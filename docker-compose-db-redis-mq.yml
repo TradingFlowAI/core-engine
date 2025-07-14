@@ -1,0 +1,137 @@
+# Put in /opt/tradingflow/data_services
+version: "3.8"
+
+# # 从当前目录加载 .env 文件
+# env_file:
+#   - ./.env
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tradingflow-postgres
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    networks:
+      - tradingflow-db-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: tradingflow-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    env_file:
+      - ./.env
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${REDIS_PORT}:6379"
+    networks:
+      - tradingflow-db-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: tradingflow-rabbitmq
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_VHOST}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MGMT_PORT}:15672" # 管理界面端口
+    networks:
+      - tradingflow-db-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # PostgreSQL Web管理界面
+#  pgadmin:
+#    image: dpage/pgadmin4:latest
+#    container_name: tradingflow-pgadmin
+#    restart: unless-stopped
+#    env_file:
+#      - ./.env
+#    environment:
+#      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL}
+#      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
+#      - PGADMIN_LISTEN_PORT=${PGADMIN_LISTEN_PORT}
+#    volumes:
+#      - pgadmin-data:/var/lib/pgadmin
+#    ports:
+#      - "${PGADMIN_PORT}:${PGADMIN_LISTEN_PORT}" # pgAdmin Web界面
+#    networks:
+#      - tradingflow-db-network
+#    dns:
+#      - 8.8.8.8
+#      - 8.8.4.4
+#    depends_on:
+#      - postgres
+#
+#  # Redis Web管理界面
+#  redis-commander:
+#    image: rediscommander/redis-commander:latest
+#    container_name: tradingflow-redis-commander
+#    restart: unless-stopped
+#    environment:
+#      - REDIS_HOSTS=local:tradingflow-redis:6379:0:${REDIS_PASSWORD}
+#      - HTTP_USER=${REDIS_WEB_USER}
+#      - HTTP_PASSWORD=${REDIS_WEB_PASSWORD}
+#    ports:
+#      - "${REDIS_WEB_PORT}:8081" # Redis Commander Web界面
+#    networks:
+#      - tradingflow-db-network
+#    depends_on:
+#      - redis-commander
+
+networks:
+  tradingflow-db-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DB_DATA_PATH}
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REDIS_DATA_PATH}
+  rabbitmq-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${RABBITMQ_DATA_PATH}
+#  pgadmin-data:
+#    driver: local
+#    driver_opts:
+#      type: none
+#      o: bind
+#      device: ${PGADMIN_DATA_PATH}
