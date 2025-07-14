@@ -224,3 +224,9 @@ TradingFlow 使用 GitHub Actions 进行持续集成和部署：
 ## 联系与支持
 
 如有问题或需要支持，请联系 TradingFlow 开发团队。
+
+---
+
+## 版权声明
+
+代码归 TradingFlow Company，未经 TradingFlow Company 和 TradingFlow DAO 授权，不得私自传播给第三方，违者要追究法律责任。
