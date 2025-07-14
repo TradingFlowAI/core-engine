@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制项目文件
-COPY python/common /app/python/common
-COPY python/py_worker /app/python/py_worker
+COPY tradingflow/depot /app/tradingflow/depot
+COPY tradingflow/station /app/tradingflow/station
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir \
@@ -29,7 +29,11 @@ RUN pip install --no-cache-dir \
 ENV PYTHONPATH=/app
 
 # 暴露端口
-EXPOSE 8002
+EXPOSE 7001
+
+# 复制并设置启动脚本权限
+COPY tradingflow/station/docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
 
 # 启动服务
-CMD ["python", "python/py_worker/server.py"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -1,7 +1,0 @@
-### Health API 测试
-@baseUrl = http://localhost:7001
-
-### 1. 基础健康检查 (正常)
-# @name health_check_success
-GET {{baseUrl}}/health
-Content-Type: application/json
