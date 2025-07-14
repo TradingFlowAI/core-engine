@@ -14,7 +14,7 @@ echo "==== Starting TradingFlow Account Services ===="
 
 # 1. 启动 account_manager 服务器
 echo "[1/4] Starting Account Manager service..."
-python -m tradingflow.account_manager.server > $SERVER_LOG 2>&1 &
+python -m tradingflow.bank.server > $SERVER_LOG 2>&1 &
 SERVER_PID=$!
 echo "✓ Account Manager service started, PID: $SERVER_PID"
 
@@ -24,13 +24,13 @@ echo "Account Manager initialized"
 
 # 2. 启动 celery beat 服务
 echo "[2/4] Starting Celery Beat..."
-celery -A tradingflow.account_manager.celery_worker beat --loglevel=info > $CELERY_BEAT_LOG 2>&1 &
+celery -A tradingflow.bank.celery_worker beat --loglevel=info > $CELERY_BEAT_LOG 2>&1 &
 BEAT_PID=$!
 echo "✓ Celery Beat started, PID: $BEAT_PID"
 
 # 3. 启动 celery worker 服务
 echo "[3/4] Starting Celery Worker..."
-celery -A tradingflow.account_manager.celery_worker worker --loglevel=info > $CELERY_WORKER_LOG 2>&1 &
+celery -A tradingflow.bank.celery_worker worker --loglevel=info > $CELERY_WORKER_LOG 2>&1 &
 WORKER_PID=$!
 echo "✓ Celery Worker started, PID: $WORKER_PID"
 

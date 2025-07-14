@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import httpx
 
-from tradingflow.account_manager.common.logging_config import setup_logging
-from tradingflow.common.config import CONFIG
+from tradingflow.bank.common.logging_config import setup_logging
+from tradingflow.depot.config import CONFIG
 
 # Setup logging
 setup_logging(CONFIG)
@@ -233,7 +233,7 @@ class FlowEvmVaultService:
         """
         try:
             from decimal import Decimal
-            from tradingflow.account_manager.utils.token_price_util import get_multiple_token_prices_usd
+            from tradingflow.bank.utils.token_price_util import get_multiple_token_prices_usd
 
             # 获取投资组合数据
             portfolio_data = await self.get_portfolio_composition(vault_address)

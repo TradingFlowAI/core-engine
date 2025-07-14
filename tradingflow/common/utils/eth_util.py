@@ -10,9 +10,9 @@ from eth_utils.abi import event_abi_to_log_topic
 from web3 import AsyncWeb3, Web3
 from web3.providers.rpc import AsyncHTTPProvider
 
-from tradingflow.common.config import CONFIG, TRADING_FLOW_ROOT
-from tradingflow.common.constants import VAULT_CONTRACT_FILE_PATH, erc20_abi, get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
-from tradingflow.common.logging_config import setup_logging
+from tradingflow.depot.config import CONFIG, TRADING_FLOW_ROOT
+from tradingflow.depot.constants import VAULT_CONTRACT_FILE_PATH, erc20_abi, get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
+from tradingflow.depot.logging_config import setup_logging
 
 # Setup logging
 setup_logging(CONFIG, "eth_util")
@@ -358,8 +358,8 @@ def fetch_vault_data_from_api(
     """
     try:
         # 获取API配置
-        from tradingflow.common.config import CONFIG
-        from tradingflow.common.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
+        from tradingflow.depot.config import CONFIG
+        from tradingflow.depot.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
 
         account_manager_host = CONFIG.get("ACCOUNT_MANAGER_HOST", "localhost")
         account_manager_port = CONFIG.get("ACCOUNT_MANAGER_PORT", 7001)

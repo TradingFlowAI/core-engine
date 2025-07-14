@@ -2,15 +2,15 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from tradingflow.account_manager.utils.geckoterminal_util import (
+from tradingflow.bank.utils.geckoterminal_util import (
     simple_get_multi_token_prices,
 )
-from tradingflow.common.db import db_session
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.db.services.token_price_history_service import (
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.db.services.token_price_history_service import (
     TokenPriceHistoryService,
 )
-from tradingflow.common.utils.redis_manager import RedisManager
+from tradingflow.depot.utils.redis_manager import RedisManager
 
 logger = logging.getLogger(__name__)
 

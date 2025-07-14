@@ -3,9 +3,9 @@ import logging
 from pathlib import Path
 from typing import ClassVar, Dict, Optional
 
-from tradingflow.account_manager.utils import vault_deployer
-from tradingflow.common.config import TRADING_FLOW_ROOT
-from tradingflow.common.constants import (
+from tradingflow.bank.utils import vault_deployer
+from tradingflow.depot.config import TRADING_FLOW_ROOT
+from tradingflow.depot.constants import (
     UNISWAP_V3_DEPLOYMENT_MAPPING,
     VAULT_CONTRACT_FILE_PATH,
     erc20_abi,

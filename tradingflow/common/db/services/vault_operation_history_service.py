@@ -7,12 +7,12 @@ from sqlalchemy import and_, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from tradingflow.common.db.models.vault_operation_history import (
+from tradingflow.depot.db.models.vault_operation_history import (
     OperationType,
     VaultOperationHistory,
 )
-from tradingflow.common.db.models.vault_vaule_history import VaultValueHistory
-from tradingflow.common.exceptions import (
+from tradingflow.depot.db.models.vault_vaule_history import VaultValueHistory
+from tradingflow.depot.exceptions import (
     DuplicateResourceException,
     ResourceNotFoundException,
 )
@@ -613,7 +613,7 @@ class VaultOperationHistoryService:
 
 
 if __name__ == "__main__":
-    from tradingflow.common.db import db_session
+    from tradingflow.depot.db import db_session
 
     # 测试代码
     with db_session() as db:

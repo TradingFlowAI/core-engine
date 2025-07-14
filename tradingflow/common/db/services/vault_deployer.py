@@ -5,13 +5,13 @@ from decimal import Decimal
 
 from redis import Redis
 
-from tradingflow.account_manager.services.vault_service import VaultService
-from tradingflow.common.db import db_session
-from tradingflow.common.db.models.monitored_contract import MonitoredContract
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.db.services.user_service import UserService
-from tradingflow.common.db.services.vault_contract_service import VaultContractService
-from tradingflow.common.exceptions.tf_exception import ResourceNotFoundException, DuplicateResourceException
+from tradingflow.bank.services.vault_service import VaultService
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.models.monitored_contract import MonitoredContract
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.db.services.user_service import UserService
+from tradingflow.depot.db.services.vault_contract_service import VaultContractService
+from tradingflow.depot.exceptions.tf_exception import ResourceNotFoundException, DuplicateResourceException
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def deploy_vault_async(
 
         # 添加资产代币到价格监控列表 - 传入网络信息
         # 根据chain_id推断网络信息
-        from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
+        from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
         network = None
         if chain_id in EVM_CHAIN_ID_NETWORK_MAP:
             network = EVM_CHAIN_ID_NETWORK_MAP[chain_id]
@@ -144,7 +144,7 @@ def _save_vault_to_monitored_contracts(chain_id, vault_address, vault_name, netw
                 return
 
             # 获取网络信息
-            from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
+            from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
 
             # 如果没有提供network，尝试从chain_id推断
             if not network:
@@ -266,7 +266,7 @@ def _save_vault_to_vault_contracts(
                 return
 
             # 获取网络信息
-            from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
+            from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
 
             # 如果没有提供network，尝试从chain_id推断
             if not network:
@@ -353,7 +353,7 @@ def _add_asset_to_price_monitoring(chain_id, asset_address, network=None):
         asset_address = asset_address.lower()
 
         # 获取网络信息
-        from tradingflow.common.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
+        from tradingflow.depot.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
 
         # 如果没有提供network，尝试从chain_id推断
         if not network:
@@ -407,7 +407,7 @@ def _add_asset_to_price_monitoring(chain_id, asset_address, network=None):
         try:
             import requests
 
-            from tradingflow.common.config import CONFIG
+            from tradingflow.depot.config import CONFIG
 
             # 获取API URL（从配置中）
             account_manager_host = CONFIG.get("ACCOUNT_MANAGER_HOST", "localhost")

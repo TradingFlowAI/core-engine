@@ -5,10 +5,10 @@ from typing import Dict, List, Optional
 from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
-from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
-from tradingflow.common.config import CONFIG
-from tradingflow.common.db.models.token_price_history import TokenPriceHistory
-from tradingflow.common.logging_config import setup_logging
+from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.db.models.token_price_history import TokenPriceHistory
+from tradingflow.depot.logging_config import setup_logging
 
 # Setup logging
 setup_logging(CONFIG, "token_price_service")
@@ -293,9 +293,9 @@ class TokenPriceHistoryService:
 
 if __name__ == "__main__":
     # 示例用法
-    from tradingflow.common.config import CONFIG
-    from tradingflow.common.db.base import db_session
-    from tradingflow.common.logging_config import setup_logging
+    from tradingflow.depot.config import CONFIG
+    from tradingflow.depot.db.base import db_session
+    from tradingflow.depot.logging_config import setup_logging
 
     setup_logging(CONFIG)
 

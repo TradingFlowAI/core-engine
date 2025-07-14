@@ -2,7 +2,7 @@ import os
 
 from web3 import Web3
 
-from tradingflow.common.constants import CHAIN_RPC_MAPPING
+from tradingflow.depot.constants import CHAIN_RPC_MAPPING
 
 
 # 根据chainId获取对应的私钥

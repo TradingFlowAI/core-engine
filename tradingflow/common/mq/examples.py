@@ -3,7 +3,7 @@ import sys
 
 from aio_pika.abc import AbstractIncomingMessage
 
-from tradingflow.common.mq.aio_pika_impl import AioPikaConsumer, AioPikaPublisher
+from tradingflow.depot.mq.aio_pika_impl import AioPikaConsumer, AioPikaPublisher
 
 
 # 消息处理函数

@@ -1,6 +1,6 @@
-from tradingflow.account_manager.common.logging_config import setup_logging
-from tradingflow.account_manager.tasks.vault_tasks import celery_app
-from tradingflow.common.config import CONFIG
+from tradingflow.bank.common.logging_config import setup_logging
+from tradingflow.bank.tasks.vault_tasks import celery_app
+from tradingflow.depot.config import CONFIG
 
 # 设置日志
 setup_logging(CONFIG)

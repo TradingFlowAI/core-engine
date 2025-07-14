@@ -2,8 +2,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from tradingflow.common.db.models.user import User
-from tradingflow.common.db.models.vault_contract import VaultContract
+from tradingflow.depot.db.models.user import User
+from tradingflow.depot.db.models.vault_contract import VaultContract
 
 
 class UserService:

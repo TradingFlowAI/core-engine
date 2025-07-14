@@ -1,226 +1,300 @@
-# TradingFlow Python 后端
+# TradingFlow Python Worker
 
-## 项目概述
+## 概述
 
-TradingFlow 是一个高性能、可扩展的交易流程自动化平台，支持加密货币交易策略的设计、测试和执行。Python 后端提供了核心服务，包括账户管理、交易执行、数据处理和系统监控等功能。
+TradingFlow Python Worker 是一个高性能、可扩展的任务处理框架，用于构建和执行数据流图(DAG)中的节点。该框架专为交易系统设计，支持实时数据处理、信号生成与传递，以及各种自定义任务的执行。
+
+## 主要功能
+
+-   **节点系统**: 提供灵活的节点抽象，每个节点可以执行特定的逻辑
+-   **信号机制**: 节点间通过信号通信，实现数据和事件的传递
+-   **消息队列**: 支持多种消息队列后端，包括内存队列和 RabbitMQ
+-   **异步处理**: 基于异步 IO 设计，保证高性能和低延迟
+-   **REST API**: 提供 HTTP 接口用于节点管理和监控
+-   **资源监控**: 实时跟踪系统资源和节点状态
 
 ## 系统架构
 
-TradingFlow Python 后端由以下主要组件组成：
-
-### 1. Account Manager 服务
-
-账户管理服务负责用户认证、资产管理、交易历史记录和用户偏好设置等功能。
-
-- **核心功能**：
-  - 用户账户管理与认证
-  - 钱包集成与签名验证
-  - Vault 合约部署与管理
-  - 代币信息管理
-  - 定时任务调度
-
-- **技术栈**：
-  - FastAPI Web 框架
-  - Celery 任务队列
-  - PostgreSQL 数据库
-  - Redis 缓存
-
-### 2. Python Worker 服务
-
-Python Worker 是一个高性能任务处理框架，用于构建和执行数据流图(DAG)中的节点。
-
-- **核心功能**：
-  - 节点系统：提供灵活的节点抽象，每个节点执行特定逻辑
-  - 信号机制：节点间通过信号通信，实现数据和事件传递
-  - 异步处理：基于异步IO设计，保证高性能和低延迟
-  - REST API：提供HTTP接口用于节点管理和监控
-
-- **技术栈**：
-  - FastAPI
-  - AsyncIO
-  - RabbitMQ 消息队列
-
-### 3. Monitor 服务
-
-监控服务负责监听区块链事件，并将相关数据存储到数据库中。
-
-- **核心功能**：
-  - 区块链事件监听
-  - 合约事件解码与存储
-  - 动态合约发现
-  - 事件通知
-
-- **技术栈**：
-  - web3.py
-  - asyncio
-  - PostgreSQL
-
-## 部署架构
-
-TradingFlow Python 后端采用容器化部署方式，支持灵活的部署选项：
-
-### 1. 服务分离部署
-
-系统被分为两个主要的服务组：
-
-- **Account Services**：包含 Account Manager、Celery 服务和 Monitor
-- **Python Worker**：独立的 Worker 服务
-
-### 2. 数据服务
-
-所有服务依赖的数据存储和消息队列组件：
-
-- **PostgreSQL**：主数据库，存储用户数据、交易记录等
-- **Redis**：缓存和 Celery 后端
-- **RabbitMQ**：消息队列，用于服务间通信
-
-## 部署指南
-
-### 环境要求
-
-- Docker 和 Docker Compose
-- Python 3.10+
-- 足够的磁盘空间用于数据持久化
-
-### 配置文件
-
-1. 复制环境变量模板：
-   ```bash
-   cp .env.example .env
-   ```
-
-2. 编辑 `.env` 文件，配置必要的环境变量：
-   - 数据库连接信息
-   - Redis 和 RabbitMQ 连接信息
-   - 服务端口和主机设置
-   - 数据存储路径
-
-### 部署选项
-
-#### 选项 1：单机部署（所有服务）
-
-```bash
-docker-compose -f docker-compose-account-and-worker.yml -f docker-compose-db-redis-mq.yml up -d
+```
++----------------+     +----------------+     +----------------+
+|     Node A     |---->|     Node B     |---->|     Node C     |
++----------------+     +----------------+     +----------------+
+        |                     ^                      ^
+        |                     |                      |
+        v                     |                      |
+      +-----------------------------------------------+
+      |                 Message Queue                 |
+      +-----------------------------------------------+
 ```
 
-#### 选项 2：分离部署
+### 核心组件
 
-1. 在数据服务器上部署数据服务：
-   ```bash
-   docker-compose -f docker-compose-db-redis-mq.yml up -d
-   ```
+-   **NodeBase**: 节点基类，提供节点生命周期管理和信号处理
+-   **MessageQueue**: 消息队列抽象
+-   **Signal**: 节点间传递的信号，包含类型和有效负载
+-   **Worker API**: 提供 HTTP 接口用于管理和监控节点
 
-2. 在应用服务器上部署应用服务：
-   ```bash
-   docker-compose -f docker-compose-account-and-worker.yml up -d
-   ```
+## API 接口
 
-### 服务端口
+### HTTP 端点
 
-- Account Manager: 7000
-- Python Worker: 7001
-- PostgreSQL: 5432
-- Redis: 6379
-- RabbitMQ: 5672 (管理界面: 15672)
+| 端点                      | 方法 | 描述             |
+| ------------------------- | ---- | ---------------- |
+| `/health`                 | GET  | 健康检查         |
+| `/nodes/execute`          | POST | 执行一个节点     |
+| `/nodes/{node_id}/status` | GET  | 获取节点状态     |
+| `/nodes/{node_id}/stop`   | POST | 停止节点执行     |
+| `/stats`                  | GET  | 获取资源使用统计 |
 
-## 开发指南
+### 执行节点示例
 
-### 本地开发环境设置
+```bash
+# 执行一个价格数据节点
+curl -X POST http://localhost:7000/nodes/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "flow_id": "example_flow",
+    "component_id": 1,
+    "cycle": 1,
+    "node_id": "binance_price_node_1",
+    "node_type": "binance_price_node",
+    "input_edges": [
+    ],
+    "output_edges": [
+      {
+        "source": "binance_price_node_1",
+        "source_handle": "price_data_handle",
+        "target": "data_processor_2",
+        "target_handle": "price_data_handle"
+      }
+    ],
+    "config": {
+      "node_class_type": "binance_price_node",
+      "symbol": "BTCUSDT",
+      "interval": "1h",
+      "limit": 10
+    }
+  }'
+# 执行一个价格trade节点
+curl -X POST http://localhost:7000/nodes/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "flow_id": "trading_flow",
+    "component_id": 2,
+    "cycle": 1,
+    "node_id": "uniswap_trade_node1",
+    "node_type": "dex_trade_node",
+    "input_edges": [],
+    "output_edges": [
+      {
+        "source": "uniswap_trade_node1",
+        "source_handle": "output",
+        "target": "trade_notification_node",
+        "target_handle": "transaction_receipt"
+      }
+    ],
+    "config": {
+      "node_class_type": "dex_trade_node",
+      "chain_id": 31337,
+      "dex_name": "uniswap",
+      "vault_address": "0xfDD930c22708c7572278cf74D64f3721Eedc18Ad",
+      "action": "buy",
+      "output_token_address": "0x88D3CAaD49fC2e8E38C812c5f4ACdd0a8B065F66",
+      "amount_in": "1.5",
+      "min_amount_out": "0",
+      "slippage_tolerance": 0.5,
+      "signal_timeout": 10
+    }
+  }'
+```
 
-1. 克隆代码库：
-   ```bash
-   git clone <repository-url>
-   cd TradingFlow
-   ```
+### 执行 flow 示例
 
-2. 创建并激活虚拟环境：
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # 或
-   venv\Scripts\activate  # Windows
-   ```
+基于你的 Flow API 和调度器实现，我来为你提供三个 curl 示例：执行 Flow、查询 Flow 状态以及停止 Flow。
 
-3. 安装依赖：
-   ```bash
-   pip install -r python/requirements.txt
-   ```
+#### 1. 执行 Flow 的 curl 示例
 
-4. 启动本地数据服务：
-   ```bash
-   cd python
-   docker-compose -f docker-compose-db-redis-mq.yml up -d
-   ```
+这个示例调用 `/flows/execute` 接口来注册并执行一个新的 Flow：
 
-5. 运行服务：
-   ```bash
-   # 启动 Account Manager
-   python -m tradingflow.account_manager.server
+```bash
+curl -X POST http://localhost:7000/flows/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "flow_id": "example_flow",
+    "cycle_interval": "1m",
+    "flow_json": {
+      "nodes": [
+        {
+          "id": "binance_price",
+          "type": "binance_price_node",
+          "config": {
+            "node_class_type": "binance_price_node",
+            "symbol": "BTCUSDT",
+            "interval": "1h",
+            "limit": 10
+          }
+        },
+        {
+          "id": "ai_model_node",
+          "type": "ai_model_node",
+          "config": {
+            "node_class_type": "ai_model_node",
+            "operation": "rolling_avg",
+            "window": 5
+          }
+        },
+        {
 
-   # 启动 Celery Beat
-   celery -A tradingflow.account_manager.celery_worker beat --loglevel=info
 
-   # 启动 Celery Worker
-   celery -A tradingflow.account_manager.celery_worker worker --loglevel=info
+        }
+      ],
+      "edges": [
+        {
+          "source": "binance_price",
+          "target": "data_processor"
+        }
+      ]
+    }
+  }'
+```
 
-   # 启动 Python Worker
-   python -m tradingflow.py_worker.server
-   ```
+#### 2. 查询 Flow 状态的 curl 示例
 
-### 使用脚本
+这个示例调用 `/flows/{flow_id}/status` 接口来获取指定 Flow 的状态信息：
 
-项目提供了几个便捷脚本用于服务管理：
+```bash
+curl -X GET http://localhost:8000/flows/example_flow/status \
+  -H "Content-Type: application/json"
+```
 
-- `start_account_services.sh`: 启动 Account Manager 相关服务
-- `stop_account_services.sh`: 停止 Account Manager 相关服务
-- `start_worker.sh`: 启动 Python Worker 服务
-- `stop_worker.sh`: 停止 Python Worker 服务
+如果你想查询特定周期的状态：
 
-## CI/CD 流程
+```bash
+curl -X GET http://localhost:8000/flows/example_flow/cycles/0 \
+  -H "Content-Type: application/json"
+```
 
-TradingFlow 使用 GitHub Actions 进行持续集成和部署：
+#### 3. 停止 Flow 的 curl 示例
 
-1. **Python Account Services 工作流**：
-   - 构建和部署 Account Manager、Celery 服务和 Monitor
-   - 触发条件：推送到 `stg` 分支且修改了相关文件
+这个示例调用 `/flows/{flow_id}/stop` 接口来停止 Flow 的执行：
 
-2. **Python Worker 工作流**：
-   - 构建和部署 Python Worker 服务
-   - 触发条件：推送到 `stg` 分支且修改了相关文件
+```bash
+curl -X POST http://localhost:8000/flows/example_flow/stop \
+  -H "Content-Type: application/json"
+```
 
-## 数据持久化
+#### 额外示例：手动触发执行一个周期
 
-所有关键数据都通过 Docker 卷进行持久化存储：
+如果你想手动触发执行一个新的周期：
 
-- PostgreSQL 数据：`/opt/tradingflow/data/postgres`
-- Redis 数据：`/opt/tradingflow/data/redis`
-- RabbitMQ 数据：`/opt/tradingflow/data/rabbitmq`
-- 日志文件：`./logs` (映射到容器内的 `/app/logs`)
+```bash
+curl -X POST http://localhost:8000/flows/example_flow/cycles \
+  -H "Content-Type: application/json"
+```
 
-## 故障排除
+或指定特定的周期号：
 
-### 常见问题
+```bash
+curl -X POST http://localhost:8000/flows/example_flow/cycles \
+  -H "Content-Type: application/json" \
+  -d '{"cycle": 5}'
+```
 
-1. **服务无法启动**
-   - 检查环境变量配置
-   - 检查数据库连接
-   - 查看日志文件
+#### 额外示例：停止特定组件的执行
 
-2. **数据库连接问题**
-   - 确认 PostgreSQL 服务正在运行
-   - 验证数据库凭据
-   - 检查网络连接和防火墙设置
+如果你想停止 Flow 中特定组件在特定周期的执行：
 
-3. **消息队列问题**
-   - 确认 RabbitMQ 服务正在运行
-   - 验证 RabbitMQ 凭据和虚拟主机设置
-   - 检查队列状态和消息积压
+```bash
+curl -X POST http://localhost:8000/flows/example_flow/cycles/0/components/0/stop \
+  -H "Content-Type: application/json"
+```
 
-### 日志位置
+这些 curl 命令假设你的 Sanic 应用运行在 localhost 的 8000 端口上。如果你的应用运行在其他地址或端口，请相应地调整 URL。
 
-- 容器日志：`docker logs <container-name>`
-- 应用日志：`./logs/` 目录下的相应日志文件
+## 中间件服务准备
 
-## 联系与支持
+在运行 TradingFlow Python Worker 之前，需要准备相关的中间件服务，主要包括 RabbitMQ 和 Redis。以下是使用 Docker 启动这些服务的示例。
 
-如有问题或需要支持，请联系 TradingFlow 开发团队。
+### 启动 RabbitMQ
+
+```bash
+# 拉取 RabbitMQ 镜像
+docker pull rabbitmq:3-management
+
+# 启动 RabbitMQ 容器
+docker run -d --name rabbitmq \
+  -p 5672:5672 \
+  -p 15672:15672 \
+  -e RABBITMQ_DEFAULT_USER=guest \
+  -e RABBITMQ_DEFAULT_PASS=guest \
+  rabbitmq:3-management
+
+# 验证 RabbitMQ 是否正常运行
+# 访问管理界面：http://localhost:15672
+# 默认用户名和密码都是 guest
+```
+
+### 启动 Redis
+
+```bash
+# 拉取 Redis 镜像
+docker pull redis
+
+# 启动 Redis 容器
+docker run -d --name redis \
+  -p 6379:6379 \
+  redis
+
+# 验证 Redis 是否正常运行
+docker exec -it redis redis-cli ping
+# 应返回 PONG
+```
+
+## 使用方法
+
+### 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+### 启动服务
+
+```bash
+# 使用默认配置运行
+python py_worker/server.py
+```
+
+## 测试
+
+运行单元测试：
+
+```bash
+pytest py_worker/tests/
+```
+
+运行快速功能测试：
+
+```bash
+python -m py_worker.quick_test
+```
+
+## 扩展
+
+### 添加新的节点类型
+
+1. 在 nodes 目录下创建新的节点类
+2. 继承 `NodeBase` 类并实现 `execute()` 方法
+3. 在 `node_factory.py` 中注册新的节点类型
+
+### 添加新的消息队列实现
+
+1. 在 message_queue 目录下创建新的队列实现类
+2. 继承 `MessageQueueBase` 类并实现所有抽象方法
+
+## 注意事项
+
+-   当使用内存队列时，通信仅限于单进程内
+-   复杂工作流程建议使用 RabbitMQ 或其他持久化消息队列
+-   节点的 `execute()` 方法应当是异步的，避免阻塞主线程
+-   信号处理应考虑幂等性，确保多次处理相同信号不会产生副作用

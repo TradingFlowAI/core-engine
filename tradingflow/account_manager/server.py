@@ -4,7 +4,7 @@ import logging
 
 from sanic import Sanic
 
-from tradingflow.account_manager.api import (
+from tradingflow.bank.api import (
     account_bp,
     aptos_vault_bp,
     evm_vault_bp,
@@ -12,10 +12,10 @@ from tradingflow.account_manager.api import (
     token_bp,
     # vault_bp,
 )
-from tradingflow.account_manager.services import setup_services
-from tradingflow.common.config import get_account_manager_config
-from tradingflow.common.logging_config import setup_logging
-from tradingflow.common.mq.dex_trade_signal_consumer import DexTradeSignalConsumer
+from tradingflow.bank.services import setup_services
+from tradingflow.depot.config import get_account_manager_config
+from tradingflow.depot.logging_config import setup_logging
+from tradingflow.depot.mq.dex_trade_signal_consumer import DexTradeSignalConsumer
 
 # Setup logging
 CONFIG = get_account_manager_config()

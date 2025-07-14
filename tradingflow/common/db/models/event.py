@@ -15,8 +15,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
-from tradingflow.common.config import CONFIG
-from tradingflow.common.db.base import Base
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.db.base import Base
 
 logger = logging.getLogger(__name__)
 

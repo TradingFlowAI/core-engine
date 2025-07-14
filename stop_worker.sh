@@ -24,7 +24,7 @@ else
     echo -e "${YELLOW}PID file not found, trying to find process...${NC}"
 
     # Try to find and kill by process name
-    PIDS=$(pgrep -f "tradingflow.py_worker.server")
+    PIDS=$(pgrep -f "tradingflow.station.server")
     if [ ! -z "$PIDS" ]; then
         echo $PIDS | xargs kill
         echo -e "${GREEN}✓ Found and stopped Python Worker processes${NC}"

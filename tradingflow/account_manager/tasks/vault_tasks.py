@@ -5,13 +5,13 @@ import os
 from celery import Celery
 from celery.schedules import timedelta
 
-from python.tradingflow.account_manager.tasks.handle_price_fetch import fetch_prices_async
-from python.tradingflow.account_manager.tasks.handle_vault_event import (
+from python.tradingflow.bank.tasks.handle_price_fetch import fetch_prices_async
+from python.tradingflow.bank.tasks.handle_vault_event import (
     process_vault_events_async,
 )
-from python.tradingflow.account_manager.tasks.handle_vault_value_update import update_vault_values_async
-# from python.tradingflow.account_manager.tasks.handle_vault_deploy import deploy_vault_async
-from tradingflow.common.db import db_session
+from python.tradingflow.bank.tasks.handle_vault_value_update import update_vault_values_async
+# from python.tradingflow.bank.tasks.handle_vault_deploy import deploy_vault_async
+from tradingflow.depot.db import db_session
 
 logger = logging.getLogger(__name__)
 
@@ -57,19 +57,19 @@ celery_app.conf.update(
 # 配置定时任务
 celery_app.conf.beat_schedule = {
     "fetch-prices-every-60s": {
-        "task": "tradingflow.account_manager.tasks.vault_tasks.fetch_prices",
+        "task": "tradingflow.bank.tasks.vault_tasks.fetch_prices",
         "schedule": timedelta(seconds=60),
         "args": (),
         "kwargs": {},
     },
     "update-vault-value-usd-every-60s": {
-        "task": "tradingflow.account_manager.tasks.vault_tasks.update_vault_value_usd",
+        "task": "tradingflow.bank.tasks.vault_tasks.update_vault_value_usd",
         "schedule": timedelta(seconds=60),
         "args": (),
         "kwargs": {},
     },
     "process-vault-events-every-60s": {
-        "task": "tradingflow.account_manager.tasks.vault_tasks.process_vault_events",
+        "task": "tradingflow.bank.tasks.vault_tasks.process_vault_events",
         "schedule": timedelta(seconds=60),
         "args": (),
         "kwargs": {},

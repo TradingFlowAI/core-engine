@@ -5,9 +5,9 @@ from typing import Any, Callable, List, Optional, Union
 from aio_pika import DeliveryMode, Message
 from aio_pika.abc import AbstractChannel, AbstractConnection, AbstractIncomingMessage
 
-from tradingflow.common.config import CONFIG
-from tradingflow.common.mq.connection_pool import connection_pool
-from tradingflow.common.mq.interfaces import Consumer, Publisher
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.mq.connection_pool import connection_pool
+from tradingflow.depot.mq.interfaces import Consumer, Publisher
 
 logger = logging.getLogger(__name__)
 

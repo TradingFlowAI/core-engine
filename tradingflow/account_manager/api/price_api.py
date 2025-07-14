@@ -6,26 +6,26 @@ from sanic import Blueprint
 from sanic.response import json as sanic_json
 from sqlalchemy.exc import IntegrityError
 
-from tradingflow.account_manager.common.middleware import authenticate
-from tradingflow.account_manager.utils.token_price_util import (
+from tradingflow.bank.common.middleware import authenticate
+from tradingflow.bank.utils.token_price_util import (
     get_aptos_token_price_usd,
     get_multiple_aptos_token_prices_usd,
     get_multiple_token_prices_usd,
     get_sui_token_price_usd,
     get_token_price_usd,
 )
-from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
-from tradingflow.common.db import db_session
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.db.services.token_price_history_service import (
+from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.db.services.token_price_history_service import (
     TokenPriceHistoryService,
 )
-from tradingflow.common.exceptions import (
+from tradingflow.depot.exceptions import (
     DuplicateResourceException,
     ResourceNotFoundException,
 )
-from tradingflow.common.utils import eth_util
-from tradingflow.common.utils.redis_manager import RedisManager
+from tradingflow.depot.utils import eth_util
+from tradingflow.depot.utils.redis_manager import RedisManager
 
 logger = logging.getLogger(__name__)
 

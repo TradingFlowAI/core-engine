@@ -3,10 +3,10 @@ import logging
 from sanic import Blueprint
 from sanic.response import json as sanic_json
 
-from tradingflow.account_manager.common.middleware import authenticate
-from tradingflow.common.db import db_session
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.exceptions import (
+from tradingflow.bank.common.middleware import authenticate
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.exceptions import (
     DuplicateResourceException,
     ResourceNotFoundException,
 )

@@ -13,9 +13,9 @@ import os
 # 添加项目路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tradingflow'))
 
-from tradingflow.common.utils import aptos_util
-from tradingflow.common.logging_config import setup_logging
-from tradingflow.common.config import CONFIG
+from tradingflow.depot.utils import aptos_util
+from tradingflow.depot.logging_config import setup_logging
+from tradingflow.depot.config import CONFIG
 
 # 设置日志
 setup_logging(CONFIG, "test_aptos_util")
@@ -109,7 +109,7 @@ def test_companion_connection():
     print("=" * 60)
 
     import requests
-    from tradingflow.common.config import CONFIG
+    from tradingflow.depot.config import CONFIG
 
     companion_host = CONFIG.get("COMPANION_HOST", "localhost")
     companion_port = CONFIG.get("COMPANION_PORT", 3000)

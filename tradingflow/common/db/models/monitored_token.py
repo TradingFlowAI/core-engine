@@ -1,7 +1,7 @@
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
 
-from tradingflow.common.db.base import Base
+from tradingflow.depot.db.base import Base
 
 
 class MonitoredToken(Base):

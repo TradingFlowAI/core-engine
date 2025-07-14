@@ -6,7 +6,7 @@ Flow Vault API
 import logging
 from sanic import Blueprint
 from sanic.response import json
-from tradingflow.account_manager.services.flow_vault_service import FlowVaultService
+from tradingflow.bank.services.flow_vault_service import FlowVaultService
 
 logger = logging.getLogger(__name__)
 
@@ -78,4 +78,4 @@ async def get_contract_address(request):
 
     except Exception as e:
         logger.exception("Failed to retrieve contract address: %s", e)
-        return json({"error": f"Internal server error: {str(e)}"}, status=500) 
+        return json({"error": f"Internal server error: {str(e)}"}, status=500)

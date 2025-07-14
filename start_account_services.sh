@@ -22,7 +22,7 @@ echo -e "${GREEN}==== Starting TradingFlow Services ====${NC}"
 
 # 1. Start account_manager server
 echo -e "${BLUE}[1/4]${NC} Starting Account Manager service..."
-python -m tradingflow.account_manager.server > $SERVER_LOG 2>&1 &
+python -m tradingflow.bank.server > $SERVER_LOG 2>&1 &
 SERVER_PID=$!
 echo -e "${GREEN}✓${NC} Account Manager service started, PID: $SERVER_PID, log: $SERVER_LOG"
 
@@ -33,13 +33,13 @@ sleep 3
 
 # 2. Start celery beat service
 echo -e "${BLUE}[2/4]${NC} Starting Celery Beat..."
-celery -A tradingflow.account_manager.celery_worker beat --loglevel=info > $CELERY_BEAT_LOG 2>&1 &
+celery -A tradingflow.bank.celery_worker beat --loglevel=info > $CELERY_BEAT_LOG 2>&1 &
 BEAT_PID=$!
 echo -e "${GREEN}✓${NC} Celery Beat started, PID: $BEAT_PID, log: $CELERY_BEAT_LOG"
 
 # 3. Start celery worker service
 echo -e "${BLUE}[3/4]${NC} Starting Celery Worker..."
-celery -A tradingflow.account_manager.celery_worker worker --loglevel=info > $CELERY_WORKER_LOG 2>&1 &
+celery -A tradingflow.bank.celery_worker worker --loglevel=info > $CELERY_WORKER_LOG 2>&1 &
 WORKER_PID=$!
 echo -e "${GREEN}✓${NC} Celery Worker started, PID: $WORKER_PID, log: $CELERY_WORKER_LOG"
 
