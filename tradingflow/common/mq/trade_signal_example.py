@@ -4,8 +4,8 @@ import logging
 
 from web3 import Web3
 
-from tradingflow.common.mq.dex_trade_signal_consumer import DexTradeSignalConsumer
-from tradingflow.common.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
+from tradingflow.depot.mq.dex_trade_signal_consumer import DexTradeSignalConsumer
+from tradingflow.depot.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
 
 # 配置日志
 logging.basicConfig(

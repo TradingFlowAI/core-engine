@@ -8,15 +8,15 @@ from sqlalchemy.orm import Session
 from web3.exceptions import BlockNotFound
 from web3.types import LogReceipt  # Correct type hint for logs
 
-from tradingflow.account_manager.common.logging_config import setup_logging
-from tradingflow.common import config
-from tradingflow.common.config import CONFIG
-from tradingflow.common.db import db_session
-from tradingflow.common.db.models.event import ListenerState
-from tradingflow.common.db.models.monitored_contract import MonitoredContract
-from tradingflow.common.db.services.contract_event_service import ContractEventService
-from tradingflow.common.exceptions import DuplicateResourceException
-from tradingflow.common.utils import eth_util
+from tradingflow.bank.common.logging_config import setup_logging
+from tradingflow.depot import config
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.models.event import ListenerState
+from tradingflow.depot.db.models.monitored_contract import MonitoredContract
+from tradingflow.depot.db.services.contract_event_service import ContractEventService
+from tradingflow.depot.exceptions import DuplicateResourceException
+from tradingflow.depot.utils import eth_util
 
 # Setup logging
 setup_logging(CONFIG)

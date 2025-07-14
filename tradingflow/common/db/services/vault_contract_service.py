@@ -5,8 +5,8 @@ from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from tradingflow.common.exceptions import DuplicateResourceException, ResourceNotFoundException
-from tradingflow.common.db.models.vault_contract import VaultContract
+from tradingflow.depot.exceptions import DuplicateResourceException, ResourceNotFoundException
+from tradingflow.depot.db.models.vault_contract import VaultContract
 
 # 添加日志记录器
 logger = logging.getLogger(__name__)

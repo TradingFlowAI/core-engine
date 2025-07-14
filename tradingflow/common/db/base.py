@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from tradingflow.common.config import CONFIG
+from tradingflow.depot.config import CONFIG
 
 logger = logging.getLogger(__name__)
 sql_logger = logging.getLogger(__name__ + ".sql")

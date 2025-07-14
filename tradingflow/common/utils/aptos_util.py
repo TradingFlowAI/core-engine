@@ -3,8 +3,8 @@ import requests
 from typing import Optional, Dict, Any
 from decimal import Decimal
 
-from tradingflow.common.config import CONFIG
-from tradingflow.common.logging_config import setup_logging
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.logging_config import setup_logging
 
 # Setup logging
 setup_logging(CONFIG, "aptos_util")

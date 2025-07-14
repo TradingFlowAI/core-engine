@@ -6,8 +6,8 @@ from sqlalchemy import and_, desc, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from tradingflow.common.exceptions import DuplicateResourceException, ResourceNotFoundException
-from tradingflow.common.db.models.event import ContractEvent, EventProcessorState
+from tradingflow.depot.exceptions import DuplicateResourceException, ResourceNotFoundException
+from tradingflow.depot.db.models.event import ContractEvent, EventProcessorState
 
 logger = logging.getLogger(__name__)
 

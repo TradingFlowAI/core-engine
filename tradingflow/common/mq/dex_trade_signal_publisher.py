@@ -12,8 +12,8 @@ from aio_pika.abc import (
     AbstractQueue,
 )
 
-from tradingflow.common.config import CONFIG
-from tradingflow.common.mq.aio_pika_impl import AioPikaTopicPublisher
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.mq.aio_pika_impl import AioPikaTopicPublisher
 
 logger = logging.getLogger(__name__)
 

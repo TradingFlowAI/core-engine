@@ -4,13 +4,13 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from tradingflow.common.config import CONFIG
-from tradingflow.common.db.services.vault_contract_service import VaultContractService
-from tradingflow.common.db.services.vault_vaule_history_service import (
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.db.services.vault_contract_service import VaultContractService
+from tradingflow.depot.db.services.vault_vaule_history_service import (
     VaultValueHistoryService,
 )
-from tradingflow.common.logging_config import setup_logging
-from tradingflow.common.utils import eth_util
+from tradingflow.depot.logging_config import setup_logging
+from tradingflow.depot.utils import eth_util
 
 # Setup logging
 setup_logging(CONFIG, "vault_value_update")
@@ -27,7 +27,7 @@ def get_vault_network_info(vault):
     Returns:
         tuple: (network, network_type)
     """
-    from tradingflow.common.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
+    from tradingflow.depot.constants import get_network_info_by_name, EVM_CHAIN_ID_NETWORK_MAP
 
     # 优先使用vault对象中的network字段（如果存在）
     if hasattr(vault, 'network') and vault.network:
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     # 测试代码
     import asyncio
 
-    from tradingflow.common.db.base import db_session
+    from tradingflow.depot.db.base import db_session
 
     with db_session() as db:
         asyncio.run(update_vault_values_async(db))

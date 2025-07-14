@@ -18,7 +18,7 @@ echo -e "${GREEN}==== Starting TradingFlow Python Worker ====${NC}"
 
 # Start py_worker server
 echo -e "${BLUE}[1/1]${NC} Starting Python Worker service..."
-python -m tradingflow.py_worker.server > $WORKER_LOG 2>&1 &
+python -m tradingflow.station.server > $WORKER_LOG 2>&1 &
 WORKER_PID=$!
 echo -e "${GREEN}✓${NC} Python Worker service started, PID: $WORKER_PID, log: $WORKER_LOG"
 

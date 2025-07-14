@@ -5,23 +5,23 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from tradingflow.account_manager.common.logging_config import setup_logging
-from tradingflow.account_manager.utils.token_price_util import get_token_price_usd
-from tradingflow.common.config import CONFIG
-from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP, ALL_CHAIN_NETWORK_MAP
-from tradingflow.common.db.models.event import ContractEvent
-from tradingflow.common.db.models.vault_operation_history import OperationType
-from tradingflow.common.db.services.contract_event_service import ContractEventService
-from tradingflow.common.db.services.vault_contract_service import VaultContractService
-from tradingflow.common.db.services.vault_operation_history_service import (
+from tradingflow.bank.common.logging_config import setup_logging
+from tradingflow.bank.utils.token_price_util import get_token_price_usd
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP, ALL_CHAIN_NETWORK_MAP
+from tradingflow.depot.db.models.event import ContractEvent
+from tradingflow.depot.db.models.vault_operation_history import OperationType
+from tradingflow.depot.db.services.contract_event_service import ContractEventService
+from tradingflow.depot.db.services.vault_contract_service import VaultContractService
+from tradingflow.depot.db.services.vault_operation_history_service import (
     VaultOperationHistoryService,
 )
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.exceptions.tf_exception import ResourceNotFoundException
-from tradingflow.common.utils import eth_util
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.exceptions.tf_exception import ResourceNotFoundException
+from tradingflow.depot.utils import eth_util
 
 if TYPE_CHECKING:
-    from tradingflow.common.db.models.vault_operation_history import (
+    from tradingflow.depot.db.models.vault_operation_history import (
         VaultOperationHistory,
     )
 
@@ -249,7 +249,7 @@ async def create_vault_from_event_data(
 
         # 添加到监控列表
         try:
-            from tradingflow.common.db.models.monitored_contract import MonitoredContract
+            from tradingflow.depot.db.models.monitored_contract import MonitoredContract
             from sqlalchemy.exc import IntegrityError
 
             contract_id = f"{network}_{event.chain_id}_{vault_type.lower()}_{vault_address.lower()}"
@@ -309,7 +309,7 @@ async def process_vault_created_event(
         if vault:
             # 创建用户记录
             try:
-                from tradingflow.common.db.services.user_service import UserService
+                from tradingflow.depot.db.services.user_service import UserService
                 user_service = UserService(db)
                 user = user_service.create_user(wallet_address=user_address.lower())
                 logger.info("✅ 用户记录创建成功: %s", user_address)
@@ -365,7 +365,7 @@ async def process_balance_manager_created_event(
         if vault:
             # 创建用户记录
             try:
-                from tradingflow.common.db.services.user_service import UserService
+                from tradingflow.depot.db.services.user_service import UserService
                 user_service = UserService(db)
                 user = user_service.create_user(wallet_address=user_address.lower())
                 logger.info("✅ 用户记录创建成功: %s", user_address)
@@ -617,7 +617,7 @@ async def get_token_decimals(chain_id: int, token_address: str, network: str = N
     try:
         if network_type == "aptos":
             # 使用Aptos工具函数
-            from tradingflow.common.utils import aptos_util
+            from tradingflow.depot.utils import aptos_util
             decimals = await aptos_util.get_token_decimals(token_address)
         elif network_type in ["evm", "ethereum", "flow-evm"]:
             # 使用EVM工具函数
@@ -861,7 +861,7 @@ if __name__ == "__main__":
     # 测试代码
     import asyncio
 
-    from tradingflow.common.db.base import db_session
+    from tradingflow.depot.db.base import db_session
 
     with db_session() as db:
         asyncio.run(process_vault_events_async(db))

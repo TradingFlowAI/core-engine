@@ -7,8 +7,8 @@ from typing import Dict, List, Optional
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
 
-from tradingflow.common.db.models.flow_execution_log import FlowExecutionLog
-from tradingflow.common.db.postgres_manager import PostgresManager
+from tradingflow.depot.db.models.flow_execution_log import FlowExecutionLog
+from tradingflow.depot.db.postgres_manager import PostgresManager
 
 logger = logging.getLogger(__name__)
 

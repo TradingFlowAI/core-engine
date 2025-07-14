@@ -3,9 +3,9 @@ import logging
 import sys
 import time
 
-from tradingflow.common.mq.node_signal_consumer import NodeSignalConsumer
-from tradingflow.common.mq.node_signal_publisher import NodeSignalPublisher
-from tradingflow.py_worker.common.signal_types import Signal, SignalType
+from tradingflow.depot.mq.node_signal_consumer import NodeSignalConsumer
+from tradingflow.depot.mq.node_signal_publisher import NodeSignalPublisher
+from tradingflow.station.common.signal_types import Signal, SignalType
 
 # 配置日志
 logging.basicConfig(

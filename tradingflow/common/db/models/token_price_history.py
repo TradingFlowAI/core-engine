@@ -1,7 +1,7 @@
 from sqlalchemy import Column, DateTime, Float, Index, Integer, String
 from sqlalchemy.sql import func
 
-from tradingflow.common.db.base import Base
+from tradingflow.depot.db.base import Base
 
 
 class TokenPriceHistory(Base):

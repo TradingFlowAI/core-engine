@@ -2,9 +2,9 @@ import json
 import logging
 from typing import Dict, List, Optional
 
-from tradingflow.common.db import db_session
-from tradingflow.common.db.services.monitored_token_service import MonitoredTokenService
-from tradingflow.common.utils.redis_manager import RedisManager
+from tradingflow.depot.db import db_session
+from tradingflow.depot.db.services.monitored_token_service import MonitoredTokenService
+from tradingflow.depot.utils.redis_manager import RedisManager
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +429,7 @@ def get_multiple_sui_token_prices_usd(
 
 
 if __name__ == "__main__":
-    # python -m tradingflow.account_manager.utils.token_price_util
+    # python -m tradingflow.bank.utils.token_price_util
     # 配置日志
     logging.basicConfig(level=logging.INFO)
 

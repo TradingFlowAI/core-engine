@@ -11,7 +11,7 @@ echo "==== Starting TradingFlow Python Worker ===="
 
 # 启动 py_worker 服务器
 echo "[1/1] Starting Python Worker service..."
-python -m tradingflow.py_worker.server > $WORKER_LOG 2>&1 &
+python -m tradingflow.station.server > $WORKER_LOG 2>&1 &
 WORKER_PID=$!
 echo "✓ Python Worker service started, PID: $WORKER_PID"
 

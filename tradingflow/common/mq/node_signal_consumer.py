@@ -3,9 +3,9 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from aio_pika.abc import AbstractIncomingMessage
 
-from tradingflow.common.mq.aio_pika_impl import AioPikaTopicConsumer
-from tradingflow.py_worker.common.edge import Edge
-from tradingflow.py_worker.common.signal_types import Signal, SignalType
+from tradingflow.depot.mq.aio_pika_impl import AioPikaTopicConsumer
+from tradingflow.station.common.edge import Edge
+from tradingflow.station.common.signal_types import Signal, SignalType
 
 logger = logging.getLogger(__name__)
 

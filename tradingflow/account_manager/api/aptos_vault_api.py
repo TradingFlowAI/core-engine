@@ -3,8 +3,8 @@ import logging
 from sanic import Blueprint
 from sanic.response import json
 
-from tradingflow.account_manager.common.middleware import authenticate
-from tradingflow.account_manager.services.aptos_vault_service import AptosVaultService
+from tradingflow.bank.common.middleware import authenticate
+from tradingflow.bank.services.aptos_vault_service import AptosVaultService
 
 # 创建蓝图
 aptos_vault_bp = Blueprint("aptos_vault", url_prefix="/aptos/vaults")

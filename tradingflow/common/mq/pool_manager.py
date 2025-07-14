@@ -1,7 +1,7 @@
 import atexit
 import logging
 
-from tradingflow.common.mq.connection_pool import connection_pool
+from tradingflow.depot.mq.connection_pool import connection_pool
 
 logger = logging.getLogger(__name__)
 

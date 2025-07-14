@@ -1,7 +1,7 @@
 from sqlalchemy import Column, DateTime, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.sql import func
 
-from tradingflow.common.db.base import Base
+from tradingflow.depot.db.base import Base
 
 
 class VaultContract(Base):

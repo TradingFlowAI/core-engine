@@ -6,7 +6,7 @@ from typing import Any, Callable, TypeVar
 
 from sqlalchemy.orm import Session
 
-from tradingflow.common.db.base import get_engine, get_session_factory
+from tradingflow.depot.db.base import get_engine, get_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -19,30 +19,30 @@ T = TypeVar('T')
 
 def get_postgres_manager(name: str = "default") -> 'PostgresManager':
     """获取或创建PostgreSQL管理器实例
-    
+
     Args:
         name: 管理器实例名称，用于区分多个数据库连接
-        
+
     Returns:
         PostgresManager: PostgreSQL管理器实例
     """
     global _postgres_managers
-    
+
     if name not in _postgres_managers:
         _postgres_managers[name] = PostgresManager()
         logger.debug(f"创建了PostgreSQL管理器实例: {name}")
-        
+
     return _postgres_managers[name]
 
 
 def close_all_connections():
     """关闭所有PostgreSQL连接"""
     global _postgres_managers
-    
+
     for name, manager in _postgres_managers.items():
         logger.info(f"关闭PostgreSQL管理器实例: {name}")
         # 这里不需要显式关闭，因为SQLAlchemy的engine会自己管理连接池
-        
+
     _postgres_managers = {}
 
 
@@ -87,14 +87,14 @@ class PostgresManager:
         """
         with self.get_session() as session:
             return query_func(session, *args, **kwargs)
-            
+
     @staticmethod
     def get_instance(name: str = "default") -> 'PostgresManager':
         """获取PostgreSQL管理器实例
-        
+
         Args:
             name: 管理器实例名称
-            
+
         Returns:
             PostgresManager: PostgreSQL管理器实例
         """

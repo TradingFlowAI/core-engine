@@ -6,7 +6,7 @@ from datetime import datetime
 
 from aio_pika.abc import AbstractIncomingMessage
 
-from tradingflow.common.mq.aio_pika_impl import (
+from tradingflow.depot.mq.aio_pika_impl import (
     AioPikaTopicConsumer,
     AioPikaTopicPublisher,
 )

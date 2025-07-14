@@ -2,11 +2,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, List
 
-from tradingflow.py_worker.common.signal_types import Signal, SignalType
-from tradingflow.py_worker.nodes.node_base import NodeBase
+from tradingflow.station.common.signal_types import Signal, SignalType
+from tradingflow.station.nodes.node_base import NodeBase
 
 if TYPE_CHECKING:
-    from tradingflow.py_worker.common.state_store import StateStore
+    from tradingflow.station.common.state_store import StateStore
 
 # 配置日志
 logging.basicConfig(

@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from tradingflow.common.config import CONFIG
+from tradingflow.depot.config import CONFIG
 
 # 添加日志记录器
 logger = logging.getLogger(__name__)
@@ -536,7 +536,7 @@ class AptosVaultService:
         """
         try:
             from decimal import Decimal
-            from tradingflow.account_manager.utils.token_price_util import (
+            from tradingflow.bank.utils.token_price_util import (
                 get_multiple_aptos_token_prices_usd,
             )
 
@@ -647,11 +647,11 @@ class AptosVaultService:
         try:
             from datetime import datetime
             from decimal import Decimal
-            from tradingflow.account_manager.utils.token_price_util import (
+            from tradingflow.bank.utils.token_price_util import (
                 get_aptos_monitored_token_info,
             )
-            from tradingflow.common.db import db_session
-            from tradingflow.common.db.services.token_price_history_service import (
+            from tradingflow.depot.db import db_session
+            from tradingflow.depot.db.services.token_price_history_service import (
                 TokenPriceHistoryService,
             )
 
@@ -721,10 +721,10 @@ class AptosVaultService:
             tolerance_minutes: 时间容忍度（分钟）
         """
         from decimal import Decimal
-        from tradingflow.account_manager.utils.token_price_util import (
+        from tradingflow.bank.utils.token_price_util import (
             get_aptos_monitored_token_info,
         )
-        from tradingflow.common.db.services.token_price_history_service import (
+        from tradingflow.depot.db.services.token_price_history_service import (
             TokenPriceHistoryService,
         )
 
@@ -803,7 +803,7 @@ if __name__ == "__main__":
     # 添加asyncio导入
     import asyncio
 
-    from tradingflow.account_manager.utils.geckoterminal_util import (
+    from tradingflow.bank.utils.geckoterminal_util import (
         simple_get_multi_token_prices,
     )
 

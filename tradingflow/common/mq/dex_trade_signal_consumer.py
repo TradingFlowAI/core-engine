@@ -5,9 +5,9 @@ from typing import Any, Dict, Optional
 from aio_pika import Message, connect
 from aio_pika.abc import AbstractIncomingMessage
 
-from tradingflow.account_manager.services.vault_service import VaultService
-from tradingflow.common.config import CONFIG
-from tradingflow.common.mq.aio_pika_impl import AioPikaTopicConsumer
+from tradingflow.bank.services.vault_service import VaultService
+from tradingflow.depot.config import CONFIG
+from tradingflow.depot.mq.aio_pika_impl import AioPikaTopicConsumer
 
 logger = logging.getLogger(__name__)
 

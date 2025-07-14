@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from tradingflow.common.constants import EVM_CHAIN_ID_NETWORK_MAP
-from tradingflow.common.utils.address_util import normalize_token_address
+from tradingflow.depot.constants import EVM_CHAIN_ID_NETWORK_MAP
+from tradingflow.depot.utils.address_util import normalize_token_address
 
 logger = logging.getLogger(__name__)
 
