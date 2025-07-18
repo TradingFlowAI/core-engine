@@ -20,6 +20,8 @@ from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 # 定义输入输出处理器名称
 DATA_INPUT_HANDLE = "data_input_handle"
 DATA_OUTPUT_HANDLE = "data_output_handle"
+DOC_LINK_HANDLE = "doc_link_handle"
+DATA_HANDLE = "data_handle"
 
 
 @register_node_type(
@@ -30,6 +32,9 @@ DATA_OUTPUT_HANDLE = "data_output_handle"
         "mode": "read",  # read, write, append
         "range": "A1:Z1000",
         "header_row": True,
+        "node_category": "base",
+        "display_name": "Dataset Node",
+        "version": "0.0.2",
     },
 )
 class DatasetNode(NodeBase):
@@ -531,3 +536,109 @@ class DatasetNode(NodeBase):
             self.client = None
             self.spreadsheet = None
             self.worksheet = None
+
+
+# ============ 实例节点类 ============
+
+@register_node_type(
+    "dataset_input_node",
+    default_params={
+        "spreadsheet_id": "",
+        "worksheet_name": "Sheet1",
+        "mode": "read",
+        "range": "A1:Z1000",
+        "header_row": True,
+        "node_category": "instance",
+        "display_name": "Dataset Input",
+        "base_node_type": "dataset_node",
+        "version": "0.0.2",
+    },
+)
+class DatasetInputNode(DatasetNode):
+    """
+    Dataset Input Node - 数据输入节点
+    
+    专门用于从数据源读取数据的节点实例
+    
+    输入参数:
+    - doc_link: 文档链接 (Google Sheets URL或ID)
+    
+    输出信号:
+    - data: 读取的数据 (json object)
+    """
+    
+    def __init__(self, **kwargs):
+        # 强制设置为读取模式
+        kwargs['mode'] = 'read'
+        super().__init__(**kwargs)
+        
+        # 重新设置日志名称
+        self.logger = logging.getLogger(f"DatasetInputNode.{self.node_id}")
+    
+    def _register_input_handles(self):
+        """注册输入句柄 - Dataset Input特化"""
+        from tradingflow.station.nodes.node_base import InputHandle
+        
+        # 注册doc_link输入句柄
+        self._input_handles["doc_link"] = InputHandle(
+            name="doc_link",
+            data_type=str,
+            description="Document Link - Google Sheets URL or ID",
+            example="1Q1J0-2s0SsY4z6uo9LXxTgYyacpeMrLlY7zbQnBYKgY",
+            auto_update_attr="spreadsheet_id"
+        )
+
+
+@register_node_type(
+    "dataset_output_node",
+    default_params={
+        "spreadsheet_id": "",
+        "worksheet_name": "Sheet1",
+        "mode": "write",
+        "range": "A1:Z1000",
+        "header_row": True,
+        "node_category": "instance",
+        "display_name": "Dataset Output",
+        "base_node_type": "dataset_node",
+        "version": "0.0.2",
+    },
+)
+class DatasetOutputNode(DatasetNode):
+    """
+    Dataset Output Node - 数据输出节点
+    
+    专门用于向数据源写入数据的节点实例
+    
+    输入参数:
+    - data: 要写入的数据 (json object)
+    - doc_link: 文档链接 (Google Sheets URL或ID)
+    """
+    
+    def __init__(self, **kwargs):
+        # 强制设置为写入模式
+        kwargs['mode'] = 'write'
+        super().__init__(**kwargs)
+        
+        # 重新设置日志名称
+        self.logger = logging.getLogger(f"DatasetOutputNode.{self.node_id}")
+    
+    def _register_input_handles(self):
+        """注册输入句柄 - Dataset Output特化"""
+        from tradingflow.station.nodes.node_base import InputHandle
+        
+        # 注册data输入句柄
+        self._input_handles["data"] = InputHandle(
+            name="data",
+            data_type=dict,
+            description="Data to write - JSON object containing the data",
+            example={"headers": ["col1", "col2"], "rows": [["val1", "val2"]]}
+        )
+        
+        # 注册doc_link输入句柄
+        self._input_handles["doc_link"] = InputHandle(
+            name="doc_link",
+            data_type=str,
+            description="Document Link - Google Sheets URL or ID",
+            example="1Q1J0-2s0SsY4z6uo9LXxTgYyacpeMrLlY7zbQnBYKgY",
+            auto_update_attr="spreadsheet_id"
+        )

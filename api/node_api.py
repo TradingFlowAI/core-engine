@@ -138,6 +138,50 @@ async def execute_node(request: Request):
         return sanic_json({"error": str(e)}, status=500)
 
 
+@node_bp.get("/nodes/types")
+async def get_node_types(request: Request):
+    """获取所有节点类型信息，包括基类和实例的关系"""
+    try:
+        registry = NodeRegistry.get_instance()
+        
+        types_info = {}
+        for node_type, node_class in registry._node_classes.items():
+            # 获取默认参数
+            default_params = registry.get_default_params(node_type)
+            
+            # 提取节点元数据
+            node_category = default_params.get('node_category', 'base')
+            display_name = default_params.get('display_name', node_type)
+            base_node_type = default_params.get('base_node_type', None)
+            version = default_params.get('version', '0.0.1')
+            
+            # 获取输入句柄信息
+            input_handles = {}
+            if hasattr(node_class, '_input_handles'):
+                for handle_name, handle in node_class._input_handles.items():
+                    input_handles[handle_name] = handle.to_dict()
+            
+            types_info[node_type] = {
+                "class_name": node_class.__name__,
+                "category": node_category,
+                "display_name": display_name,
+                "base_type": base_node_type,
+                "version": version,
+                "default_params": default_params,
+                "input_handles": input_handles,
+                "docstring": node_class.__doc__ or ""
+            }
+        
+        return sanic_json({
+            "status": "success", 
+            "data": types_info,
+            "count": len(types_info)
+        })
+    except Exception as e:
+        logger.error(f"Error getting node types: {str(e)}")
+        return sanic_json({"status": "error", "message": str(e)}, status=500)
+
+
 @node_bp.get("/nodes/<node_task_id>/status")
 async def get_node_status(request: Request, node_task_id: str):
     """查询节点执行状态"""
