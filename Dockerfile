@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir \
 ENV PYTHONPATH=/app
 
 # 暴露端口
-EXPOSE 7001
+EXPOSE 7002
 
 # 复制并设置启动脚本权限
 COPY tradingflow/station/docker-entrypoint.sh /app/
