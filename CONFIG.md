@@ -19,9 +19,9 @@
 
 | 配置名称    | 类型    | 默认值                    | 说明                  |
 | ----------- | ------- | ------------------------- | --------------------- |
-| SERVER_URL  | string  | http://localhost:8000     | 主服务器 URL          |
+| SERVER_URL  | string  | http://localhost:7002     | 主服务器 URL          |
 | WORKER_HOST | string  | localhost                 | Worker 服务绑定主机名 |
-| WORKER_PORT | integer | 7000                      | Worker 服务绑定端口   |
+| WORKER_PORT | integer | 7002                      | Worker 服务绑定端口   |
 | WORKER_ID   | string  | auto (自动生成)           | Worker 唯一标识       |
 | DEBUG       | boolean | true (开发), false (生产) | 是否启用调试模式      |
 
@@ -65,6 +65,6 @@
 
 可以通过 `ENVIRONMENT` 环境变量选择预定义的环境配置：
 
--   `development`：开发环境（默认）
--   `testing`：测试环境
--   `production`：生产环境
+- `development`：开发环境（默认）
+- `testing`：测试环境
+- `production`：生产环境

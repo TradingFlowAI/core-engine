@@ -1,5 +1,5 @@
 ### Twitter监听器测试
-@baseUrl = http://localhost:7000
+@baseUrl = http://localhost:7002
 
 ### Twitter监听器测试 - 获取用户推文
 # @name execute_x_listener_node

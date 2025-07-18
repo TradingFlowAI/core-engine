@@ -4,7 +4,7 @@ import httpx
 
 
 async def execute_nodes():
-    url = "http://localhost:7000/nodes/execute"
+    url = "http://localhost:7002/nodes/execute"
     # headers = {"Content-Type": "application/json"}
 
     # 创建价格生成器节点
@@ -52,10 +52,10 @@ async def execute_nodes():
             await asyncio.sleep(1)
 
             gen_status = await client.get(
-                "http://localhost:7000/nodes/price_gen_1/status"
+                "http://localhost:7002/nodes/price_gen_1/status"
             )
             det_status = await client.get(
-                "http://localhost:7000/nodes/detector_1/status"
+                "http://localhost:7002/nodes/detector_1/status"
             )
 
             print(f"Generator status: {gen_status.json().get('status')}")

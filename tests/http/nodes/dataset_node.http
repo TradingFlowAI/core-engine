@@ -1,5 +1,5 @@
 ### 数据集节点测试
-@baseUrl = http://localhost:7000
+@baseUrl = http://localhost:7002
 
 ### 获取所有节点类型信息
 # @name get_node_types

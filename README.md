@@ -50,7 +50,7 @@ TradingFlow Python Worker 是一个高性能、可扩展的任务处理框架，
 
 ```bash
 # 执行一个价格数据节点
-curl -X POST http://localhost:7000/nodes/execute \
+curl -X POST http://localhost:7002/nodes/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "example_flow",
@@ -76,7 +76,7 @@ curl -X POST http://localhost:7000/nodes/execute \
     }
   }'
 # 执行一个价格trade节点
-curl -X POST http://localhost:7000/nodes/execute \
+curl -X POST http://localhost:7002/nodes/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "trading_flow",
@@ -117,7 +117,7 @@ curl -X POST http://localhost:7000/nodes/execute \
 这个示例调用 `/flows/execute` 接口来注册并执行一个新的 Flow：
 
 ```bash
-curl -X POST http://localhost:7000/flows/execute \
+curl -X POST http://localhost:7002/flows/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "example_flow",

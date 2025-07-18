@@ -1,5 +1,5 @@
 ### Binance价格节点测试
-@baseUrl = http://localhost:7000
+@baseUrl = http://localhost:7002
 
 # @name execute_binance_pricer_node
 POST {{baseUrl}}/nodes/execute

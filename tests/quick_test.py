@@ -3,7 +3,7 @@ import json
 
 import httpx
 
-WORKER_URL = "http://localhost:7000"
+WORKER_URL = "http://localhost:7002"
 
 
 async def quick_test():

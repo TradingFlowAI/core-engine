@@ -1,5 +1,5 @@
 ### Flow API 测试
-@baseUrl = http://localhost:7000
+@baseUrl = http://localhost:7002
 @flowId = 685c29b6f58fed2b58428874
 @cycle = 1
 @binanceNodeId = binance_price_node_1

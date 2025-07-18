@@ -1,5 +1,5 @@
 ### 健康检查接口测试
-@baseUrl = http://localhost:7000
+@baseUrl = http://localhost:7002
 
 # @name health_check
 GET {{baseUrl}}/health
