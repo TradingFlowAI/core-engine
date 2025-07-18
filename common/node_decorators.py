@@ -31,10 +31,7 @@ def register_node_type(node_class_type: str, default_params: Dict[str, Any] = No
         # 添加类属性，便于反射
         cls.NODE_CLASS_TYPE = node_class_type
 
-        @wraps(cls)
-        def wrapper(*args, **kwargs):
-            return cls(*args, **kwargs)
-
-        return wrapper
+        # 直接返回类，不要包装，以支持类继承
+        return cls
 
     return decorator

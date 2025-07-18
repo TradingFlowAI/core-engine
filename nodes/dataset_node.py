@@ -91,6 +91,14 @@ class DatasetNode(NodeBase):
             state_store: 状态存储
             **kwargs: 传递给基类的其他参数
         """
+        # 设置基类节点元数据
+        kwargs.setdefault('version', '0.0.2')
+        kwargs.setdefault('display_name', 'Dataset Node')
+        kwargs.setdefault('node_category', 'base')
+        kwargs.setdefault('description', 'A flexible node for reading/writing data from various sources')
+        kwargs.setdefault('author', 'TradingFlow Team')
+        kwargs.setdefault('tags', ['data', 'io', 'google-sheets'])
+        
         super().__init__(
             flow_id=flow_id,
             component_id=component_id,
@@ -570,6 +578,16 @@ class DatasetInputNode(DatasetNode):
     def __init__(self, **kwargs):
         # 强制设置为读取模式
         kwargs['mode'] = 'read'
+        
+        # 设置实例节点元数据
+        kwargs.setdefault('version', '0.0.2')
+        kwargs.setdefault('display_name', 'Dataset Input Node')
+        kwargs.setdefault('node_category', 'instance')
+        kwargs.setdefault('base_node_type', 'dataset_node')
+        kwargs.setdefault('description', 'Specialized node for reading data from external sources')
+        kwargs.setdefault('author', 'TradingFlow Team')
+        kwargs.setdefault('tags', ['data', 'input', 'read'])
+        
         super().__init__(**kwargs)
         
         # 重新设置日志名称
@@ -617,6 +635,16 @@ class DatasetOutputNode(DatasetNode):
     def __init__(self, **kwargs):
         # 强制设置为写入模式
         kwargs['mode'] = 'write'
+        
+        # 设置实例节点元数据
+        kwargs.setdefault('version', '0.0.2')
+        kwargs.setdefault('display_name', 'Dataset Output Node')
+        kwargs.setdefault('node_category', 'instance')
+        kwargs.setdefault('base_node_type', 'dataset_node')
+        kwargs.setdefault('description', 'Specialized node for writing data to external sources')
+        kwargs.setdefault('author', 'TradingFlow Team')
+        kwargs.setdefault('tags', ['data', 'output', 'write'])
+        
         super().__init__(**kwargs)
         
         # 重新设置日志名称

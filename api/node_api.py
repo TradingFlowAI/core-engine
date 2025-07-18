@@ -149,11 +149,25 @@ async def get_node_types(request: Request):
             # 获取默认参数
             default_params = registry.get_default_params(node_type)
             
-            # 提取节点元数据
+            # 优先从默认参数中获取元数据（向后兼容）
             node_category = default_params.get('node_category', 'base')
             display_name = default_params.get('display_name', node_type)
             base_node_type = default_params.get('base_node_type', None)
             version = default_params.get('version', '0.0.1')
+            description = default_params.get('description', node_class.__doc__ or "")
+            author = default_params.get('author', "")
+            tags = default_params.get('tags', [])
+            
+            # 尝试从类级别元数据获取（如果存在）
+            class_metadata = getattr(node_class, '_metadata', None)
+            if class_metadata:
+                node_category = class_metadata.node_category
+                display_name = class_metadata.display_name or display_name
+                base_node_type = class_metadata.base_node_type or base_node_type
+                version = class_metadata.version
+                description = class_metadata.description or description
+                author = class_metadata.author or author
+                tags = class_metadata.tags or tags
             
             # 获取输入句柄信息
             input_handles = {}
@@ -161,12 +175,16 @@ async def get_node_types(request: Request):
                 for handle_name, handle in node_class._input_handles.items():
                     input_handles[handle_name] = handle.to_dict()
             
+            # 构建节点类型信息
             types_info[node_type] = {
                 "class_name": node_class.__name__,
                 "category": node_category,
                 "display_name": display_name,
                 "base_type": base_node_type,
                 "version": version,
+                "description": description,
+                "author": author,
+                "tags": tags,
                 "default_params": default_params,
                 "input_handles": input_handles,
                 "docstring": node_class.__doc__ or ""

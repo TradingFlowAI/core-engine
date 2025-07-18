@@ -39,6 +39,35 @@ class InputHandle:
         }
 
 
+@dataclass
+class NodeMetadata:
+    """Node metadata definition"""
+    
+    version: str = "0.0.1"
+    display_name: str = ""
+    node_category: str = "base"  # "base", "instance", "variant"
+    base_node_type: Optional[str] = None
+    description: str = ""
+    author: str = ""
+    tags: List[str] = None
+    
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format"""
+        return {
+            "version": self.version,
+            "display_name": self.display_name,
+            "node_category": self.node_category,
+            "base_node_type": self.base_node_type,
+            "description": self.description,
+            "author": self.author,
+            "tags": self.tags,
+        }
+
+
 class NodeStatus(Enum):
     """Node status enumeration"""
 
@@ -52,6 +81,9 @@ class NodeStatus(Enum):
 
 class NodeBase(abc.ABC):
     """Base node class"""
+    
+    # Class-level metadata - can be overridden by subclasses
+    _metadata: Optional[NodeMetadata] = None
 
     def __init__(
         self,
@@ -63,6 +95,15 @@ class NodeBase(abc.ABC):
         input_edges: List[Edge] = None,
         output_edges: List[Edge] = None,
         state_store: "StateStore" = None,
+        # 添加元数据相关参数
+        version: str = None,
+        display_name: str = None,
+        node_category: str = None,
+        base_node_type: str = None,
+        description: str = None,
+        author: str = None,
+        tags: List[str] = None,
+        **kwargs  # 接收其他参数，保持向后兼容
     ):
         """
         Initialize node
@@ -76,6 +117,13 @@ class NodeBase(abc.ABC):
             input_edges: List of input edges
             output_edges: List of output edges
             state_store: Initialized state store instance (used if provided)
+            version: Node version
+            display_name: Display name for UI
+            node_category: Node category (base/instance/variant)
+            base_node_type: Base node type if this is an instance
+            description: Node description
+            author: Node author
+            tags: Node tags
         """
         # Logger setup
         self.logger = logging.getLogger(f"Node.{node_id}")
@@ -86,6 +134,17 @@ class NodeBase(abc.ABC):
         self.name = name
         self._input_edges = input_edges or []
         self._output_edges = output_edges or []
+        
+        # 初始化元数据
+        self._instance_metadata = NodeMetadata(
+            version=version or "0.0.1",
+            display_name=display_name or name or self.__class__.__name__,
+            node_category=node_category or "base",
+            base_node_type=base_node_type,
+            description=description or self.__class__.__doc__ or "",
+            author=author or "",
+            tags=tags or []
+        )
         # NOTE: 描述运行时的输入信号有哪些，注意与_input_handles的区别
         self._input_signals = {}
 
@@ -1076,3 +1135,101 @@ class NodeBase(abc.ABC):
             List of handle names
         """
         return list(self._input_handles.keys())
+    
+    # ============ 元数据相关方法 ============
+    
+    def get_metadata(self) -> NodeMetadata:
+        """
+        Get node metadata (instance-level)
+        
+        Returns:
+            NodeMetadata: Node metadata object
+        """
+        return self._instance_metadata
+    
+    @classmethod
+    def get_class_metadata(cls) -> Optional[NodeMetadata]:
+        """
+        Get class-level metadata
+        
+        Returns:
+            Optional[NodeMetadata]: Class metadata if set, None otherwise
+        """
+        return cls._metadata
+    
+    @classmethod
+    def set_class_metadata(cls, metadata: NodeMetadata) -> None:
+        """
+        Set class-level metadata
+        
+        Args:
+            metadata: NodeMetadata object to set
+        """
+        cls._metadata = metadata
+    
+    def update_metadata(self, **kwargs) -> None:
+        """
+        Update instance metadata
+        
+        Args:
+            **kwargs: Metadata fields to update
+        """
+        for key, value in kwargs.items():
+            if hasattr(self._instance_metadata, key):
+                setattr(self._instance_metadata, key, value)
+            else:
+                self.logger.warning(f"Unknown metadata field: {key}")
+    
+    def get_version(self) -> str:
+        """
+        Get node version
+        
+        Returns:
+            str: Node version
+        """
+        return self._instance_metadata.version
+    
+    def get_display_name(self) -> str:
+        """
+        Get node display name
+        
+        Returns:
+            str: Node display name
+        """
+        return self._instance_metadata.display_name
+    
+    def get_node_category(self) -> str:
+        """
+        Get node category
+        
+        Returns:
+            str: Node category (base/instance/variant)
+        """
+        return self._instance_metadata.node_category
+    
+    def is_base_node(self) -> bool:
+        """
+        Check if this is a base node
+        
+        Returns:
+            bool: True if this is a base node
+        """
+        return self._instance_metadata.node_category == "base"
+    
+    def is_instance_node(self) -> bool:
+        """
+        Check if this is an instance node
+        
+        Returns:
+            bool: True if this is an instance node
+        """
+        return self._instance_metadata.node_category == "instance"
+    
+    def get_base_node_type(self) -> Optional[str]:
+        """
+        Get base node type (for instance nodes)
+        
+        Returns:
+            Optional[str]: Base node type if this is an instance node
+        """
+        return self._instance_metadata.base_node_type
