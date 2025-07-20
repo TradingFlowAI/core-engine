@@ -262,7 +262,7 @@ pip install -r requirements.txt
 
 ```bash
 # 使用默认配置运行
-python py_worker/server.py
+python station/server.py
 ```
 
 ## 测试
@@ -270,13 +270,13 @@ python py_worker/server.py
 运行单元测试：
 
 ```bash
-pytest py_worker/tests/
+pytest station/tests/
 ```
 
 运行快速功能测试：
 
 ```bash
-python -m py_worker.quick_test
+python -m station.quick_test
 ```
 
 ## 扩展

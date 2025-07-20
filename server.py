@@ -6,7 +6,7 @@ import logging
 from sanic import Sanic
 
 
-from tradingflow.depot.config import get_py_worker_config
+from tradingflow.depot.config import get_station_config
 from tradingflow.depot.logging_config import setup_logging  # noqa: F401, E402
 from tradingflow.depot.mq.pool_manager import pool_manager
 from tradingflow.station.api import flow_bp, health_bp, node_bp
@@ -16,8 +16,8 @@ from tradingflow.station.services import setup_services  # noqa: F401, E402
 
 pool_manager.register_shutdown_handler()
 
-CONFIG = get_py_worker_config()
-setup_logging(CONFIG, "py_worker")
+CONFIG = get_station_config()
+setup_logging(CONFIG, "station")
 logger = logging.getLogger(__name__)
 # Read configuration from config file
 WORKER_HOST = CONFIG["WORKER_HOST"]

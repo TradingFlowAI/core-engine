@@ -13,7 +13,7 @@ Content-Type: application/json
 Accept: application/json
 
 {
-  "flow_id": "example_flow",
+  "flow_id": "example_flow2",
   "component_id": 3,
   "cycle": 1,
   "node_id": "dataset_node_read",

@@ -98,7 +98,7 @@ class DatasetNode(NodeBase):
         kwargs.setdefault('description', 'A flexible node for reading/writing data from various sources')
         kwargs.setdefault('author', 'TradingFlow Team')
         kwargs.setdefault('tags', ['data', 'io', 'google-sheets'])
-        
+
         super().__init__(
             flow_id=flow_id,
             component_id=component_id,
@@ -121,10 +121,11 @@ class DatasetNode(NodeBase):
         # 获取凭证路径，支持相对路径
         credentials_path = CONFIG.get("GOOGLE_CREDENTIALS_PATH", "")
         if credentials_path and not os.path.isabs(credentials_path):
-            # 如果是相对路径，则相对于项目根目录
+            # 如果是相对路径，则相对于3_weather_cluster目录（项目根目录）
             # 获取项目根目录路径
             current_file = pathlib.Path(__file__)
-            # 假设目录结构是 TradingFlow/python/py_worker/nodes/dataset_node.py
+            # 目录结构: 3_weather_cluster/tradingflow/station/nodes/dataset_node.py
+            # 所以需要向上3级目录到达3_weather_cluster
             project_root = current_file.parent.parent.parent.parent
             credentials_path = os.path.join(project_root, credentials_path)
 
@@ -440,14 +441,6 @@ class DatasetNode(NodeBase):
             self.logger.info(f"Using credentials from config: {config_cred_path}")
             return config_cred_path
 
-        # 尝试默认位置
-        current_file = pathlib.Path(__file__)
-        project_root = current_file.parent.parent.parent.parent
-        default_path = os.path.join(project_root, "python/py_worker/config/google_credentials.json")
-        if os.path.exists(default_path):
-            self.logger.info(f"Using default credentials path: {default_path}")
-            return default_path
-
         # 最后返回空字符串
         self.logger.warning("No valid Google credentials path found")
         return ""
@@ -565,20 +558,20 @@ class DatasetNode(NodeBase):
 class DatasetInputNode(DatasetNode):
     """
     Dataset Input Node - 数据输入节点
-    
+
     专门用于从数据源读取数据的节点实例
-    
+
     输入参数:
     - doc_link: 文档链接 (Google Sheets URL或ID)
-    
+
     输出信号:
     - data: 读取的数据 (json object)
     """
-    
+
     def __init__(self, **kwargs):
         # 强制设置为读取模式
         kwargs['mode'] = 'read'
-        
+
         # 设置实例节点元数据
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Dataset Input Node')
@@ -587,16 +580,16 @@ class DatasetInputNode(DatasetNode):
         kwargs.setdefault('description', 'Specialized node for reading data from external sources')
         kwargs.setdefault('author', 'TradingFlow Team')
         kwargs.setdefault('tags', ['data', 'input', 'read'])
-        
+
         super().__init__(**kwargs)
-        
+
         # 重新设置日志名称
         self.logger = logging.getLogger(f"DatasetInputNode.{self.node_id}")
-    
+
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Input特化"""
         from tradingflow.station.nodes.node_base import InputHandle
-        
+
         # 注册doc_link输入句柄
         self._input_handles["doc_link"] = InputHandle(
             name="doc_link",
@@ -624,18 +617,18 @@ class DatasetInputNode(DatasetNode):
 class DatasetOutputNode(DatasetNode):
     """
     Dataset Output Node - 数据输出节点
-    
+
     专门用于向数据源写入数据的节点实例
-    
+
     输入参数:
     - data: 要写入的数据 (json object)
     - doc_link: 文档链接 (Google Sheets URL或ID)
     """
-    
+
     def __init__(self, **kwargs):
         # 强制设置为写入模式
         kwargs['mode'] = 'write'
-        
+
         # 设置实例节点元数据
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Dataset Output Node')
@@ -644,16 +637,16 @@ class DatasetOutputNode(DatasetNode):
         kwargs.setdefault('description', 'Specialized node for writing data to external sources')
         kwargs.setdefault('author', 'TradingFlow Team')
         kwargs.setdefault('tags', ['data', 'output', 'write'])
-        
+
         super().__init__(**kwargs)
-        
+
         # 重新设置日志名称
         self.logger = logging.getLogger(f"DatasetOutputNode.{self.node_id}")
-    
+
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Output特化"""
         from tradingflow.station.nodes.node_base import InputHandle
-        
+
         # 注册data输入句柄
         self._input_handles["data"] = InputHandle(
             name="data",
@@ -661,7 +654,7 @@ class DatasetOutputNode(DatasetNode):
             description="Data to write - JSON object containing the data",
             example={"headers": ["col1", "col2"], "rows": [["val1", "val2"]]}
         )
-        
+
         # 注册doc_link输入句柄
         self._input_handles["doc_link"] = InputHandle(
             name="doc_link",
