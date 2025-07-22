@@ -13,8 +13,14 @@ from tradingflow.station.common.signal_formats import SignalFormats
 from tradingflow.station.common.signal_types import Signal, SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
-SYSTEM_PROMPT_HANDLE = "system_prompt_handle"
-PROMPT_HANDLE = "prompt_handle"
+# 定义输入输出处理器名称
+# 输入句柄
+MODEL_INPUT_HANDLE = "model"  # 模型输入
+PROMPT_INPUT_HANDLE = "prompt"  # 提示词输入
+PARAMETERS_INPUT_HANDLE = "parameters"  # 参数输入
+
+# 输出句柄
+AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI响应输出
 
 
 @register_node_type(
@@ -25,27 +31,22 @@ PROMPT_HANDLE = "prompt_handle"
         "system_prompt": "You are a helpful assistant.",
         "prompt": "Please analyze the following information:",
         "max_tokens": 1000,
-        "output_signal_type": SignalType.AI_RESPONSE.value,  # 输出信号类型
-        "output_format_prompt": True,  # 是否在提示词中添加输出格式要求
+        "auto_format_output": True,  # 是否自动根据输出连接生成JSON格式要求
     },
 )
 class AIModelNode(NodeBase):
     """
     AI大模型节点 - 接收各类信号作为上下文，调用大模型获取响应
+    自动根据输出连接情况生成JSON格式要求
 
     输入参数:
-    - model_name: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
-    - temperature: 温度参数，控制随机性，0.0-2.0
-    - system_prompt: 系统提示词，设置AI的角色和行为
-    - prompt: 主提示词，在上下文前添加的指导语
-    - max_tokens: 最大返回token数
-    - output_signal_type: 输出信号类型
-
-    输入信号:
-    - 任意信号类型：所有接收到的信号将被转换为文本上下文
+    - model: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
+    - prompt: 主提示词，指导 AI 如何处理输入数据
+    - parameters: 模型参数，如 temperature, max_tokens 等
+    - auto_format_output: 是否自动根据输出连接生成JSON格式要求
 
     输出信号:
-    - AI_RESPONSE：包含AI响应的信号
+    - ai_response: AI响应数据，根据输出连接自动调整格式
     """
 
     def __init__(
@@ -55,13 +56,13 @@ class AIModelNode(NodeBase):
         cycle: int,
         node_id: str,
         name: str,
-        model_name: str,
+        model_name: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         system_prompt: str = "You are a helpful assistant.",
         prompt: str = "Please analyze the following information:",
         max_tokens: int = 1000,
-        output_signal_type: str = "AI_RESPONSE",
-        output_format_prompt: bool = True,
+        parameters: Dict[str, Any] = None,
+        auto_format_output: bool = True,
         input_edges: List[Edge] = None,
         output_edges: List[Edge] = None,
         state_store=None,
@@ -97,21 +98,181 @@ class AIModelNode(NodeBase):
         )
 
         # 保存参数
-        self.model_name = "deepseek-r1-250120"
-        self.temperature = max(0.0, min(2.0, temperature))
+        self.model_name = model_name or "deepseek-r1-250120"
         self.system_prompt = system_prompt
         self.prompt = prompt
         self.api_key = CONFIG["ARK_API_KEY"]
         self.api_endpoint = CONFIG["AI_MODEL_NODE_ENDPOINT"]
-        self.max_tokens = max(1, min(max_tokens, 4000))
-        self.output_signal_type = output_signal_type
-        self.output_format_prompt = output_format_prompt
+        self.auto_format_output = auto_format_output
+        
+        # 处理模型参数
+        self.parameters = parameters or {}
+        self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
+        self.max_tokens = self.parameters.get("max_tokens", max(1, min(max_tokens, 4000)))
 
         # 结果
         self.ai_response = None
 
         # 日志设置
         self.logger = logging.getLogger(f"AIModel.{node_id}")
+    
+    def _register_input_handles(self) -> None:
+        """注册输入句柄"""
+        self.register_input_handle(
+            name=MODEL_INPUT_HANDLE,
+            data_type=str,
+            description="Model - 大模型名称，如 'gpt-3.5-turbo', 'gpt-4' 等",
+            example="gpt-3.5-turbo",
+            auto_update_attr="model_name",
+        )
+        self.register_input_handle(
+            name=PROMPT_INPUT_HANDLE,
+            data_type=str,
+            description="Prompt - 主提示词，指导 AI 如何处理输入数据",
+            example="Please analyze the trading data and provide recommendations:",
+            auto_update_attr="prompt",
+        )
+        self.register_input_handle(
+            name=PARAMETERS_INPUT_HANDLE,
+            data_type=dict,
+            description="Parameters - 模型参数，如 temperature, max_tokens 等",
+            example={"temperature": 0.7, "max_tokens": 1000},
+            auto_update_attr="parameters",
+        )
+    
+    def _analyze_output_format_requirements(self) -> Dict[str, Any]:
+        """
+        分析输出句柄的连接情况，确定需要输出的JSON格式
+        
+        Returns:
+            Dict[str, Any]: 包含输出格式要求的字典
+        """
+        required_fields = set()
+        field_descriptions = {}
+        field_examples = {}
+        
+        self.logger.debug(f"Analyzing {len(self._output_edges)} output edges for format requirements")
+        
+        # 遍历所有输出边，分析目标节点需要的输入格式
+        for edge in self._output_edges:
+            target_handle = edge.target_node_handle
+            target_node = edge.target_node
+            source_handle = edge.source_node_handle
+            
+            self.logger.debug(
+                f"Output edge: {source_handle} -> {target_node}.{target_handle}"
+            )
+            
+            # 将目标句柄名称作为必需的JSON字段
+            required_fields.add(target_handle)
+            
+            # 根据常见句柄名称添加描述和示例
+            if "chain" in target_handle.lower():
+                field_descriptions[target_handle] = "区块链网络标识符"
+                field_examples[target_handle] = "aptos"
+            elif "amount" in target_handle.lower():
+                field_descriptions[target_handle] = "交易金额，数值类型"
+                field_examples[target_handle] = 100.0
+            elif "token" in target_handle.lower():
+                if "from" in target_handle.lower():
+                    field_descriptions[target_handle] = "源代币符号"
+                    field_examples[target_handle] = "USDT"
+                elif "to" in target_handle.lower():
+                    field_descriptions[target_handle] = "目标代币符号"
+                    field_examples[target_handle] = "BTC"
+                else:
+                    field_descriptions[target_handle] = "代币符号"
+                    field_examples[target_handle] = "ETH"
+            elif "price" in target_handle.lower():
+                field_descriptions[target_handle] = "价格，数值类型"
+                field_examples[target_handle] = 50000.0
+            elif "action" in target_handle.lower():
+                field_descriptions[target_handle] = "操作类型"
+                field_examples[target_handle] = "buy"
+            elif "vault" in target_handle.lower():
+                field_descriptions[target_handle] = "Vault地址"
+                field_examples[target_handle] = "0x123..."
+            elif "slippage" in target_handle.lower() or "tolerance" in target_handle.lower():
+                field_descriptions[target_handle] = "滑点容忍度，百分比"
+                field_examples[target_handle] = 1.0
+            else:
+                field_descriptions[target_handle] = f"必需字段: {target_handle}"
+                field_examples[target_handle] = "value"
+        
+        return {
+            "required_fields": list(required_fields),
+            "field_descriptions": field_descriptions,
+            "field_examples": field_examples
+        }
+
+    async def _extract_structured_data_from_response(self, ai_response: str) -> Optional[Dict[str, Any]]:
+        """
+        从AI响应中提取结构化数据
+        
+        Args:
+            ai_response: AI模型的响应文本
+            
+        Returns:
+            Optional[Dict[str, Any]]: 提取的结构化数据，如果提取失败则返回None
+        """
+        try:
+            # 尝试从响应中提取JSON块
+            import re
+            
+            # 查找JSON代码块
+            json_pattern = r'```(?:json)?\s*({[^}]*}[^`]*)```'
+            json_matches = re.findall(json_pattern, ai_response, re.DOTALL | re.IGNORECASE)
+            
+            if json_matches:
+                # 尝试解析第一个JSON块
+                json_str = json_matches[0].strip()
+                try:
+                    structured_data = json.loads(json_str)
+                    self.logger.info(f"Extracted JSON from code block: {json_str[:100]}...")
+                    return structured_data
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Failed to parse JSON from code block: {e}")
+            
+            # 如果没有找到代码块，尝试直接查找JSON对象
+            json_object_pattern = r'{[^{}]*(?:{[^{}]*}[^{}]*)*}'
+            json_objects = re.findall(json_object_pattern, ai_response)
+            
+            for json_obj in json_objects:
+                try:
+                    structured_data = json.loads(json_obj)
+                    self.logger.info(f"Extracted JSON object: {json_obj[:100]}...")
+                    return structured_data
+                except json.JSONDecodeError:
+                    continue
+            
+            # 如果都没有找到，尝试基于输出连接的字段名从文本中提取信息
+            if self._output_edges:
+                format_requirements = self._analyze_output_format_requirements()
+                extracted_data = {}
+                
+                for field in format_requirements["required_fields"]:
+                    # 简单的文本匹配提取
+                    field_pattern = field + r'["\']?\s*[:=]\s*["\']?([^,\n\r"\'}]+)["\']?'
+                    match = re.search(field_pattern, ai_response, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip()
+                        # 尝试转换数据类型
+                        if value.lower() in ['true', 'false']:
+                            extracted_data[field] = value.lower() == 'true'
+                        elif value.replace('.', '', 1).isdigit():
+                            extracted_data[field] = float(value) if '.' in value else int(value)
+                        else:
+                            extracted_data[field] = value
+                
+                if extracted_data:
+                    self.logger.info(f"Extracted data from text patterns: {extracted_data}")
+                    return extracted_data
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error in _extract_structured_data_from_response: {str(e)}")
+            return None
 
     def _signal_to_text(self, signal: Signal) -> str:
         """
@@ -183,29 +344,30 @@ class AIModelNode(NodeBase):
         # 先添加主提示词
         context = self.prompt + "\n\n"
 
-        # 如果启用了输出格式提示，添加格式要求
-        if self.output_format_prompt:
-            # 获取输出信号类型的格式描述
-            format_desc = SignalFormats.get_format_description(self.output_signal_type)
-            if format_desc:
-                context += (
-                    f"\n输出要求: 请确保你的回复遵循以下格式规范:\n{format_desc}\n"
-                )
-
-                # 如果是DEX_TRADE这样的特殊信号，添加具体的结构指导
-                if self.output_signal_type == SignalType.DEX_TRADE.value:
-                    context += (
-                        "\n请在你的回复中明确包含一个格式化的交易信号部分，如下所示:\n"
-                        "```json\n"
-                        "{\n"
-                        '  "trading_pair": "ETH/USDT",\n'
-                        '  "action": "buy",\n'
-                        '  "amount": 0.5,\n'
-                        '  "price": 3000.0,\n'
-                        '  "reason": "突破阻力位后的追涨信号"\n'
-                        "}\n"
-                        "```\n"
-                    )
+        # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
+        if self.auto_format_output and self._output_edges:
+            format_requirements = self._analyze_output_format_requirements()
+            
+            if format_requirements["required_fields"]:
+                context += "\n输出格式要求:\n"
+                context += "请确保你的回复包含一个符合以下格式的JSON对象：\n\n"
+                
+                # 生成JSON示例
+                json_example = {}
+                for field in format_requirements["required_fields"]:
+                    json_example[field] = format_requirements["field_examples"].get(field, "value")
+                
+                context += "```json\n"
+                context += json.dumps(json_example, indent=2, ensure_ascii=False)
+                context += "\n```\n\n"
+                
+                # 添加字段说明
+                context += "字段说明：\n"
+                for field in format_requirements["required_fields"]:
+                    desc = format_requirements["field_descriptions"].get(field, f"必需字段: {field}")
+                    context += f"- {field}: {desc}\n"
+                
+                context += "\n请在你的分析后，提供一个符合上述格式的JSON对象。\n\n"
 
         # 如果有输入信号，添加信号内容
         if self._input_signals:
@@ -398,8 +560,8 @@ class AIModelNode(NodeBase):
             self.ai_response = ai_response
             self.logger.info(f"Got AI response (length: {len(ai_response)})")
 
-            # 构建基本响应payload
-            base_payload = {
+            # 构建 AI 响应 payload
+            payload = {
                 "model_name": self.model_name,
                 "response": ai_response,
                 "input_signals_count": input_signals_count,
@@ -408,35 +570,21 @@ class AIModelNode(NodeBase):
                     for signal in self._input_signals.values()
                     if signal is not None
                 ],
+                "timestamp": time.time()
             }
-
-            # 处理特殊信号类型
-            if self.output_signal_type != SignalType.AI_RESPONSE:
-                # 从AI响应中提取结构化数据
-                structured_data = await self._extract_structured_data(ai_response)
-
-                # 验证数据是否符合格式要求
-                valid, error_msg = SignalFormats.validate(
-                    self.output_signal_type, structured_data
-                )
-
-                if valid:
-                    # 合并数据
-                    payload = {**structured_data, **base_payload}
-                else:
-                    # 数据不符合要求，记录警告并回退到基本响应
-                    self.logger.warning(
-                        f"Extracted data does not meet {self.output_signal_type} format requirements: {error_msg}"
-                    )
-                    # 添加原始提取数据和警告信息
-                    payload = {
-                        **base_payload,
-                        "structured_data": structured_data,
-                        "format_error": error_msg,
-                    }
-            else:
-                # 对于AI_RESPONSE类型，使用基本payload
-                payload = base_payload
+            
+            # 如果启用了自动输出格式且有输出连接，尝试提取结构化数据
+            if self.auto_format_output and self._output_edges:
+                try:
+                    structured_data = await self._extract_structured_data_from_response(ai_response)
+                    if structured_data:
+                        # 将结构化数据添加到 payload 中
+                        payload.update(structured_data)
+                        self.logger.info(f"Successfully extracted structured data: {list(structured_data.keys())}")
+                    else:
+                        self.logger.warning("Failed to extract structured data from AI response")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting structured data: {str(e)}")
 
             # 发送AI响应信号 - 使用默认输出handle
             # output_handle = next(

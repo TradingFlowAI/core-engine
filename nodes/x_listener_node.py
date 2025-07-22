@@ -15,8 +15,12 @@ from tradingflow.station.common.signal_types import SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
 # 定义输入输出处理器名称
-TWEETS_OUTPUT_HANDLE = "tweets_output_handle"  # 推文输出
-USER_INFO_OUTPUT_HANDLE = "user_info_output_handle"  # 用户信息输出
+# 输入句柄
+ACCOUNT_INPUT_HANDLE = "account"  # X账号输入
+KEYWORDS_INPUT_HANDLE = "keywords"  # 关键词输入
+
+# 输出句柄
+LATEST_TWEETS_OUTPUT_HANDLE = "latest_tweets"  # 最新推文输出
 
 
 def is_user_id(identifier: str) -> bool:
@@ -29,23 +33,26 @@ def is_user_id(identifier: str) -> bool:
     default_params={
         "account": "",  # X账号，支持UserId和UserName
         "limit": 20,  # 获取的推文数量限制
-        "keywords": "",
+        "keywords": "",  # 关键词过滤，多个关键词用逗号分隔
+        "search_mode": "user_tweets",  # 搜索模式: "user_tweets" 或 "advanced_search"
+        "query_type": "Latest",  # 搜索类型: "Latest" 或 "Top"
         "api_key": "",  # Twitter API密钥
     },
 )
 class XListenerNode(NodeBase):
     """
-    Twitter监听器节点 - 用于获取指定用户的最近推文
+    Twitter监听器节点 - 用于获取指定用户的最近推文或进行高级搜索
 
     输入参数:
-    - account: X 的用户名或id
-    - tweet_limit: 获取的推文数量限制
-    - include_user_info: 是否包含用户信息
+    - account: X 的用户名或id（用户推文模式下使用）
+    - keywords: 关键词过滤，多个关键词用逗号分隔
+    - search_mode: 搜索模式 ("user_tweets" 或 "advanced_search")
+    - query_type: 搜索类型 ("Latest" 或 "Top")
+    - limit: 获取的推文数量限制
     - api_key: Twitter API密钥
 
     输出信号:
-    - TWEETS_OUTPUT_HANDLE: 获取的推文数据
-    - USER_INFO_OUTPUT_HANDLE: 用户信息（如果include_user_info为True）
+    - latest_tweets: 获取的最新推文数据
     """
 
     def __init__(
@@ -58,6 +65,8 @@ class XListenerNode(NodeBase):
             account: str = "",
             limit: int = 20,
             keywords: str = "",
+            search_mode: str = "user_tweets",
+            query_type: str = "Latest",
             api_key: str = "",
             input_edges: List[Edge] = None,
             output_edges: List[Edge] = None,
@@ -96,15 +105,178 @@ class XListenerNode(NodeBase):
 
         # 保存参数
         self.account = account
-        self.keywords = keywords
+        self.keywords = keywords.strip() if keywords else ""
+        self.search_mode = search_mode
+        self.query_type = query_type
         self.limit = max(1, min(100, limit))  # 限制在1-100之间
         self.api_key = api_key or os.environ.get("TWITTER_API_KEY") or CONFIG.get("TWITTER_API_KEY", "")
+        
         # API相关
-        self.base_url = "https://api.twitterapi.io/twitter/user/last_tweets"
+        self.user_tweets_url = "https://api.twitterapi.io/twitter/user/last_tweets"
+        self.advanced_search_url = "https://api.twitterapi.io/twitter/tweet/advanced_search"
         self.headers = {"X-API-Key": self.api_key}
 
         # 日志设置
-        self.logger = logging.getLogger(f"TwitterListenerNode.{node_id}")
+        self.logger = logging.getLogger(f"XListenerNode.{node_id}")
+    
+    def _register_input_handles(self) -> None:
+        """注册输入句柄"""
+        self.register_input_handle(
+            name=ACCOUNT_INPUT_HANDLE,
+            data_type=str,
+            description="Accounts - X 的用户名或id，支持userId和userName",
+            example="elonmusk",
+            auto_update_attr="account",
+        )
+        self.register_input_handle(
+            name=KEYWORDS_INPUT_HANDLE,
+            data_type=str,
+            description="Keywords - 关键词过滤，多个关键词用逗号分隔",
+            example="AI, Tesla, SpaceX",
+            auto_update_attr="keywords",
+        )
+
+    def _build_search_query(self) -> str:
+        """
+        构建高级搜索查询字符串
+        
+        Returns:
+            str: 搜索查询字符串
+        """
+        query_parts = []
+        
+        # 处理关键词
+        if self.keywords:
+            keywords_list = [kw.strip() for kw in self.keywords.split(',') if kw.strip()]
+            if keywords_list:
+                # 如果有多个关键词，使用 OR 连接
+                if len(keywords_list) > 1:
+                    keywords_query = ' OR '.join([f'"{kw}"' for kw in keywords_list])
+                    query_parts.append(f'({keywords_query})')
+                else:
+                    query_parts.append(f'"{keywords_list[0]}"')
+        
+        # 如果指定了用户，添加 from: 操作符
+        if self.account and self.search_mode == "advanced_search":
+            if is_user_id(self.account):
+                # 如果是用户ID，需要转换为用户名或使用其他方式
+                self.logger.warning(f"高级搜索不支持用户ID，跳过用户过滤: {self.account}")
+            else:
+                query_parts.append(f"from:{self.account}")
+        
+        # 如果没有任何查询条件，返回默认查询
+        if not query_parts:
+            return "twitter"  # 默认搜索
+        
+        return ' '.join(query_parts)
+    
+    def _filter_tweets_by_keywords(self, tweets: List[Dict]) -> List[Dict]:
+        """
+        根据关键词过滤推文
+        
+        Args:
+            tweets: 推文列表
+            
+        Returns:
+            List[Dict]: 过滤后的推文列表
+        """
+        if not self.keywords or not tweets:
+            return tweets
+        
+        keywords_list = [kw.strip().lower() for kw in self.keywords.split(',') if kw.strip()]
+        if not keywords_list:
+            return tweets
+        
+        filtered_tweets = []
+        for tweet in tweets:
+            tweet_text = tweet.get('text', '').lower()
+            # 检查是否包含任何关键词
+            if any(keyword in tweet_text for keyword in keywords_list):
+                filtered_tweets.append(tweet)
+        
+        self.logger.info(f"关键词过滤: {len(tweets)} -> {len(filtered_tweets)} 条推文")
+        return filtered_tweets
+    
+    async def fetch_tweets_advanced_search(self, cursor="", max_pages=5) -> Dict[str, Any]:
+        """
+        使用高级搜索API获取推文
+        
+        Args:
+            cursor: 分页游标
+            max_pages: 最大页数
+            
+        Returns:
+            Dict[str, Any]: 包含推文和用户信息的字典
+        """
+        query = self._build_search_query()
+        self.logger.info(f"使用高级搜索查询: {query}")
+        
+        all_tweets = []
+        current_page = 0
+        current_cursor = cursor
+        
+        try:
+            while current_page < max_pages:
+                # 构建查询参数
+                params = {
+                    "query": query,
+                    "queryType": self.query_type
+                }
+                
+                if current_cursor:
+                    params["cursor"] = current_cursor
+                
+                # 使用线程池执行同步API调用
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: requests.get(self.advanced_search_url, headers=self.headers, params=params)
+                )
+                
+                # 检查响应状态
+                if response.status_code != 200:
+                    error_msg = f"高级搜索API请求失败: {response.status_code} - {response.text}"
+                    self.logger.error(error_msg)
+                    return {"error": error_msg, "tweets": all_tweets}
+                
+                # 解析响应
+                response_data = response.json()
+                
+                # 获取推文
+                tweets = response_data.get("tweets", [])
+                all_tweets.extend(tweets)
+                
+                # 检查是否有更多页
+                has_next_page = response_data.get("has_next_page", False)
+                if not has_next_page or len(all_tweets) >= self.limit:
+                    break
+                
+                # 更新游标和页数
+                current_cursor = response_data.get("next_cursor", "")
+                current_page += 1
+                
+                # 如果没有下一页的游标，退出循环
+                if not current_cursor:
+                    break
+                
+                # 简单的速率限制
+                await asyncio.sleep(0.5)
+            
+            # 限制返回的推文数量
+            if len(all_tweets) > self.limit:
+                all_tweets = all_tweets[:self.limit]
+            
+            return {
+                "tweets": all_tweets,
+                "total_count": len(all_tweets),
+                "next_cursor": current_cursor if current_page < max_pages else ""
+            }
+        
+        except Exception as e:
+            error_msg = f"高级搜索时出错: {str(e)}"
+            self.logger.error(error_msg)
+            self.logger.debug(traceback.format_exc())
+            return {"error": error_msg, "tweets": all_tweets}
 
     async def fetch_tweets(self, account:str = "", cursor="", max_pages=5) -> Dict[str, Any]:
         """
@@ -152,7 +324,7 @@ class XListenerNode(NodeBase):
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
-                    lambda: requests.get(self.base_url, headers=self.headers, params=params)
+                    lambda: requests.get(self.user_tweets_url, headers=self.headers, params=params)
                 )
 
                 # 检查响应状态
@@ -171,6 +343,11 @@ class XListenerNode(NodeBase):
                 # 获取推文 - 适应新的API响应结构
                 data = response_data.get("data", {})
                 tweets = data.get("tweets", [])
+                
+                # 对推文进行关键词过滤
+                if self.keywords:
+                    tweets = self._filter_tweets_by_keywords(tweets)
+                
                 all_tweets.extend(tweets)
 
                 # 检查是否有更多页 - 适应新的API响应结构
@@ -208,10 +385,11 @@ class XListenerNode(NodeBase):
 
 
     async def execute(self) -> bool:
-        """执行节点逻辑，获取Twitter用户的最近推文"""
+        """执行节点逻辑，获取Twitter用户的最近推文或进行高级搜索"""
         start_time = time.time()
         try:
-            self.logger.info(f"执行XListenerNode，获取用户 {self.account} 的推文")
+            mode_desc = "高级搜索" if self.search_mode == "advanced_search" else f"用户 {self.account} 的推文"
+            self.logger.info(f"执行XListenerNode，模式: {self.search_mode}，获取{mode_desc}")
 
             # 检查API密钥
             if not self.api_key:
@@ -220,17 +398,27 @@ class XListenerNode(NodeBase):
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
-            # 检查用户标识符
-            if not self.account:
-                error_msg = "必须提供account参数"
-                self.logger.error(error_msg)
-                await self.set_status(NodeStatus.FAILED, error_msg)
-                return False
+            # 根据搜索模式检查参数
+            if self.search_mode == "user_tweets":
+                if not self.account:
+                    error_msg = "用户推文模式下必须提供account参数"
+                    self.logger.error(error_msg)
+                    await self.set_status(NodeStatus.FAILED, error_msg)
+                    return False
+            elif self.search_mode == "advanced_search":
+                if not self.keywords and not self.account:
+                    error_msg = "高级搜索模式下必须提供关键词或用户名"
+                    self.logger.error(error_msg)
+                    await self.set_status(NodeStatus.FAILED, error_msg)
+                    return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 获取推文
-            result = await self.fetch_tweets()
+            # 根据搜索模式获取推文
+            if self.search_mode == "advanced_search":
+                result = await self.fetch_tweets_advanced_search()
+            else:
+                result = await self.fetch_tweets()
 
             # 检查是否有错误
             if "error" in result:
@@ -244,11 +432,14 @@ class XListenerNode(NodeBase):
                 "tweets": result["tweets"],
                 "count": len(result["tweets"]),
                 "user": self.account,
+                "keywords": self.keywords,
+                "search_mode": self.search_mode,
+                "query_type": self.query_type,
                 "timestamp": time.time(),
                 "next_cursor": result.get("next_cursor", "")
             }
 
-            if await self.send_signal(TWEETS_OUTPUT_HANDLE, SignalType.DATASET, payload=tweets_data):
+            if await self.send_signal(LATEST_TWEETS_OUTPUT_HANDLE, SignalType.DATASET, payload=tweets_data):
                 self.logger.info(f"成功发送 {len(result['tweets'])} 条推文数据")
             else:
                 self.logger.warning("发送推文数据失败")

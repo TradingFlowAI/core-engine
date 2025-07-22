@@ -440,3 +440,289 @@ class SwapNode(NodeBase):
             example=1.0,
             auto_update_attr="slippery_tolerance",
         )
+
+
+# ============ 实例节点类 ============
+
+@register_node_type(
+    "buy_node",
+    default_params={
+        "chain": "aptos",
+        "buy_token": None,
+        "base_token": None,
+        "vault_address": None,
+        "order_type": "market",
+        "limited_price": None,
+        "amount_in_percentage": None,
+        "amount_in_human_readable": None,
+        "slippery_tolerance": 1.0,
+    },
+)
+class BuyNode(SwapNode):
+    """
+    Buy Node - 专门用于买入代币的节点实例
+    
+    输入参数:
+    - buy_token: 要买入的代币符号 (string)
+    - base_token: 用于支付的基础代币符号 (string) 
+    - chain: 区块链网络 (string)
+    - vault_address: Vault合约地址 (string)
+    - order_type: 订单类型 (string) - "market" 或 "limit"
+    - limited_price: 限价 (number) - 仅限价单使用
+    - amount_in_percentage: 交易金额百分比 (number)
+    - amount_in_human_readable: 人类可读金额 (number)
+    - slippery_tolerance: 滑点容忍度 (number)
+    
+    输出信号:
+    - trade_receipt: 交易收据 (json object)
+    """
+    
+    def __init__(self, **kwargs):
+        # 设置买入逻辑：from_token = base_token, to_token = buy_token
+        buy_token = kwargs.get('buy_token')
+        base_token = kwargs.get('base_token')
+        
+        if buy_token:
+            kwargs['to_token'] = buy_token
+        if base_token:
+            kwargs['from_token'] = base_token
+            
+        # 设置实例节点元数据
+        kwargs.setdefault('version', '0.0.2')
+        kwargs.setdefault('display_name', 'Buy Node')
+        kwargs.setdefault('node_category', 'instance')
+        kwargs.setdefault('base_node_type', 'swap_node')
+        kwargs.setdefault('description', 'Specialized node for buying tokens')
+        kwargs.setdefault('author', 'TradingFlow Team')
+        kwargs.setdefault('tags', ['trading', 'buy', 'dex'])
+        
+        super().__init__(**kwargs)
+        
+        # 保存买入特定参数
+        self.buy_token = buy_token
+        self.base_token = base_token
+        self.order_type = kwargs.get('order_type', 'market')
+        self.limited_price = kwargs.get('limited_price')
+        
+        # 重新设置日志名称
+        self.logger = logging.getLogger(f"BuyNode.{self.node_id}")
+        
+    def _register_input_handles(self) -> None:
+        """注册买入节点特化的输入句柄"""
+        self.register_input_handle(
+            name="buy_token",
+            data_type=str,
+            description="Token to Buy - Target token symbol to purchase",
+            example="BTC",
+            auto_update_attr="buy_token",
+        )
+        self.register_input_handle(
+            name="base_token",
+            data_type=str,
+            description="With Token - Base token symbol used for payment",
+            example="USDT",
+            auto_update_attr="base_token",
+        )
+        self.register_input_handle(
+            name=CHAIN_HANDLE,
+            data_type=str,
+            description="Chain - Blockchain network ('aptos' or 'flow_evm')",
+            example="aptos",
+            auto_update_attr="chain",
+        )
+        self.register_input_handle(
+            name=VAULT_ADDRESS_HANDLE,
+            data_type=str,
+            description="Vault Address - Vault contract address",
+            example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
+            auto_update_attr="vault_address",
+        )
+        self.register_input_handle(
+            name="order_type",
+            data_type=str,
+            description="Order Type - Order execution type ('market' or 'limit')",
+            example="market",
+            auto_update_attr="order_type",
+        )
+        self.register_input_handle(
+            name="limited_price",
+            data_type=float,
+            description="Limited Price - Maximum price for limit orders",
+            example=50000.0,
+            auto_update_attr="limited_price",
+        )
+        self.register_input_handle(
+            name=AMOUNT_IN_HANDLE_PERCENTAGE,
+            data_type=float,
+            description="Percentage In - Trading amount as percentage of base token balance (0-100)",
+            example=25.0,
+            auto_update_attr="amount_in_percentage",
+        )
+        self.register_input_handle(
+            name=AMOUNT_IN_HANDLE_HUMAN_READABLE,
+            data_type=float,
+            description="Amount In - Trading amount in human-readable decimal format",
+            example=100.0,
+            auto_update_attr="amount_in_human_readable",
+        )
+        self.register_input_handle(
+            name=SLIPPAGE_TOLERANCE_HANDLE,
+            data_type=float,
+            description="Slippery Tolerance - Maximum acceptable slippage percentage",
+            example=1.0,
+            auto_update_attr="slippery_tolerance",
+        )
+        
+    async def _on_buy_token_received(self, buy_token: str) -> None:
+        """处理买入代币更新"""
+        self.logger.info(f"Received buy token: {buy_token}")
+        self.buy_token = buy_token
+        self.to_token = buy_token
+        
+    async def _on_base_token_received(self, base_token: str) -> None:
+        """处理基础代币更新"""
+        self.logger.info(f"Received base token: {base_token}")
+        self.base_token = base_token
+        self.from_token = base_token
+
+
+@register_node_type(
+    "sell_node",
+    default_params={
+        "chain": "aptos",
+        "sell_token": None,
+        "base_token": None,
+        "vault_address": None,
+        "order_type": "market",
+        "limited_price": None,
+        "amount_in_percentage": None,
+        "amount_in_human_readable": None,
+        "slippery_tolerance": 1.0,
+    },
+)
+class SellNode(SwapNode):
+    """
+    Sell Node - 专门用于卖出代币的节点实例
+    
+    输入参数:
+    - sell_token: 要卖出的代币符号 (string)
+    - base_token: 换取的基础代币符号 (string)
+    - chain: 区块链网络 (string)
+    - vault_address: Vault合约地址 (string)
+    - order_type: 订单类型 (string) - "market" 或 "limit"
+    - limited_price: 限价 (number) - 仅限价单使用
+    - amount_in_percentage: 交易金额百分比 (number)
+    - amount_in_human_readable: 人类可读金额 (number)
+    - slippery_tolerance: 滑点容忍度 (number)
+    
+    输出信号:
+    - trade_receipt: 交易收据 (json object)
+    """
+    
+    def __init__(self, **kwargs):
+        # 设置卖出逻辑：from_token = sell_token, to_token = base_token
+        sell_token = kwargs.get('sell_token')
+        base_token = kwargs.get('base_token')
+        
+        if sell_token:
+            kwargs['from_token'] = sell_token
+        if base_token:
+            kwargs['to_token'] = base_token
+            
+        # 设置实例节点元数据
+        kwargs.setdefault('version', '0.0.2')
+        kwargs.setdefault('display_name', 'Sell Node')
+        kwargs.setdefault('node_category', 'instance')
+        kwargs.setdefault('base_node_type', 'swap_node')
+        kwargs.setdefault('description', 'Specialized node for selling tokens')
+        kwargs.setdefault('author', 'TradingFlow Team')
+        kwargs.setdefault('tags', ['trading', 'sell', 'dex'])
+        
+        super().__init__(**kwargs)
+        
+        # 保存卖出特定参数
+        self.sell_token = sell_token
+        self.base_token = base_token
+        self.order_type = kwargs.get('order_type', 'market')
+        self.limited_price = kwargs.get('limited_price')
+        
+        # 重新设置日志名称
+        self.logger = logging.getLogger(f"SellNode.{self.node_id}")
+        
+    def _register_input_handles(self) -> None:
+        """注册卖出节点特化的输入句柄"""
+        self.register_input_handle(
+            name="sell_token",
+            data_type=str,
+            description="Token to Sell - Source token symbol to sell",
+            example="BTC",
+            auto_update_attr="sell_token",
+        )
+        self.register_input_handle(
+            name="base_token",
+            data_type=str,
+            description="With Token - Base token symbol to receive",
+            example="USDT",
+            auto_update_attr="base_token",
+        )
+        self.register_input_handle(
+            name=CHAIN_HANDLE,
+            data_type=str,
+            description="Chain - Blockchain network ('aptos' or 'flow_evm')",
+            example="aptos",
+            auto_update_attr="chain",
+        )
+        self.register_input_handle(
+            name=VAULT_ADDRESS_HANDLE,
+            data_type=str,
+            description="Vault Address - Vault contract address",
+            example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
+            auto_update_attr="vault_address",
+        )
+        self.register_input_handle(
+            name="order_type",
+            data_type=str,
+            description="Order Type - Order execution type ('market' or 'limit')",
+            example="market",
+            auto_update_attr="order_type",
+        )
+        self.register_input_handle(
+            name="limited_price",
+            data_type=float,
+            description="Limited Price - Minimum price for limit orders",
+            example=45000.0,
+            auto_update_attr="limited_price",
+        )
+        self.register_input_handle(
+            name=AMOUNT_IN_HANDLE_PERCENTAGE,
+            data_type=float,
+            description="Percentage In - Trading amount as percentage of sell token balance (0-100)",
+            example=25.0,
+            auto_update_attr="amount_in_percentage",
+        )
+        self.register_input_handle(
+            name=AMOUNT_IN_HANDLE_HUMAN_READABLE,
+            data_type=float,
+            description="Amount In - Trading amount in human-readable decimal format",
+            example=0.5,
+            auto_update_attr="amount_in_human_readable",
+        )
+        self.register_input_handle(
+            name=SLIPPAGE_TOLERANCE_HANDLE,
+            data_type=float,
+            description="Slippery Tolerance - Maximum acceptable slippage percentage",
+            example=1.0,
+            auto_update_attr="slippery_tolerance",
+        )
+        
+    async def _on_sell_token_received(self, sell_token: str) -> None:
+        """处理卖出代币更新"""
+        self.logger.info(f"Received sell token: {sell_token}")
+        self.sell_token = sell_token
+        self.from_token = sell_token
+        
+    async def _on_base_token_received(self, base_token: str) -> None:
+        """处理基础代币更新"""
+        self.logger.info(f"Received base token: {base_token}")
+        self.base_token = base_token
+        self.to_token = base_token
