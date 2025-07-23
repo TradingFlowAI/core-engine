@@ -1,6 +1,6 @@
 ### Flow API 测试
 @baseUrl = http://localhost:7002
-@flowId = 685c29b6f58fed2b58428874
+@flowId = 687c95f4f9ff63cb29e7614f
 @cycle = 1
 @binanceNodeId = binance_price_node_1
 @aiModelNodeId = ai_model_node_1
@@ -58,7 +58,7 @@ Content-Type: application/json
 
 ### 4. 执行 Flow 的特定 Cycle
 # @name execute_flow_cycle
-POST {{baseUrl}}/flows/685c29b6f58fed2b58428874/cycles/execute
+POST {{baseUrl}}/flows/{{flowId}}/cycles/execute
 Content-Type: application/json
 
 {
