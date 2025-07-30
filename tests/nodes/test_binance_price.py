@@ -1,6 +1,6 @@
 import asyncio
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.nodes.binance_price_node import BinancePriceNode
 
 

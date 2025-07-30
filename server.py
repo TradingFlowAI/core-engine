@@ -6,9 +6,9 @@ import logging
 from sanic import Sanic
 
 
-from tradingflow.depot.config import get_station_config
-from tradingflow.depot.logging_config import setup_logging  # noqa: F401, E402
-from tradingflow.depot.mq.pool_manager import pool_manager
+from tradingflow.depot.python.config import get_station_config
+from tradingflow.depot.python.logging_config import setup_logging  # noqa: F401, E402
+from tradingflow.depot.python.mq.pool_manager import pool_manager
 from tradingflow.station.api import flow_bp, health_bp, node_bp
 from tradingflow.station.common.node_registry import NodeRegistry
 from tradingflow.station.common.node_task_manager import NodeTaskManager

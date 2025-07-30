@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import redis.asyncio as aioredis
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 
 if TYPE_CHECKING:
     from tradingflow.station.nodes.node_base import NodeBase

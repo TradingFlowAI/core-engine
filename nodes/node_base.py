@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from tradingflow.depot.exceptions.tf_exception import NodeStopExecutionException
-from tradingflow.depot.mq.node_signal_consumer import NodeSignalConsumer
-from tradingflow.depot.mq.node_signal_publisher import NodeSignalPublisher
+from tradingflow.depot.python.exceptions.tf_exception import NodeStopExecutionException
+from tradingflow.depot.python.mq.node_signal_consumer import NodeSignalConsumer
+from tradingflow.depot.python.mq.node_signal_publisher import NodeSignalPublisher
 from tradingflow.station.common.edge import Edge
 from tradingflow.station.common.signal_types import Signal, SignalType
 from tradingflow.station.common.state_store import StateStoreFactory
@@ -217,7 +217,7 @@ class NodeBase(abc.ABC):
         """Initialize flow execution log service lazily"""
         if self._log_service is None:
             try:
-                from tradingflow.depot.db.services.flow_execution_log_service import (
+                from tradingflow.depot.python.db.services.flow_execution_log_service import (
                     FlowExecutionLogService,
                 )
                 self._log_service = FlowExecutionLogService()

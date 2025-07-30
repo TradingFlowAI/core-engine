@@ -6,7 +6,7 @@ from datetime import datetime
 import httpx
 from sanic.log import logger
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.node_task_manager import NodeTaskManager
 from tradingflow.station.core.system_stats import get_system_stats
 

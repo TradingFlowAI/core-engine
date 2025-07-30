@@ -4,8 +4,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from tradingflow.depot.config import CONFIG
-from tradingflow.depot.exceptions.tf_exception import (
+from tradingflow.depot.python.config import CONFIG
+from tradingflow.depot.python.exceptions.tf_exception import (
     NodeExecutionException,
     NodeResourceException,
     NodeStopExecutionException,

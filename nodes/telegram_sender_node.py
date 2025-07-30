@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict, List, Optional, Union
 
 import aiohttp
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.edge import Edge
 
 from tradingflow.station.common.node_decorators import register_node_type

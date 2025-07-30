@@ -1,6 +1,6 @@
 """Worker注册和管理API"""
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 
 # 配置信息
 WORKER_ID = CONFIG["WORKER_ID"]

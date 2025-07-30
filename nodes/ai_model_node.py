@@ -5,7 +5,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 import httpx
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.edge import Edge
 
 from tradingflow.station.common.node_decorators import register_node_type
@@ -104,7 +104,7 @@ class AIModelNode(NodeBase):
         self.api_key = CONFIG["ARK_API_KEY"]
         self.api_endpoint = CONFIG["AI_MODEL_NODE_ENDPOINT"]
         self.auto_format_output = auto_format_output
-        
+
         # 处理模型参数
         self.parameters = parameters or {}
         self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
@@ -115,7 +115,7 @@ class AIModelNode(NodeBase):
 
         # 日志设置
         self.logger = logging.getLogger(f"AIModel.{node_id}")
-    
+
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
         self.register_input_handle(
@@ -139,33 +139,33 @@ class AIModelNode(NodeBase):
             example={"temperature": 0.7, "max_tokens": 1000},
             auto_update_attr="parameters",
         )
-    
+
     def _analyze_output_format_requirements(self) -> Dict[str, Any]:
         """
         分析输出句柄的连接情况，确定需要输出的JSON格式
-        
+
         Returns:
             Dict[str, Any]: 包含输出格式要求的字典
         """
         required_fields = set()
         field_descriptions = {}
         field_examples = {}
-        
+
         self.logger.debug(f"Analyzing {len(self._output_edges)} output edges for format requirements")
-        
+
         # 遍历所有输出边，分析目标节点需要的输入格式
         for edge in self._output_edges:
             target_handle = edge.target_node_handle
             target_node = edge.target_node
             source_handle = edge.source_node_handle
-            
+
             self.logger.debug(
                 f"Output edge: {source_handle} -> {target_node}.{target_handle}"
             )
-            
+
             # 将目标句柄名称作为必需的JSON字段
             required_fields.add(target_handle)
-            
+
             # 根据常见句柄名称添加描述和示例
             if "chain" in target_handle.lower():
                 field_descriptions[target_handle] = "区块链网络标识符"
@@ -198,7 +198,7 @@ class AIModelNode(NodeBase):
             else:
                 field_descriptions[target_handle] = f"必需字段: {target_handle}"
                 field_examples[target_handle] = "value"
-        
+
         return {
             "required_fields": list(required_fields),
             "field_descriptions": field_descriptions,
@@ -208,21 +208,21 @@ class AIModelNode(NodeBase):
     async def _extract_structured_data_from_response(self, ai_response: str) -> Optional[Dict[str, Any]]:
         """
         从AI响应中提取结构化数据
-        
+
         Args:
             ai_response: AI模型的响应文本
-            
+
         Returns:
             Optional[Dict[str, Any]]: 提取的结构化数据，如果提取失败则返回None
         """
         try:
             # 尝试从响应中提取JSON块
             import re
-            
+
             # 查找JSON代码块
             json_pattern = r'```(?:json)?\s*({[^}]*}[^`]*)```'
             json_matches = re.findall(json_pattern, ai_response, re.DOTALL | re.IGNORECASE)
-            
+
             if json_matches:
                 # 尝试解析第一个JSON块
                 json_str = json_matches[0].strip()
@@ -232,11 +232,11 @@ class AIModelNode(NodeBase):
                     return structured_data
                 except json.JSONDecodeError as e:
                     self.logger.warning(f"Failed to parse JSON from code block: {e}")
-            
+
             # 如果没有找到代码块，尝试直接查找JSON对象
             json_object_pattern = r'{[^{}]*(?:{[^{}]*}[^{}]*)*}'
             json_objects = re.findall(json_object_pattern, ai_response)
-            
+
             for json_obj in json_objects:
                 try:
                     structured_data = json.loads(json_obj)
@@ -244,12 +244,12 @@ class AIModelNode(NodeBase):
                     return structured_data
                 except json.JSONDecodeError:
                     continue
-            
+
             # 如果都没有找到，尝试基于输出连接的字段名从文本中提取信息
             if self._output_edges:
                 format_requirements = self._analyze_output_format_requirements()
                 extracted_data = {}
-                
+
                 for field in format_requirements["required_fields"]:
                     # 简单的文本匹配提取
                     field_pattern = field + r'["\']?\s*[:=]\s*["\']?([^,\n\r"\'}]+)["\']?'
@@ -263,13 +263,13 @@ class AIModelNode(NodeBase):
                             extracted_data[field] = float(value) if '.' in value else int(value)
                         else:
                             extracted_data[field] = value
-                
+
                 if extracted_data:
                     self.logger.info(f"Extracted data from text patterns: {extracted_data}")
                     return extracted_data
-            
+
             return None
-            
+
         except Exception as e:
             self.logger.error(f"Error in _extract_structured_data_from_response: {str(e)}")
             return None
@@ -347,26 +347,26 @@ class AIModelNode(NodeBase):
         # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
         if self.auto_format_output and self._output_edges:
             format_requirements = self._analyze_output_format_requirements()
-            
+
             if format_requirements["required_fields"]:
                 context += "\n输出格式要求:\n"
                 context += "请确保你的回复包含一个符合以下格式的JSON对象：\n\n"
-                
+
                 # 生成JSON示例
                 json_example = {}
                 for field in format_requirements["required_fields"]:
                     json_example[field] = format_requirements["field_examples"].get(field, "value")
-                
+
                 context += "```json\n"
                 context += json.dumps(json_example, indent=2, ensure_ascii=False)
                 context += "\n```\n\n"
-                
+
                 # 添加字段说明
                 context += "字段说明：\n"
                 for field in format_requirements["required_fields"]:
                     desc = format_requirements["field_descriptions"].get(field, f"必需字段: {field}")
                     context += f"- {field}: {desc}\n"
-                
+
                 context += "\n请在你的分析后，提供一个符合上述格式的JSON对象。\n\n"
 
         # 如果有输入信号，添加信号内容
@@ -572,7 +572,7 @@ class AIModelNode(NodeBase):
                 ],
                 "timestamp": time.time()
             }
-            
+
             # 如果启用了自动输出格式且有输出连接，尝试提取结构化数据
             if self.auto_format_output and self._output_edges:
                 try:

@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 
 import aiohttp
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 
 logger = logging.getLogger(__name__)
 

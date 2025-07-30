@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Set
 import httpx
 import redis.asyncio as aioredis
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.node_registry import NodeRegistry
 from tradingflow.station.common.node_task_manager import NodeTaskManager
 
@@ -285,8 +285,8 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Use database session context manager
-            from tradingflow.depot.db import db_session
-            from tradingflow.depot.db.services.flow_execution_log_service import (
+            from tradingflow.depot.python.db import db_session
+            from tradingflow.depot.python.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -367,8 +367,8 @@ class FlowScheduler:
         """
         try:
             # Use database session context manager
-            from tradingflow.depot.db import db_session
-            from tradingflow.depot.db.services.flow_execution_log_service import (
+            from tradingflow.depot.python.db import db_session
+            from tradingflow.depot.python.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -446,7 +446,7 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Initialize log service
-            from tradingflow.depot.db.services.flow_execution_log_service import (
+            from tradingflow.depot.python.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
             log_service = FlowExecutionLogService()

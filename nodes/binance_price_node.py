@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from binance.client import BaseClient, Client
 from binance.exceptions import BinanceAPIException
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.edge import Edge
 
 from tradingflow.station.common.node_decorators import register_node_type

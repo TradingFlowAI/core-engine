@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 from tradingflow.station.common.edge import Edge
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 
 from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
@@ -110,7 +110,7 @@ class XListenerNode(NodeBase):
         self.query_type = query_type
         self.limit = max(1, min(100, limit))  # 限制在1-100之间
         self.api_key = api_key or os.environ.get("TWITTER_API_KEY") or CONFIG.get("TWITTER_API_KEY", "")
-        
+
         # API相关
         self.user_tweets_url = "https://api.twitterapi.io/twitter/user/last_tweets"
         self.advanced_search_url = "https://api.twitterapi.io/twitter/tweet/advanced_search"
@@ -118,7 +118,7 @@ class XListenerNode(NodeBase):
 
         # 日志设置
         self.logger = logging.getLogger(f"XListenerNode.{node_id}")
-    
+
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
         self.register_input_handle(
@@ -139,12 +139,12 @@ class XListenerNode(NodeBase):
     def _build_search_query(self) -> str:
         """
         构建高级搜索查询字符串
-        
+
         Returns:
             str: 搜索查询字符串
         """
         query_parts = []
-        
+
         # 处理关键词
         if self.keywords:
             keywords_list = [kw.strip() for kw in self.keywords.split(',') if kw.strip()]
@@ -155,7 +155,7 @@ class XListenerNode(NodeBase):
                     query_parts.append(f'({keywords_query})')
                 else:
                     query_parts.append(f'"{keywords_list[0]}"')
-        
+
         # 如果指定了用户，添加 from: 操作符
         if self.account and self.search_mode == "advanced_search":
             if is_user_id(self.account):
@@ -163,58 +163,58 @@ class XListenerNode(NodeBase):
                 self.logger.warning(f"高级搜索不支持用户ID，跳过用户过滤: {self.account}")
             else:
                 query_parts.append(f"from:{self.account}")
-        
+
         # 如果没有任何查询条件，返回默认查询
         if not query_parts:
             return "twitter"  # 默认搜索
-        
+
         return ' '.join(query_parts)
-    
+
     def _filter_tweets_by_keywords(self, tweets: List[Dict]) -> List[Dict]:
         """
         根据关键词过滤推文
-        
+
         Args:
             tweets: 推文列表
-            
+
         Returns:
             List[Dict]: 过滤后的推文列表
         """
         if not self.keywords or not tweets:
             return tweets
-        
+
         keywords_list = [kw.strip().lower() for kw in self.keywords.split(',') if kw.strip()]
         if not keywords_list:
             return tweets
-        
+
         filtered_tweets = []
         for tweet in tweets:
             tweet_text = tweet.get('text', '').lower()
             # 检查是否包含任何关键词
             if any(keyword in tweet_text for keyword in keywords_list):
                 filtered_tweets.append(tweet)
-        
+
         self.logger.info(f"关键词过滤: {len(tweets)} -> {len(filtered_tweets)} 条推文")
         return filtered_tweets
-    
+
     async def fetch_tweets_advanced_search(self, cursor="", max_pages=5) -> Dict[str, Any]:
         """
         使用高级搜索API获取推文
-        
+
         Args:
             cursor: 分页游标
             max_pages: 最大页数
-            
+
         Returns:
             Dict[str, Any]: 包含推文和用户信息的字典
         """
         query = self._build_search_query()
         self.logger.info(f"使用高级搜索查询: {query}")
-        
+
         all_tweets = []
         current_page = 0
         current_cursor = cursor
-        
+
         try:
             while current_page < max_pages:
                 # 构建查询参数
@@ -222,56 +222,56 @@ class XListenerNode(NodeBase):
                     "query": query,
                     "queryType": self.query_type
                 }
-                
+
                 if current_cursor:
                     params["cursor"] = current_cursor
-                
+
                 # 使用线程池执行同步API调用
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
                     lambda: requests.get(self.advanced_search_url, headers=self.headers, params=params)
                 )
-                
+
                 # 检查响应状态
                 if response.status_code != 200:
                     error_msg = f"高级搜索API请求失败: {response.status_code} - {response.text}"
                     self.logger.error(error_msg)
                     return {"error": error_msg, "tweets": all_tweets}
-                
+
                 # 解析响应
                 response_data = response.json()
-                
+
                 # 获取推文
                 tweets = response_data.get("tweets", [])
                 all_tweets.extend(tweets)
-                
+
                 # 检查是否有更多页
                 has_next_page = response_data.get("has_next_page", False)
                 if not has_next_page or len(all_tweets) >= self.limit:
                     break
-                
+
                 # 更新游标和页数
                 current_cursor = response_data.get("next_cursor", "")
                 current_page += 1
-                
+
                 # 如果没有下一页的游标，退出循环
                 if not current_cursor:
                     break
-                
+
                 # 简单的速率限制
                 await asyncio.sleep(0.5)
-            
+
             # 限制返回的推文数量
             if len(all_tweets) > self.limit:
                 all_tweets = all_tweets[:self.limit]
-            
+
             return {
                 "tweets": all_tweets,
                 "total_count": len(all_tweets),
                 "next_cursor": current_cursor if current_page < max_pages else ""
             }
-        
+
         except Exception as e:
             error_msg = f"高级搜索时出错: {str(e)}"
             self.logger.error(error_msg)
@@ -343,11 +343,11 @@ class XListenerNode(NodeBase):
                 # 获取推文 - 适应新的API响应结构
                 data = response_data.get("data", {})
                 tweets = data.get("tweets", [])
-                
+
                 # 对推文进行关键词过滤
                 if self.keywords:
                     tweets = self._filter_tweets_by_keywords(tweets)
-                
+
                 all_tweets.extend(tweets)
 
                 # 检查是否有更多页 - 适应新的API响应结构

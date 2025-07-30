@@ -7,7 +7,7 @@ from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
 
-from tradingflow.depot.config import CONFIG
+from tradingflow.depot.python.config import CONFIG
 from tradingflow.station.common.node_registry import NodeRegistry
 from tradingflow.station.common.node_task_manager import NodeTaskManager
 from tradingflow.station.core.node_executor import execute_node_task
@@ -143,12 +143,12 @@ async def get_node_types(request: Request):
     """获取所有节点类型信息，包括基类和实例的关系"""
     try:
         registry = NodeRegistry.get_instance()
-        
+
         types_info = {}
         for node_type, node_class in registry._node_classes.items():
             # 获取默认参数
             default_params = registry.get_default_params(node_type)
-            
+
             # 优先从默认参数中获取元数据（向后兼容）
             node_category = default_params.get('node_category', 'base')
             display_name = default_params.get('display_name', node_type)
@@ -157,7 +157,7 @@ async def get_node_types(request: Request):
             description = default_params.get('description', node_class.__doc__ or "")
             author = default_params.get('author', "")
             tags = default_params.get('tags', [])
-            
+
             # 尝试从类级别元数据获取（如果存在）
             class_metadata = getattr(node_class, '_metadata', None)
             if class_metadata:
@@ -168,13 +168,13 @@ async def get_node_types(request: Request):
                 description = class_metadata.description or description
                 author = class_metadata.author or author
                 tags = class_metadata.tags or tags
-            
+
             # 获取输入句柄信息
             input_handles = {}
             if hasattr(node_class, '_input_handles'):
                 for handle_name, handle in node_class._input_handles.items():
                     input_handles[handle_name] = handle.to_dict()
-            
+
             # 构建节点类型信息
             types_info[node_type] = {
                 "class_name": node_class.__name__,
@@ -189,9 +189,9 @@ async def get_node_types(request: Request):
                 "input_handles": input_handles,
                 "docstring": node_class.__doc__ or ""
             }
-        
+
         return sanic_json({
-            "status": "success", 
+            "status": "success",
             "data": types_info,
             "count": len(types_info)
         })
@@ -231,7 +231,7 @@ async def stop_node(request: Request, node_task_id: str):
     from datetime import datetime
 
     import httpx
-    from tradingflow.depot.config import CONFIG
+    from tradingflow.depot.python.config import CONFIG
 
     SERVER_URL = CONFIG["SERVER_URL"]
 
