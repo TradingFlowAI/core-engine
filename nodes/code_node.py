@@ -31,9 +31,8 @@ STDOUT_HANDLE = "stdout_output"  # 标准输出
 STDERR_HANDLE = "stderr_output"  # 标准错误
 DEBUG_HANDLE = "debug_output"  # 调试输出
 
-# 定义安全执行环境
-# 已移动到code_node_interpreter.py
-
+# 定义默认最大 Gas
+DEFAULT_MAX_GAS = 1000000000 # 10_0000_0000
 
 @register_node_type(
     "code_node",
@@ -42,7 +41,7 @@ DEBUG_HANDLE = "debug_output"  # 调试输出
         "input_handles": [],  # 可以自定义多个输入处理器
         "output_handles": [],  # 可以自定义多个输出处理器
         "timeout": 30,  # 代码执行超时时间（秒）
-        "max_gas": 10000,  # 最大可用gas
+        "max_gas": DEFAULT_MAX_GAS,  # 最大可用gas（提高以支持复杂模块导入）
         "base_gas": 100,  # 基础Gas消耗
         "max_recursion": 1000,  # 最大递归深度
         "max_memory_mb": 500,  # 最大内存使用限制（MB）
@@ -123,7 +122,7 @@ class CodeNode(NodeBase):
         self.input_handles = input_handles or []
         self.output_handles = output_handles or []
         self.timeout = max(1, min(300, timeout))  # 限制在1-300秒之间
-        self.max_gas = max(100, min(100000, max_gas))  # 限制在100-100000之间
+        self.max_gas = max(100, min(DEFAULT_MAX_GAS, max_gas))  # 限制在 100-DEFAULT_MAX_GAS 之间
         self.base_gas = max(10, min(1000, base_gas))  # 限制在10-1000之间
         self.max_recursion = max(100, min(3000, max_recursion))  # 限制在100-3000之间
         self.max_memory_mb = max(100, min(2000, max_memory_mb))  # 限制在100-2000MB之间
@@ -153,14 +152,14 @@ class CodeNode(NodeBase):
         """
         result = {"is_safe": True, "violations": [], "risk_level": "Low"}
 
-        # 定义危险模块和函数
+        # 定义危险模块和函数 - 移除常见数据采集库
         dangerous_modules = {
             "os": "系统操作",
             "subprocess": "执行系统命令",
             "shutil": "文件操作",
-            "socket": "网络访问",
-            "requests": "网络请求",
-            "urllib": "网络访问",
+            "socket": "底层网络访问",
+            # "requests": "网络请求",  # 移除：允许用于数据采集
+            # "urllib": "网络访问",    # 移除：允许用于数据采集
             "pathlib": "文件系统访问",
             "pickle": "不安全的序列化",
             "multiprocessing": "进程操作",
@@ -169,6 +168,11 @@ class CodeNode(NodeBase):
             "ctypes": "底层系统调用",
             "importlib": "动态导入",
             "builtins": "内置函数访问",
+            # 新增真正危险的模块
+            "eval": "动态代码执行",
+            "exec": "动态代码执行",
+            "__import__": "动态导入",
+            "compile": "代码编译",
         }
 
         # 定义允许导入的模块白名单
@@ -180,13 +184,13 @@ class CodeNode(NodeBase):
             "__import__": "动态导入",
             "globals": "访问全局变量",
             "locals": "访问局部变量",
-            "getattr": "动态属性访问",
-            "setattr": "动态属性设置",
-            "delattr": "删除属性",
-            "compile": "代码编译",
-            "open": "文件操作",
-            "read": "文件读取",
-            "write": "文件写入",
+            # "getattr": "动态属性访问",  # 移除：常用于对象操作
+            # "setattr": "动态属性设置",  # 移除：常用于对象操作
+            # "delattr": "删除属性",      # 移除：常用于对象操作
+            # "compile": "代码编译",      # 移除：已在危险模块中处理
+            # "open": "文件操作",         # 移除：在数据处理中常用
+            # "read": "文件读取",         # 移除：在数据处理中常用
+            # "write": "文件写入",        # 移除：在数据处理中常用
         }
 
         try:
@@ -196,9 +200,26 @@ class CodeNode(NodeBase):
             # 检查导入语句
             for node in ast.walk(parsed_ast):
                 # 检查导入模块
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    # 处理 import xxx 语句
                     for name in node.names:
                         module_name = name.name.split(".")[0]
+                        # 检查危险模块
+                        if module_name in dangerous_modules:
+                            result["violations"].append(
+                                f"危险模块导入: {module_name} - {dangerous_modules[module_name]}"
+                            )
+                            result["is_safe"] = False
+                        # 检查模块白名单
+                        elif module_name not in allowed_modules:
+                            result["violations"].append(
+                                f"非白名单模块导入: {module_name} - 仅允许导入白名单中的模块"
+                            )
+                            result["is_safe"] = False
+                elif isinstance(node, ast.ImportFrom):
+                    # 处理 from xxx import yyy 语句
+                    if node.module:
+                        module_name = node.module.split(".")[0]
                         # 检查危险模块
                         if module_name in dangerous_modules:
                             result["violations"].append(
@@ -239,14 +260,14 @@ class CodeNode(NodeBase):
                 if isinstance(node, ast.Str):
                     string_literals.append(node.s)
 
-            # 检查字符串中的危险模式
+            # 检查字符串中的危险模式（只保留真正危险的）
             dangerous_patterns = [
                 (r"__import__\s*\(", "动态导入尝试"),
                 (r"eval\s*\(", "动态代码执行尝试"),
                 (r"exec\s*\(", "动态代码执行尝试"),
                 (r"os\.system", "系统命令执行尝试"),
                 (r"subprocess\.", "系统命令执行尝试"),
-                (r"open\s*\(", "文件操作尝试"),
+                # (r"open\s*\(", "文件操作尝试"),  # 移除：在数据处理中常用
             ]
 
             for string in string_literals:
@@ -347,17 +368,17 @@ class CodeNode(NodeBase):
             self.gas_used += 1  # 每执行一行代码增加1个Gas
 
             # 获取当前行的代码内容
-            try:
-                current_line = linecache.getline(
-                    frame.f_code.co_filename, frame.f_lineno
-                ).strip()
-                self.logger.info(f"执行行: {frame.f_lineno}, 内容: {current_line}")
-            except Exception:
-                # 如果无法获取行内容，忽略错误
-                pass
+            # try:
+            #     current_line = linecache.getline(
+            #         frame.f_code.co_filename, frame.f_lineno
+            #     ).strip()
+            #     self.logger.info(f"执行行: {frame.f_lineno}, 内容: {current_line}")
+            # except Exception:
+            #     # 如果无法获取行内容，忽略错误
+            #     pass
 
             # 输出资源使用情况
-            self.logger.info(f"资源使用: Gas={self.gas_used}/{self.max_gas}")
+            # self.logger.info(f"资源使用: Gas={self.gas_used}/{self.max_gas}")
 
             # 检查是否超出Gas限制
             if self.gas_used > self.max_gas:
@@ -369,31 +390,31 @@ class CodeNode(NodeBase):
             # 使用(文件名, 行号)作为循环的唯一标识
             location = (frame.f_code.co_filename, frame.f_lineno)
 
-            # 如果是循环内的代码，增加计数
-            if location in self.loop_detection:
-                self.loop_detection[location] += 1
+            # # 如果是循环内的代码，增加计数
+            # if location in self.loop_detection:
+            #     self.loop_detection[location] += 1
 
-                # 如果同一行执行次数过多，可能是无限循环
-                if self.loop_detection[location] > self.max_iterations:
-                    raise Exception(
-                        f"Potential infinite loop detected at line {frame.f_lineno}. "
-                        f"Executed {self.max_iterations} iterations."
-                    )
-            else:
-                # 新位置，初始化计数
-                self.loop_detection[location] = 1
+            #     # 如果同一行执行次数过多，可能是无限循环
+            #     if self.loop_detection[location] > self.max_iterations:
+            #         raise Exception(
+            #             f"Potential infinite loop detected at line {frame.f_lineno}. "
+            #             f"Executed {self.max_iterations} iterations."
+            #         )
+            # else:
+            #     # 新位置，初始化计数
+            #     self.loop_detection[location] = 1
 
-            # 每10行代码检查一次内存使用情况
-            if self.gas_used % 10 == 0:
+            # 每 10000 行代码检查一次内存使用情况
+            if self.gas_used % 10000 == 0:
                 # 获取当前进程的内存使用情况
                 try:
                     process = psutil.Process(os.getpid())
                     memory_info = process.memory_info()
                     memory_mb = memory_info.rss / (1024 * 1024)  # 转换为MB
 
-                    self.logger.info(
-                        f"内存使用: {memory_mb:.2f}MB/{self.max_memory_mb}MB"
-                    )
+                    # self.logger.info(
+                    #     f"内存使用: {memory_mb:.2f}MB/{self.max_memory_mb}MB"
+                    # )
 
                     # 如果内存使用超过限制，终止执行
                     if memory_mb > self.max_memory_mb:
@@ -406,47 +427,163 @@ class CodeNode(NodeBase):
 
         return self.gas_tracking_callback
 
+    async def _setup_execution_environment(self):
+        """设置代码执行环境，包括预导入常用模块"""
+        local_vars = {
+            "__name__": "__console__",
+            "__doc__": None,
+            "pd": pd,
+            "output_data": None,
+        }
+
+        await self.persist_log("开始导入常用模块...", log_level="INFO")
+
+        imported_modules = []
+        failed_modules = []
+
+        # 预导入requests
+        try:
+            import requests
+            local_vars["requests"] = requests
+            imported_modules.append("requests")
+        except ImportError as e:
+            failed_modules.append(f"requests: {str(e)}")
+            self.logger.warning("requests module not available - install with: pip install requests")
+
+        # 预导入BeautifulSoup和bs4
+        try:
+            from bs4 import BeautifulSoup
+            import bs4
+            local_vars["BeautifulSoup"] = BeautifulSoup
+            local_vars["bs4"] = bs4
+            imported_modules.extend(["BeautifulSoup", "bs4"])
+        except ImportError as e:
+            failed_modules.append(f"bs4/BeautifulSoup: {str(e)}")
+            self.logger.warning("BeautifulSoup/bs4 module not available - install with: pip install beautifulsoup4")
+
+        # 预导入urllib
+        try:
+            import urllib
+            local_vars["urllib"] = urllib
+            imported_modules.append("urllib")
+        except ImportError as e:
+            failed_modules.append(f"urllib: {str(e)}")
+            self.logger.warning("urllib module not available")
+
+        await self.persist_log(
+            f"模块导入完成: 成功 {len(imported_modules)} 个，失败 {len(failed_modules)} 个",
+            log_level="INFO" if len(failed_modules) == 0 else "WARNING",
+            log_metadata={
+                "imported_modules": imported_modules,
+                "failed_modules": failed_modules,
+                "success_count": len(imported_modules),
+                "failure_count": len(failed_modules)
+            }
+        )
+
+        return local_vars
+
+    async def _validate_security(self):
+        """执行安全检查并记录结果"""
+        await self.persist_log(
+            "开始代码安全检查...",
+            log_level="INFO",
+            log_metadata={"code_length": len(self.python_code)}
+        )
+
+        security_result = self.analyze_security(self.python_code)
+
+        if not security_result["is_safe"]:
+            error_msg = "; ".join(security_result["violations"])
+            await self.persist_log(
+                f"安全检查失败: {error_msg}",
+                log_level="ERROR",
+                log_metadata={
+                    "security_violations": security_result["violations"],
+                    "risk_level": security_result["risk_level"]
+                }
+            )
+
+            self.logger.warning(f"Security violations detected: {error_msg}")
+            await self.send_signal(STDERR_HANDLE, SignalType.TEXT, payload=error_msg)
+            await self.set_status(NodeStatus.FAILED, "代码安全检查失败")
+            return False
+
+        # 记录安全审计日志
+        await self.persist_log(
+            f"代码安全检查通过 (风险等级: {security_result['risk_level']})",
+            log_level="INFO",
+            log_metadata={
+                "risk_level": security_result["risk_level"],
+                "modules_checked": len(security_result.get("modules_checked", [])),
+                "code_length": len(self.python_code)
+            }
+        )
+
+        self.logger.info(f"Security check passed for code execution in node {self.node_id}")
+        self.logger.debug(f"Security analysis result: {security_result}")
+        return True
+
+    async def _prepare_execution_context(self, local_vars):
+        """准备代码执行上下文"""
+        # 捕获标准输出、标准错误和调试输出
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        debug_capture = io.StringIO()
+
+        # 创建安全解释器
+        interpreter = RestrictedInterpreter(
+            locals=local_vars, allowed_modules=ALLOWED_MODULES
+        )
+
+        await self.persist_log(
+            f"代码执行环境准备完成，开始执行代码 (超时: {self.timeout}秒)",
+            log_level="INFO",
+            log_metadata={
+                "timeout": self.timeout,
+                "max_gas": self.max_gas,
+                "max_memory_mb": self.max_memory_mb,
+                "available_variables": list(local_vars.keys())
+            }
+        )
+
+        return stdout_capture, stderr_capture, debug_capture, interpreter
+
     async def execute(self) -> bool:
         """执行节点逻辑，运行 Python 代码"""
         try:
             self.logger.info(f"Executing CodeNode {self.node_id}")
             await self.set_status(NodeStatus.RUNNING)
 
-            # 安全分析
-            security_result = self.analyze_security(self.python_code)
-            if not security_result["is_safe"]:
-                violations_str = "\n- " + "\n- ".join(security_result["violations"])
-                error_msg = f"代码安全检查失败 (风险等级: {security_result['risk_level']}):{violations_str}"
-                self.logger.warning(f"Security violations detected: {error_msg}")
-                await self.send_signal(
-                    STDERR_HANDLE, SignalType.TEXT, payload=error_msg
-                )
-                await self.set_status(NodeStatus.FAILED, "代码安全检查失败")
+            # 安全检查
+            if not await self._validate_security():
                 return False
-
-            # 记录安全审计日志
-            self.logger.info(
-                f"Security check passed for code execution in node {self.node_id}"
-            )
-            self.logger.debug(f"Security analysis result: {security_result}")
 
             # 估算初始Gas
             estimated_gas = self.estimate_gas(self.python_code)
-            self.logger.info(f"Estimated initial gas: {estimated_gas}")
-
-            # 记录估算的Gas消耗
-            self.logger.info(f"Estimated initial gas: {estimated_gas}")
+            await self.persist_log(
+                f"代码复杂度分析完成，估算Gas消耗: {estimated_gas}",
+                log_level="INFO",
+                log_metadata={
+                    "estimated_gas": estimated_gas,
+                    "max_gas": self.max_gas,
+                    "code_lines": len(self.python_code.split('\n'))
+                }
+            )
 
             # 收集所有输入数据
             input_data_dict = self._parse_input_data_dict()
+            await self.persist_log(
+                f"输入数据处理完成，收集到 {len(input_data_dict)} 个输入变量",
+                log_level="INFO",
+                log_metadata={
+                    "input_variables": list(input_data_dict.keys()),
+                    "input_count": len(input_data_dict)
+                }
+            )
 
             # 准备执行环境
-            local_vars = {
-                "__name__": "__console__",
-                "__doc__": None,
-                "pd": pd,
-                "output_data": None,
-            }
+            local_vars = await self._setup_execution_environment()
             local_vars.update(input_data_dict)
 
             # debug信息
@@ -454,16 +591,9 @@ class CodeNode(NodeBase):
                 f"Local variables prepared for execution: {local_vars.keys()}"
             )
 
-            # 捕获标准输出、标准错误和调试输出
-            stdout_capture = io.StringIO()
-            stderr_capture = io.StringIO()
-            debug_capture = io.StringIO()  # 新增调试输出捕获器
-
-            # 创建安全解释器
-            # 只传递必要的参数，避免将其他参数传递给RestrictedInterpreter
-            interpreter = RestrictedInterpreter(
-                locals=local_vars, allowed_modules=ALLOWED_MODULES
-            )
+            # 准备执行上下文
+            stdout_capture, stderr_capture, debug_capture, interpreter = \
+                await self._prepare_execution_context(local_vars)
 
             # 执行代码，带超时和Gas计算
             success = True
@@ -562,27 +692,82 @@ class CodeNode(NodeBase):
                 await asyncio.wait_for(execution_task, timeout=self.timeout)
                 # 如果成功完成，设置成功状态
                 success = True
+                await self.persist_log(
+                    "代码执行成功完成",
+                    log_level="INFO",
+                    log_metadata={
+                        "execution_time": time.time() - start_time,
+                        "gas_used": self.gas_used
+                    }
+                )
             except asyncio.TimeoutError:
-                self.logger.warning(f"代码执行超时 (超过 {self.timeout} 秒)")
+                error_msg = f"代码执行超时 (超过 {self.timeout} 秒)"
+                await self.persist_log(
+                    error_msg,
+                    log_level="ERROR",
+                    log_metadata={
+                        "timeout_seconds": self.timeout,
+                        "execution_time": time.time() - start_time,
+                        "gas_used": self.gas_used
+                    }
+                )
+                self.logger.warning(error_msg)
                 stderr_capture.write(f"执行超时: 代码运行时间超过 {self.timeout} 秒\n")
                 # 即使超时，我们也不能立即终止线程，因为这可能导致资源泄漏
                 # 我们只能等待线程自然结束
                 # 注意：如果代码中有无限循环，这里不会终止它，但由于线程是守护线程，当主线程结束时它会被终止
             except Exception as e:
                 # 处理其他异常（如从线程传递的异常）
-                self.logger.error(f"代码执行异常: {str(e)}")
+                error_msg = f"代码执行异常: {str(e)}"
 
+                # 根据异常类型记录不同的日志
                 if "Gas limit exceeded" in str(e):
+                    await self.persist_log(
+                        f"代码执行中止: Gas使用量超出限制 ({self.gas_used}/{self.max_gas})",
+                        log_level="ERROR",
+                        log_metadata={
+                            "gas_used": self.gas_used,
+                            "max_gas": self.max_gas,
+                            "exception_type": "gas_limit_exceeded"
+                        }
+                    )
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 elif "Potential infinite loop detected" in str(e):
+                    await self.persist_log(
+                        f"代码执行中止: 检测到潜在的无限循环",
+                        log_level="ERROR",
+                        log_metadata={
+                            "exception_type": "infinite_loop_detected",
+                            "gas_used": self.gas_used
+                        }
+                    )
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 elif "Memory usage exceeded" in str(e):
+                    await self.persist_log(
+                        f"代码执行中止: 内存使用量超出限制 ({self.max_memory_mb}MB)",
+                        log_level="ERROR",
+                        log_metadata={
+                            "max_memory_mb": self.max_memory_mb,
+                            "exception_type": "memory_limit_exceeded"
+                        }
+                    )
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 else:
+                    await self.persist_log(
+                        f"代码执行异常: {str(e)}",
+                        log_level="ERROR",
+                        log_metadata={
+                            "exception_type": "execution_error",
+                            "exception_message": str(e),
+                            "gas_used": self.gas_used
+                        }
+                    )
                     # 避免重复输出异常信息（如果已经在线程中输出过）
                     if "Error executing code:" not in stderr_capture.getvalue():
                         stderr_capture.write(f"Error executing code: {str(e)}\n")
                         stderr_capture.write(traceback.format_exc())
+
+                self.logger.error(error_msg)
             finally:
                 # 确保无论如何都停止跟踪
                 sys.settrace(None)
@@ -651,6 +836,7 @@ class CodeNode(NodeBase):
             self.logger.info("Getting execution result from local variables")
             output_data = local_vars.get("output_data")
             self.logger.info(f"Output data present: {output_data is not None}")
+
             if output_data is not None:
                 # 在输出中添加Gas和Credits信息
                 self.logger.info("Adding execution stats to output data")
@@ -662,23 +848,56 @@ class CodeNode(NodeBase):
                         "max_memory_mb": self.max_memory_mb,
                     }
 
+                await self.persist_log(
+                    f"代码执行成功，产生输出数据 (类型: {type(output_data).__name__})",
+                    log_level="INFO",
+                    log_metadata={
+                        "output_type": type(output_data).__name__,
+                        "output_size": len(str(output_data)) if output_data else 0,
+                        "final_gas_used": self.gas_used,
+                        "execution_time": self.execution_time,
+                        "custom_outputs": len(self.output_handles)
+                    }
+                )
+
                 # 发送主输出
                 await self.send_signal(
                     CODE_OUTPUT_HANDLE, SignalType.CODE_OUTPUT, payload=output_data
                 )
 
                 # 发送自定义输出
+                custom_outputs_sent = 0
                 for handle in self.output_handles:
                     if handle in local_vars:
                         await self.send_signal(
                             handle, SignalType.DATASET, payload=local_vars[handle]
                         )
+                        custom_outputs_sent += 1
+
+                if custom_outputs_sent > 0:
+                    await self.persist_log(
+                        f"发送了 {custom_outputs_sent} 个自定义输出信号",
+                        log_level="INFO",
+                        log_metadata={
+                            "custom_outputs_sent": custom_outputs_sent,
+                            "output_handles": self.output_handles
+                        }
+                    )
 
                 self.logger.info("Successfully executed code and sent output signals")
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
                 error_msg = "Code execution did not produce output_data"
+                await self.persist_log(
+                    "代码执行失败: 未产生output_data变量",
+                    log_level="ERROR",
+                    log_metadata={
+                        "available_variables": [k for k in local_vars.keys() if not k.startswith('_')],
+                        "execution_time": self.execution_time,
+                        "gas_used": self.gas_used
+                    }
+                )
                 self.logger.warning(error_msg)
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False

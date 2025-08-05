@@ -1,0 +1,136 @@
+### 比特币持仓数据抓取Flow集成测试
+### 基于前端真实生成的Flow数据格式
+
+@baseUrl = http://localhost:7002
+@flowId = 689041637ff776371f18cda6
+@userId = 684c36ce23a411dff96ff68a
+@componentId = 1
+@cycle = 1
+@codeNodeId = code_node_1
+@datasetNodeId = dataset_output_node_1
+@docLink = 1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM
+@createdAt = 2025-08-04T05:34:32.590Z
+
+### 0. 输出所有 Nodes 的执行情况
+GET {{baseUrl}}/nodes
+
+### 1. 测试单个code_node节点执行
+# @name execute_code_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "component_id": {{componentId}},
+  "cycle": {{cycle}},
+  "node_id": "{{codeNodeId}}",
+  "node_type": "code_node",
+  "input_edges": [],
+  "output_edges": [
+    {
+      "source": "{{codeNodeId}}",
+      "source_handle": "output_data",
+      "target": "{{datasetNodeId}}",
+      "target_handle": "data"
+    }
+  ],
+  "config": {
+    "node_class_type": "code_node",
+    "python_code": "import requests\nfrom bs4 import BeautifulSoup\nimport pandas as pd\n\nprint(\"🚀 开始收集比特币财富数据...\")\n\n# 模拟数据收集（避免网络依赖）\nsample_data = [\n['MicroStrategy', '0.70%', '190,000', '$18.4B', '$18.4B', 'Q3 2024'],\n['Tesla', '0.10%', '9,720', '$941M', '$1.50B', 'Q1 2021'],\n['Marathon Digital', '0.08%', '26,200', '$2.54B', '$1.59B', 'Nov 2024'],\n['Coinbase', '0.05%', '9,000', '$872M', '$1.20B', 'Q2 2024']\n]\n\nprint(f\"📊 收集到 {len(sample_data)} 条记录\")\n\n# 格式化输出数据\ndf = pd.DataFrame(sample_data, columns=['Company', 'Market_Cap_Pct', 'Bitcoin_Holdings', 'Current_Value', 'Total_Cost', 'Last_Updated'])\nsummary = {\n\"total_companies\": len(df),\n\"top_companies\": df['Company'].head(3).tolist(),\n\"data_source\": \"bitcointreasuries.net\",\n\"collection_time\": \"2025-08-02 20:35:00\"\n}\n\noutput_data = {\n\"bitcoin_summary\": f\"成功收集到 {summary['total_companies']} 家公司的比特币持仓数据\",\n\"top_holders\": summary['top_companies'],\n\"data_count\": summary['total_companies'],\n\"source\": summary['data_source']\n}",
+    "input_data": {}
+  }
+}
+
+### 2. 检查code_node节点状态
+# @name get_code_node_status
+GET {{baseUrl}}/nodes/{{codeNodeId}}/status
+
+### 3. 测试单个dataset_output_node节点执行
+# @name execute_dataset_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "component_id": {{componentId}},
+  "cycle": {{cycle}},
+  "node_id": "{{datasetNodeId}}",
+  "node_type": "dataset_output_node",
+  "input_edges": [
+    {
+      "source": "{{codeNodeId}}",
+      "source_handle": "output_data",
+      "target": "{{datasetNodeId}}",
+      "target_handle": "data"
+    }
+  ],
+  "output_edges": [],
+  "config": {
+    "node_class_type": "dataset_output_node",
+    "data": {
+      "bitcoin_summary": "成功收集到 4 家公司的比特币持仓数据",
+      "top_holders": ["MicroStrategy", "Tesla", "Marathon Digital"],
+      "data_count": 4,
+      "source": "bitcointreasuries.net"
+    },
+    "doc_link": "{{docLink}}"
+  }
+}
+
+### 4. 检查dataset_output_node节点状态
+# @name get_dataset_node_status
+GET {{baseUrl}}/nodes/{{datasetNodeId}}/status
+
+### 5. 测试完整Flow执行（使用前端真实格式）
+# @name execute_complete_flow
+POST {{baseUrl}}/flows/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "cycle_interval": "0",
+  "flow_json": {
+    "nodes": [
+      {
+        "id": "{{codeNodeId}}",
+        "type": "code_node",
+        "config": {
+          "node_class_type": "code_node",
+          "python_code": "import requests\nfrom bs4 import BeautifulSoup\nimport pandas as pd\n\nprint(\"🚀 开始收集比特币财富数据...\")\n\n# 模拟数据收集（避免网络依赖）\nsample_data = [\n['MicroStrategy', '0.70%', '190,000', '$18.4B', '$18.4B', 'Q3 2024'],\n['Tesla', '0.10%', '9,720', '$941M', '$1.50B', 'Q1 2021'],\n['Marathon Digital', '0.08%', '26,200', '$2.54B', '$1.59B', 'Nov 2024'],\n['Coinbase', '0.05%', '9,000', '$872M', '$1.20B', 'Q2 2024']\n]\n\nprint(f\"📊 收集到 {len(sample_data)} 条记录\")\n\n# 格式化输出数据\ndf = pd.DataFrame(sample_data, columns=['Company', 'Market_Cap_Pct', 'Bitcoin_Holdings', 'Current_Value', 'Total_Cost', 'Last_Updated'])\nsummary = {\n\"total_companies\": len(df),\n\"top_companies\": df['Company'].head(3).tolist(),\n\"data_source\": \"bitcointreasuries.net\",\n\"collection_time\": \"2025-08-02 20:35:00\"\n}\n\noutput_data = {\n\"bitcoin_summary\": f\"成功收集到 {summary['total_companies']} 家公司的比特币持仓数据\",\n\"top_holders\": summary['top_companies'],\n\"data_count\": summary['total_companies'],\n\"source\": summary['data_source']\n}",
+          "input_data": {}
+        }
+      },
+      {
+        "id": "{{datasetNodeId}}",
+        "type": "dataset_output_node",
+        "config": {
+          "node_class_type": "dataset_output_node",
+          "data": {},
+          "doc_link": "{{docLink}}"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "{{codeNodeId}}",
+        "source_handle": "output_data",
+        "target": "{{datasetNodeId}}",
+        "target_handle": "data"
+      }
+    ]
+  },
+  "user_id": "{{userId}}",
+  "created_at": "{{createdAt}}"
+}
+
+### 6. 检查完整Flow状态
+# @name get_flow_status
+GET {{baseUrl}}/flows/{{flowId}}/status
+
+### 7. 停止Flow执行
+# @name stop_flow
+POST {{baseUrl}}/flows/{{flowId}}/stop
+
+### 8. 获取Flow执行历史
+# @name get_flow_history
+GET {{baseUrl}}/flows/{{flowId}}/history

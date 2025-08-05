@@ -5,7 +5,9 @@ import json
 import os
 import time
 import pathlib
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -111,8 +113,9 @@ class DatasetNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
-        self.spreadsheet_id = spreadsheet_id
+        # 保存参数，支持URL格式的spreadsheet_id
+        self._original_spreadsheet_input = spreadsheet_id  # 保存原始输入用于日志
+        self.spreadsheet_id = self.extract_spreadsheet_id(spreadsheet_id)
         self.worksheet_name = worksheet_name
         self.mode = mode.lower()
         self.range = range
@@ -138,6 +141,51 @@ class DatasetNode(NodeBase):
 
         # 日志设置
         self.logger = logging.getLogger(f"DatasetNode.{node_id}")
+
+    @staticmethod
+    def extract_spreadsheet_id(spreadsheet_input: str) -> str:
+        """
+        从Google Sheets URL或直接ID中提取spreadsheet ID
+
+        支持的格式:
+        1. 直接ID: "1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM"
+        2. 完整URL: "https://docs.google.com/spreadsheets/d/1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM/edit?usp=sharing"
+        3. 简化URL: "docs.google.com/spreadsheets/d/1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM"
+
+        Args:
+            spreadsheet_input: Google Sheets URL或spreadsheet ID
+
+        Returns:
+            str: 提取的spreadsheet ID，如果无法提取则返回原始输入
+        """
+        if not spreadsheet_input or not isinstance(spreadsheet_input, str):
+            return spreadsheet_input or ""
+
+        # 去除首尾空白
+        spreadsheet_input = spreadsheet_input.strip()
+
+        # 如果已经是一个看起来像ID的字符串（不包含斜杠且长度合适），直接返回
+        if '/' not in spreadsheet_input and len(spreadsheet_input) >= 20:
+            return spreadsheet_input
+
+        # 使用正则表达式提取spreadsheet ID
+        # Google Sheets ID 通常是44个字符的字母数字字符串
+        patterns = [
+            r'/spreadsheets/d/([a-zA-Z0-9-_]+)',  # 标准格式
+            r'id=([a-zA-Z0-9-_]+)',               # 某些格式可能使用id参数
+            r'spreadsheets/d/([a-zA-Z0-9-_]+)',   # 没有前导斜杠的格式
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, spreadsheet_input)
+            if match:
+                extracted_id = match.group(1)
+                # 验证ID长度（Google Sheets ID通常是44个字符）
+                if len(extracted_id) >= 20:  # 允许一些变化
+                    return extracted_id
+
+        # 如果无法提取，返回原始输入（可能已经是有效的ID）
+        return spreadsheet_input
 
     async def initialize_client(self) -> bool:
         """初始化 Google Sheets API 客户端，带有重试机制"""
@@ -452,6 +500,11 @@ class DatasetNode(NodeBase):
             self.logger.info(
                 f"Executing DatasetNode in {self.mode} mode for spreadsheet {self.spreadsheet_id}"
             )
+
+            # 如果spreadsheet_id看起来像是从URL提取的，记录原始输入
+            original_input = getattr(self, '_original_spreadsheet_input', None)
+            if original_input and original_input != self.spreadsheet_id:
+                self.logger.info(f"Extracted spreadsheet ID '{self.spreadsheet_id}' from input: {original_input}")
 
             # 检查模式是否有效
             if self.mode not in ["read", "write", "append"]:

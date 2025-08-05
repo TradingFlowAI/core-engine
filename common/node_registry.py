@@ -36,8 +36,8 @@ class NodeRegistry:
         self.redis = None
         self.worker_id = CONFIG.get("WORKER_ID", socket.gethostname())
         self.api_url = CONFIG.get("WORKER_API_URL")
-        # Set heartbeat interval to 30 seconds
-        self.heartbeat_interval = int(CONFIG.get("REGISTRY_HEARTBEAT_INTERVAL", 30))
+        # Set heartbeat interval to 2 minutes
+        self.heartbeat_interval = int(CONFIG.get("REGISTRY_HEARTBEAT_INTERVAL", 120))
         # TTL set to be slightly longer than registration interval to ensure buffer time even if registration fails once
         self.node_ttl = int(CONFIG.get("NODE_TTL", 45))
         self._heartbeat_task = None
@@ -255,12 +255,12 @@ class NodeRegistry:
             for node_type in supported_types:
                 await self._register_node_type_mapping(node_type)
 
-            logger.info(
-                "Worker %s has been registered, supported node types: %s, api_url: %s",
-                self.worker_id,
-                ", ".join(supported_types),
-                self.api_url,
-            )
+            # logger.info(
+            #     "Worker %s has been registered, supported node types: %s, api_url: %s",
+            #     self.worker_id,
+            #     ", ".join(supported_types),
+            #     self.api_url,
+            # )
             return True
         except Exception as e:
             logger.error("Failed to register Worker %s: %s", self.worker_id, str(e))
@@ -620,7 +620,7 @@ class NodeRegistry:
             for node_type in registered_types:
                 self.supported_node_types.add(node_type)
 
-            # logger.debug("Synced node types from Redis: %s", self.supported_node_types)
+            logger.debug("Synced node types from Redis: %s", self.supported_node_types)
         except Exception as e:
             logger.error("Failed to sync node types from Redis: %s", str(e))
 

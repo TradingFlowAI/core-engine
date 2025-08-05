@@ -66,10 +66,10 @@ class FlowScheduler:
 
         # Analyze flow structure, identify DAG components
         flow_structure = self._analyze_flow_structure(flow_config)
-        logger.debug(
-            "Flow structure analysis completed: %s",
-            json.dumps(flow_structure, indent=2),
-        )
+        # logger.debug(
+        #     "Flow structure analysis completed: %s",
+        #     json.dumps(flow_structure, indent=2),
+        # )
 
         # Store flow information in Redis
         flow_data = {
@@ -755,33 +755,32 @@ class FlowScheduler:
                         flow_config.get("interval", "0")
                     )
 
-                    # 如果 interval_seconds 为 0，表示只执行一次
-                    if interval_seconds == 0:
-                        logger.info(
-                            "Flow %s has interval=0, executing once and stopping scheduling",
-                            flow_id
-                        )
-                        # 从运行中的流程列表中移除
-                        if flow_id in self.running_flows:
-                            self.running_flows.remove(flow_id)
-                        # 更新状态为已完成
-                        await self.redis.hset(f"flow:{flow_id}", "status", "completed")
-                        await self.redis.hset(
-                            f"flow:{flow_id}", "last_cycle", str(new_cycle)
-                        )
-                        # 退出循环
-                        break
-                    else:
-                        # 正常情况，计算下次执行时间
-                        next_execution = current_time + interval_seconds
-                        await self.redis.hset(
-                            f"flow:{flow_id}", "next_execution", str(next_execution)
-                        )
-                        await self.redis.hset(
-                            f"flow:{flow_id}", "last_cycle", str(new_cycle)
-                        )
+                # 如果 interval_seconds 为 0，表示只执行一次
+                if interval_seconds == 0:
+                    logger.info(
+                        "Flow %s has interval=0, executing once and stopping scheduling",
+                        flow_id
+                    )
+                    # 从运行中的流程列表中移除
+                    if flow_id in self.running_flows:
+                        self.running_flows.remove(flow_id)
+                    # 更新状态为已完成
+                    await self.redis.hset(f"flow:{flow_id}", "status", "completed")
+                    await self.redis.hset(
+                        f"flow:{flow_id}", "last_cycle", str(new_cycle)
+                    )
+                    # 退出循环
+                    break
+                else:
+                    # 正常情况，计算下次执行时间
+                    next_execution = current_time + interval_seconds
+                    await self.redis.hset(
+                        f"flow:{flow_id}", "next_execution", str(next_execution)
+                    )
+                    await self.redis.hset(
+                        f"flow:{flow_id}", "last_cycle", str(new_cycle)
+                    )
 
-                # Wait some time before checking again
                 await asyncio.sleep(10)  # Check every 10 seconds
 
         except Exception as e:
@@ -1057,7 +1056,7 @@ class FlowScheduler:
                 return int(interval_str)
         except Exception:
             # Default to 1 hour if parsing fails
-            return 3600
+            return 0
 
 
 # Singleton pattern to get instance
