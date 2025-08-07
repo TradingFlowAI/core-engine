@@ -3,7 +3,6 @@ import asyncio
 import dis
 import io
 import linecache
-import logging
 import os
 import re
 import sys
@@ -23,48 +22,48 @@ from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
 from .code_node_interpreter import ALLOWED_MODULES, RestrictedInterpreter
 
-# 定义输入输出处理器名称
-INPUT_DATA_HANDLE = "input_data"  # 输入数据处理器
-PYTHON_CODE_HANDLE = "python_code"  # Python代码处理器
-CODE_OUTPUT_HANDLE = "output_data"  # 代码执行结果输出
-STDOUT_HANDLE = "stdout_output"  # 标准输出
-STDERR_HANDLE = "stderr_output"  # 标准错误
-DEBUG_HANDLE = "debug_output"  # 调试输出
+# Define input/output handle names
+INPUT_DATA_HANDLE = "input_data"  # Input data handler
+PYTHON_CODE_HANDLE = "python_code"  # Python code handler
+CODE_OUTPUT_HANDLE = "output_data"  # Code execution result output
+STDOUT_HANDLE = "stdout_output"  # Standard output
+STDERR_HANDLE = "stderr_output"  # Standard error
+DEBUG_HANDLE = "debug_output"  # Debug output
 
-# 定义默认最大 Gas
+# Define default maximum Gas
 DEFAULT_MAX_GAS = 1000000000 # 10_0000_0000
 
 @register_node_type(
     "code_node",
     default_params={
-        "python_code": "# 在这里编写Python代码\n# 可以使用 input_data_0, input_data_1 等访问输入数据\n# 使用 output_data 变量存储输出结果\n\noutput_data = {'result': 'Hello from Code Node!'}",
-        "input_handles": [],  # 可以自定义多个输入处理器
-        "output_handles": [],  # 可以自定义多个输出处理器
-        "timeout": 30,  # 代码执行超时时间（秒）
-        "max_gas": DEFAULT_MAX_GAS,  # 最大可用gas（提高以支持复杂模块导入）
-        "base_gas": 100,  # 基础Gas消耗
-        "max_recursion": 1000,  # 最大递归深度
-        "max_memory_mb": 500,  # 最大内存使用限制（MB）
+        "python_code": "# Write Python code here\n# You can use input_data_0, input_data_1 etc. to access input data\n# Use output_data variable to store output results\n\noutput_data = {'result': 'Hello from Code Node!'}",
+        "input_handles": [],  # Can customize multiple input handlers
+        "output_handles": [],  # Can customize multiple output handlers
+        "timeout": 30,  # Code execution timeout (seconds)
+        "max_gas": DEFAULT_MAX_GAS,  # Maximum available gas (increased to support complex module imports)
+        "base_gas": 100,  # Base Gas consumption
+        "max_recursion": 1000,  # Maximum recursion depth
+        "max_memory_mb": 500,  # Maximum memory usage limit (MB)
     },
 )
 class CodeNode(NodeBase):
     """
-    代码执行节点 - 用于执行 Python 代码
+    Code execution node - Used to execute Python code
 
-    输入参数:
-    - python_code: 要执行的 Python 代码
-    - input_handles: 自定义输入处理器列表
-    - output_handles: 自定义输出处理器列表
-    - timeout: 代码执行超时时间（秒）
+    Input parameters:
+    - python_code: Python code to execute
+    - input_handles: Custom input handler list
+    - output_handles: Custom output handler list
+    - timeout: Code execution timeout (seconds)
 
-    输入信号:
-    - 根据 input_handles 定义的处理器接收输入数据
+    Input signals:
+    - Receive input data according to handlers defined in input_handles
 
-    输出信号:
-    - CODE_OUTPUT_HANDLE: 代码执行结果
-    - STDOUT_HANDLE: 标准输出
-    - STDERR_HANDLE: 标准错误
-    - 以及根据 output_handles 定义的自定义输出处理器
+    Output signals:
+    - CODE_OUTPUT_HANDLE: Code execution result
+    - STDOUT_HANDLE: Standard output
+    - STDERR_HANDLE: Standard error
+    - As well as custom output handlers defined by output_handles
     """
 
     def __init__(
@@ -88,22 +87,22 @@ class CodeNode(NodeBase):
         **kwargs,
     ):
         """
-        初始化代码执行节点
+        Initialize code execution node
 
         Args:
-            flow_id: 流程ID
-            component_id: 组件ID
-            cycle: 节点执行周期
-            node_id: 节点唯一标识符
-            name: 节点名称
-            python_code: 要执行的 Python 代码
-            input_handles: 自定义输入处理器列表
-            output_handles: 自定义输出处理器列表
-            timeout: 代码执行超时时间（秒）
-            input_edges: 输入边列表
-            output_edges: 输出边列表
-            state_store: 状态存储
-            **kwargs: 传递给基类的其他参数
+            flow_id: Flow ID
+            component_id: Component ID
+            cycle: Node execution cycle
+            node_id: Node unique identifier
+            name: Node name
+            python_code: Python code to execute
+            input_handles: Custom input handler list
+            output_handles: Custom output handler list
+            timeout: Code execution timeout (seconds)
+            input_edges: Input edge list
+            output_edges: Output edge list
+            state_store: State storage
+            **kwargs: Other parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -117,32 +116,29 @@ class CodeNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
+        # Save parameters
         self.python_code = python_code
         self.input_handles = input_handles or []
         self.output_handles = output_handles or []
-        self.timeout = max(1, min(300, timeout))  # 限制在1-300秒之间
-        self.max_gas = max(100, min(DEFAULT_MAX_GAS, max_gas))  # 限制在 100-DEFAULT_MAX_GAS 之间
-        self.base_gas = max(10, min(1000, base_gas))  # 限制在10-1000之间
-        self.max_recursion = max(100, min(3000, max_recursion))  # 限制在100-3000之间
-        self.max_memory_mb = max(100, min(2000, max_memory_mb))  # 限制在100-2000MB之间
+        self.timeout = timeout
+        self.max_gas = max_gas
+        self.base_gas = base_gas
+        self.max_recursion = max_recursion
+        self.max_memory_mb = max_memory_mb
 
-        # Gas计算相关
+        # Initialize execution statistics
         self.gas_used = 0
         self.execution_time = 0
+        self.memory_peak = 0
+        self.loop_count = 0
+        self.recursion_depth = 0
 
-        # 循环检测相关
-        self.loop_detection = {}
-        self.max_iterations = 10000  # 单个循环最大迭代次数
-
-        # 日志设置
-        self.logger = logging.getLogger(f"CodeNode.{node_id}")
-
-        # 保存主线程的事件循环，用于工作线程中的通信
+        # Save main thread's event loop for communication in worker threads
         self.loop = asyncio.get_event_loop()
 
-    def analyze_security(self, code: str) -> Dict[str, Any]:
-        """分析代码安全性，检测潜在的恶意代码
+    async def analyze_security(self, code: str) -> Dict[str, Any]:
+        """
+        Analyze code security, detect potential malicious code
 
         Returns:
             Dict containing security analysis results:
@@ -152,30 +148,30 @@ class CodeNode(NodeBase):
         """
         result = {"is_safe": True, "violations": [], "risk_level": "Low"}
 
-        # 定义危险模块和函数 - 移除常见数据采集库
+        # Define dangerous modules and functions - remove common data collection libraries
         dangerous_modules = {
-            "os": "系统操作",
-            "subprocess": "执行系统命令",
-            "shutil": "文件操作",
-            "socket": "底层网络访问",
-            # "requests": "网络请求",  # 移除：允许用于数据采集
-            # "urllib": "网络访问",    # 移除：允许用于数据采集
-            "pathlib": "文件系统访问",
-            "pickle": "不安全的序列化",
-            "multiprocessing": "进程操作",
-            "threading": "线程操作",
-            "sys": "系统访问",
-            "ctypes": "底层系统调用",
-            "importlib": "动态导入",
-            "builtins": "内置函数访问",
-            # 新增真正危险的模块
-            "eval": "动态代码执行",
-            "exec": "动态代码执行",
-            "__import__": "动态导入",
-            "compile": "代码编译",
+            "os": "System operations",
+            "subprocess": "Execute system commands",
+            "shutil": "File operations",
+            "socket": "Low-level network access",
+            # "requests": "Network requests",  # Removed: allowed for data collection
+            # "urllib": "Network access",    # Removed: allowed for data collection
+            "pathlib": "File system access",
+            "pickle": "Unsafe serialization",
+            "multiprocessing": "Process operations",
+            "threading": "Thread operations",
+            "sys": "System access",
+            "ctypes": "Low-level system calls",
+            "importlib": "Dynamic imports",
+            "builtins": "Built-in function access",
+            # Add truly dangerous modules
+            "eval": "Dynamic code execution",
+            "exec": "Dynamic code execution",
+            "__import__": "Dynamic imports",
+            "compile": "Code compilation",
         }
 
-        # 定义允许导入的模块白名单
+        # Define whitelist of allowed modules for import
         allowed_modules = set(ALLOWED_MODULES.keys())
 
         dangerous_functions = {
@@ -299,14 +295,14 @@ class CodeNode(NodeBase):
                 result["risk_level"] = "Medium"
 
         except Exception as e:
-            self.logger.warning(f"Security analysis error: {e}")
+            await self.persist_log(f"Security analysis error: {e}", "WARNING")
             result["violations"].append(f"代码分析错误: {str(e)}")
             result["is_safe"] = False
             result["risk_level"] = "Medium"
 
         return result
 
-    def estimate_gas(self, code: str) -> int:
+    async def estimate_gas(self, code: str) -> int:
         """估算代码执行的Gas消耗
 
         基于代码的复杂度和操作类型估算Gas消耗，类似以太坊的Gas计算机制
@@ -359,10 +355,10 @@ class CodeNode(NodeBase):
             return gas
 
         except Exception as e:
-            self.logger.warning(f"Gas estimation error: {e}, using default gas value")
+            await self.persist_log(f"Gas estimation error: {e}, using default gas value", "WARNING")
             return self.base_gas * 5  # 如果估算失败，使用默认值
 
-    def gas_tracking_callback(self, frame, event, arg) -> None:
+    async def gas_tracking_callback(self, frame, event, arg) -> None:
         """跟踪代码执行并计算Gas消耗，同时检测无限循环和内存使用"""
         if event == "line":
             self.gas_used += 1  # 每执行一行代码增加1个Gas
@@ -382,7 +378,7 @@ class CodeNode(NodeBase):
 
             # 检查是否超出Gas限制
             if self.gas_used > self.max_gas:
-                self.logger.info(f"资源使用超量: Gas={self.gas_used}/{self.max_gas}")
+                await self.persist_log(f"Resource usage exceeded: Gas={self.gas_used}/{self.max_gas}", "INFO")
                 # 引发异常以终止执行
                 raise Exception(f"Gas limit exceeded: {self.gas_used}/{self.max_gas}")
 
@@ -423,7 +419,7 @@ class CodeNode(NodeBase):
                         )
                 except Exception as e:
                     # 如果psutil不可用或出错，记录错误但继续执行
-                    self.logger.warning(f"内存监控错误: {str(e)}")
+                    await self.persist_log(f"Memory monitoring error: {str(e)}", "WARNING")
 
         return self.gas_tracking_callback
 
@@ -448,7 +444,7 @@ class CodeNode(NodeBase):
             imported_modules.append("requests")
         except ImportError as e:
             failed_modules.append(f"requests: {str(e)}")
-            self.logger.warning("requests module not available - install with: pip install requests")
+            await self.persist_log("requests module not available - install with: pip install requests", "WARNING")
 
         # 预导入BeautifulSoup和bs4
         try:
@@ -459,7 +455,7 @@ class CodeNode(NodeBase):
             imported_modules.extend(["BeautifulSoup", "bs4"])
         except ImportError as e:
             failed_modules.append(f"bs4/BeautifulSoup: {str(e)}")
-            self.logger.warning("BeautifulSoup/bs4 module not available - install with: pip install beautifulsoup4")
+            await self.persist_log("BeautifulSoup/bs4 module not available - install with: pip install beautifulsoup4", "WARNING")
 
         # 预导入urllib
         try:
@@ -468,7 +464,7 @@ class CodeNode(NodeBase):
             imported_modules.append("urllib")
         except ImportError as e:
             failed_modules.append(f"urllib: {str(e)}")
-            self.logger.warning("urllib module not available")
+            await self.persist_log("urllib module not available", "WARNING")
 
         await self.persist_log(
             f"模块导入完成: 成功 {len(imported_modules)} 个，失败 {len(failed_modules)} 个",
@@ -504,7 +500,7 @@ class CodeNode(NodeBase):
                 }
             )
 
-            self.logger.warning(f"Security violations detected: {error_msg}")
+            await self.persist_log(f"Security violations detected: {error_msg}", "WARNING")
             await self.send_signal(STDERR_HANDLE, SignalType.TEXT, payload=error_msg)
             await self.set_status(NodeStatus.FAILED, "代码安全检查失败")
             return False
@@ -520,8 +516,8 @@ class CodeNode(NodeBase):
             }
         )
 
-        self.logger.info(f"Security check passed for code execution in node {self.node_id}")
-        self.logger.debug(f"Security analysis result: {security_result}")
+        await self.persist_log(f"Security check passed for code execution in node {self.node_id}", "INFO")
+        await self.persist_log(f"Security analysis result: {security_result}", "DEBUG")
         return True
 
     async def _prepare_execution_context(self, local_vars):
@@ -552,7 +548,7 @@ class CodeNode(NodeBase):
     async def execute(self) -> bool:
         """执行节点逻辑，运行 Python 代码"""
         try:
-            self.logger.info(f"Executing CodeNode {self.node_id}")
+            await self.persist_log(f"Executing CodeNode {self.node_id}", "INFO")
             await self.set_status(NodeStatus.RUNNING)
 
             # 安全检查
@@ -572,7 +568,7 @@ class CodeNode(NodeBase):
             )
 
             # 收集所有输入数据
-            input_data_dict = self._parse_input_data_dict()
+            input_data_dict = await self._parse_input_data_dict()
             await self.persist_log(
                 f"输入数据处理完成，收集到 {len(input_data_dict)} 个输入变量",
                 log_level="INFO",
@@ -587,8 +583,8 @@ class CodeNode(NodeBase):
             local_vars.update(input_data_dict)
 
             # debug信息
-            self.logger.debug(
-                f"Local variables prepared for execution: {local_vars.keys()}"
+            await self.persist_log(
+                f"Local variables prepared for execution: {local_vars.keys()}", "DEBUG"
             )
 
             # 准备执行上下文
@@ -606,7 +602,7 @@ class CodeNode(NodeBase):
 
             # 创建一个Future对象用于线程间通信
             # 注意：不要在工作线程中使用主线程的事件循环
-            self.logger.info("Creating execution task Future")
+            await self.persist_log("Creating execution task Future", "INFO")
             execution_task = asyncio.Future()
 
             # 定义一个在当前线程执行代码的函数
@@ -639,7 +635,7 @@ class CodeNode(NodeBase):
                         except Exception as e:
                             # 捕获并记录异常
                             error_msg = f"Error executing code: {str(e)}"
-                            self.logger.error(error_msg)
+                            # Note: Cannot use await persist_log in thread context, using stderr capture
                             stderr_capture.write(f"{error_msg}\n")
                             stderr_capture.write(traceback.format_exc())
 
@@ -663,8 +659,7 @@ class CodeNode(NodeBase):
                     # 处理外部异常（如redirect_stdout失败）
                     sys.settrace(None)  # 确保停止跟踪
                     error_msg = f"Unexpected error in code execution thread: {str(e)}"
-                    self.logger.error(error_msg)
-                    self.logger.error(traceback.format_exc())
+                    # Note: Cannot use await persist_log in thread context, using stderr capture
 
                     # 设置异常
                     # 使用线程安全的方式设置异常
@@ -688,7 +683,7 @@ class CodeNode(NodeBase):
 
             try:
                 # 等待代码执行完成或超时
-                self.logger.info(f"等待代码执行完成，超时时间为 {self.timeout} 秒")
+                await self.persist_log(f"Waiting for code execution to complete, timeout: {self.timeout} seconds", "INFO")
                 await asyncio.wait_for(execution_task, timeout=self.timeout)
                 # 如果成功完成，设置成功状态
                 success = True
@@ -711,7 +706,7 @@ class CodeNode(NodeBase):
                         "gas_used": self.gas_used
                     }
                 )
-                self.logger.warning(error_msg)
+                await self.persist_log(error_msg, "WARNING")
                 stderr_capture.write(f"执行超时: 代码运行时间超过 {self.timeout} 秒\n")
                 # 即使超时，我们也不能立即终止线程，因为这可能导致资源泄漏
                 # 我们只能等待线程自然结束
@@ -767,39 +762,39 @@ class CodeNode(NodeBase):
                         stderr_capture.write(f"Error executing code: {str(e)}\n")
                         stderr_capture.write(traceback.format_exc())
 
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
             finally:
                 # 确保无论如何都停止跟踪
                 sys.settrace(None)
 
                 # 计算执行时间和最终Gas消耗
                 self.execution_time = time.time() - start_time
-                self.logger.info(
-                    f"代码执行总时间: {self.execution_time:.4f}秒, 总计Gas消耗: {self.gas_used}"
+                await self.persist_log(
+                    f"Code execution total time: {self.execution_time:.4f}s, total Gas consumed: {self.gas_used}", "INFO"
                 )
 
                 # 根据执行时间额外增加Gas
-                self.logger.info("Calculating final gas usage based on execution time")
+                await self.persist_log("Calculating final gas usage based on execution time", "INFO")
                 time_gas = int(self.execution_time * 10)  # 每秒10个Gas
                 self.gas_used += time_gas
-                self.logger.info(
-                    f"Final resource usage: Gas={self.gas_used}/{self.max_gas}"
+                await self.persist_log(
+                    f"Final resource usage: Gas={self.gas_used}/{self.max_gas}", "INFO"
                 )
 
                 # 获取输出
-                self.logger.info("Getting captured stdout, stderr and debug output")
+                await self.persist_log("Getting captured stdout, stderr and debug output", "INFO")
                 stdout_output = stdout_capture.getvalue()
                 stderr_output = stderr_capture.getvalue()
                 debug_output = debug_capture.getvalue()  # 获取调试输出
                 if stdout_output:
-                    self.logger.info("Captured stdout content: %s", stdout_output)
+                    await self.persist_log(f"Captured stdout content: {stdout_output}", "INFO")
                 if stderr_output:
-                    self.logger.warning("Captured stderr content: %s", stderr_output)
+                    await self.persist_log(f"Captured stderr content: {stderr_output}", "WARNING")
                 if debug_output:
-                    self.logger.debug("Captured debug content: %s", debug_output)
+                    await self.persist_log(f"Captured debug content: {debug_output}", "DEBUG")
 
-                self.logger.info(
-                    f"Captured stdout length: {len(stdout_output)}, stderr length: {len(stderr_output)}, debug length: {len(debug_output)}"
+                await self.persist_log(
+                    f"Captured stdout length: {len(stdout_output)}, stderr length: {len(stderr_output)}, debug length: {len(debug_output)}", "INFO"
                 )
 
             # 添加详细的执行统计信息
@@ -821,7 +816,7 @@ class CodeNode(NodeBase):
                 )
                 if not success:
                     error_msg = f"Code execution failed: {stderr_output}"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
@@ -830,16 +825,16 @@ class CodeNode(NodeBase):
                 await self.send_signal(
                     DEBUG_HANDLE, SignalType.TEXT, payload=debug_output
                 )
-                self.logger.debug(f"Sent debug output: {len(debug_output)} characters")
+                await self.persist_log(f"Sent debug output: {len(debug_output)} characters", "DEBUG")
 
             # 获取代码执行结果
-            self.logger.info("Getting execution result from local variables")
+            await self.persist_log("Getting execution result from local variables", "INFO")
             output_data = local_vars.get("output_data")
-            self.logger.info(f"Output data present: {output_data is not None}")
+            await self.persist_log(f"Output data present: {output_data is not None}", "INFO")
 
             if output_data is not None:
                 # 在输出中添加Gas和Credits信息
-                self.logger.info("Adding execution stats to output data")
+                await self.persist_log("Adding execution stats to output data", "INFO")
                 if isinstance(output_data, dict):
                     output_data["_execution_stats"] = {
                         "gas_used": self.gas_used,
@@ -884,7 +879,7 @@ class CodeNode(NodeBase):
                         }
                     )
 
-                self.logger.info("Successfully executed code and sent output signals")
+                await self.persist_log("Successfully executed code and sent output signals", "INFO")
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
@@ -898,7 +893,7 @@ class CodeNode(NodeBase):
                         "gas_used": self.gas_used
                     }
                 )
-                self.logger.warning(error_msg)
+                await self.persist_log(error_msg, "WARNING")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
@@ -908,19 +903,16 @@ class CodeNode(NodeBase):
             return True
         except Exception as e:
             error_msg = f"Error in CodeNode execution: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
 
-    def _parse_input_data_dict(self):
+    async def _parse_input_data_dict(self):
         input_data_dict = {}
         for edge_key, signal in self._input_signals.items():
-            self.logger.debug(
-                "Processing input signal for edge %s: %s, type(signal)= %s",
-                edge_key,
-                signal,
-                type(signal),
+            await self.persist_log(
+                f"Processing input signal for edge {edge_key}: {signal}, type(signal)= {type(signal)}", "DEBUG"
             )
 
             if signal is not None:
@@ -936,10 +928,8 @@ class CodeNode(NodeBase):
                     # 使用 source_handle 作为 key 存储数据
                     input_data_dict[source_handle] = data
 
-                    self.logger.debug(
-                        "Added input data for source_handle '%s': %s",
-                        source_handle,
-                        data,
+                    await self.persist_log(
+                        f"Added input data for source_handle '{source_handle}': {data}", "DEBUG"
                     )
 
                     # 如果数据是 dataset 格式，尝试转换为 pandas DataFrame
@@ -947,23 +937,19 @@ class CodeNode(NodeBase):
                         try:
                             df = pd.DataFrame(data["data"], columns=data["headers"])
                             input_data_dict[f"df_{source_handle}"] = df
-                            self.logger.debug(
-                                "Created DataFrame for source_handle '%s'",
-                                source_handle,
+                            await self.persist_log(
+                                f"Created DataFrame for source_handle '{source_handle}'", "DEBUG"
                             )
                         except Exception as e:
-                            self.logger.warning(
-                                "Failed to convert data to DataFrame for source_handle '%s': %s",
-                                source_handle,
-                                e,
+                            await self.persist_log(
+                                f"Failed to convert data to DataFrame for source_handle '{source_handle}': {e}", "WARNING"
                             )
                 else:
-                    self.logger.warning(
-                        "Invalid edge_key format: %s, expected 'source_node:source_handle->target_handle'",
-                        edge_key,
+                    await self.persist_log(
+                        f"Invalid edge_key format: {edge_key}, expected 'source_node:source_handle->target_handle'", "WARNING"
                     )
             else:
-                self.logger.debug("No signal received for edge: %s", edge_key)
+                await self.persist_log(f"No signal received for edge: {edge_key}", "DEBUG")
         return input_data_dict
 
     def _register_input_handles(self) -> None:

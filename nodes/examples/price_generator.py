@@ -116,7 +116,7 @@ class PriceGenerator(NodeBase):
             "timestamp": datetime.now().timestamp(),
         }
 
-        self.logger.info("生成价格更新: %s 价格: %.2f", self.symbol, self.current_price)
+        await self.persist_log(f"Generated price update: {self.symbol} price: {self.current_price:.2f}", "INFO")
 
         # 发送价格更新信号
         result = await self.send_signal(SignalType.PRICE_UPDATE, payload)

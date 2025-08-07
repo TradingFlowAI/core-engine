@@ -71,9 +71,8 @@ class PriceChangeDetector(NodeBase):
         """
         try:
             await self.set_status(NodeStatus.RUNNING)
-            self.logger.info(
-                "开始监控价格变化，阈值：%s%%，检测到一次显著变化后将结束",
-                self.threshold_percent,
+            await self.persist_log(
+                f"Starting price monitoring, threshold: {self.threshold_percent}%, will end after detecting one significant change", "INFO"
             )
             self.running = True
             self.start_time = asyncio.get_event_loop().time()
@@ -85,7 +84,7 @@ class PriceChangeDetector(NodeBase):
             while self.running:
                 # 检查是否收到终止信号
                 if await self.is_terminated():
-                    self.logger.info("接收到终止信号，停止价格监控")
+                    await self.persist_log("Received termination signal, stopping price monitoring", "INFO")
                     await self.set_status(NodeStatus.TERMINATED)
                     return True
 
@@ -94,7 +93,7 @@ class PriceChangeDetector(NodeBase):
 
                 # 如果检测到显著价格变化，结束执行
                 if change_detected:
-                    self.logger.info("已检测到显著价格变化，完成任务")
+                    await self.persist_log("Significant price change detected, task completed", "INFO")
                     await self.set_status(NodeStatus.COMPLETED)
                     return True
 
@@ -102,9 +101,8 @@ class PriceChangeDetector(NodeBase):
                 current_time = asyncio.get_event_loop().time()
                 elapsed_time = current_time - self.start_time
                 if elapsed_time > self.max_wait_time:
-                    self.logger.info(
-                        "已达到最大等待时间 %.1f 秒，未检测到显著价格变化，结束监控",
-                        self.max_wait_time,
+                    await self.persist_log(
+                        f"Reached maximum wait time {self.max_wait_time:.1f} seconds, no significant price change detected, ending monitoring", "INFO"
                     )
                     await self.set_status(NodeStatus.COMPLETED)
                     return True
@@ -112,7 +110,7 @@ class PriceChangeDetector(NodeBase):
                 # 等待一段时间，同时监听终止事件
                 terminated = await self.wait_for_termination(self.check_interval)
                 if terminated:
-                    self.logger.info("等待期间接收到终止信号，停止价格监控")
+                    await self.persist_log("Received termination signal during wait, stopping price monitoring", "INFO")
                     await self.set_status(NodeStatus.TERMINATED)
                     return True
 
@@ -120,13 +118,13 @@ class PriceChangeDetector(NodeBase):
             return True
 
         except asyncio.CancelledError:
-            self.logger.info("价格监控任务被取消，正在清理...")
+            await self.persist_log("Price monitoring task was cancelled, cleaning up...", "INFO")
             self.running = False
             raise  # 重新抛出异常，让调用者知道任务被取消
 
         except Exception as e:
-            error_msg = f"价格变化检测失败: {str(e)}"
-            self.logger.exception(error_msg)
+            error_msg = f"Price change detection failed: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             self.running = False
             return False
@@ -177,13 +175,13 @@ class PriceChangeDetector(NodeBase):
 
         # 验证数据完整性
         if not current_price or not symbol:
-            self.logger.warning("价格信号缺少必要数据，忽略此信号")
+            await self.persist_log("Price signal missing required data, ignoring this signal", "WARNING")
             return False
 
         # 如果是新的交易对，重置价格比较
         if self.last_symbol and self.last_symbol != symbol:
-            self.logger.info(
-                "检测到交易对变更: %s -> %s，重置价格比较", self.last_symbol, symbol
+            await self.persist_log(
+                f"Trading pair change detected: {self.last_symbol} -> {symbol}, resetting price comparison", "INFO"
             )
             self.last_price = None
 
@@ -193,18 +191,16 @@ class PriceChangeDetector(NodeBase):
         if self.last_price is not None:
             change_percent = ((current_price - self.last_price) / self.last_price) * 100
 
-            self.logger.info(
-                "交易对: %s, 上次价格: %.2f, 当前价格: %.2f, 变化: %.2f%%",
-                symbol,
-                self.last_price,
-                current_price,
-                change_percent,
+            await self.persist_log(
+                f"Trading pair: {symbol}, last price: {self.last_price:.2f}, current price: {current_price:.2f}, change: {change_percent:.2f}%",
+                "INFO"
             )
 
             # 如果价格变化超过阈值，发送警报信号
             if abs(change_percent) >= self.threshold_percent:
-                self.logger.info(
-                    "检测到显著价格变化: %.2f%%，任务将结束", change_percent
+                await self.persist_log(
+                    f"Significant price change detected: {change_percent:.2f}%, task will end",
+                    "INFO"
                 )
 
                 # 构建信号负载
@@ -220,7 +216,7 @@ class PriceChangeDetector(NodeBase):
                 if not await self.send_signal(
                     SignalType.PRICE_CHANGE_ALERT, alert_payload
                 ):
-                    self.logger.error("发送价格变化警报信号失败")
+                    await self.persist_log("Failed to send price change alert signal", "ERROR")
                     return False
 
                 # 更新最近价格
@@ -230,15 +226,15 @@ class PriceChangeDetector(NodeBase):
                 self.significant_change_detected = True
                 return True
         else:
-            self.logger.info("首次接收到 %s 价格: %.2f", symbol, current_price)
+            await self.persist_log(f"First time receiving {symbol} price: {current_price:.2f}", "INFO")
 
         # 更新最近价格
         self.last_price = current_price
         return False
 
     async def stop(self):
-        """停止价格监控"""
-        self.logger.info("停止价格变化检测器")
+        """Stop price monitoring"""
+        await self.persist_log("Stopping price change detector", "INFO")
         self.running = False
         await super().stop()
 

@@ -334,9 +334,13 @@ class FlowScheduler:
                     }
                     logs_data.append(log_dict)
 
+                # Get cycle status information for cycles present in logs
+                cycle_status_info = await self._get_cycle_status_info(flow_id, logs_data)
+
                 return {
                     "flow_id": flow_id,
                     "logs": logs_data,
+                    "cycle_status": cycle_status_info,
                     "pagination": {
                         "total": total_count,
                         "limit": limit,
@@ -409,6 +413,82 @@ class FlowScheduler:
         except Exception as e:
             logger.error("Error retrieving flow execution log detail: %s", str(e))
             raise
+
+    async def _get_cycle_status_info(self, flow_id: str, logs: list = None) -> Dict:
+        """
+        Get cycle status information for a flow from Redis
+        
+        Args:
+            flow_id: Flow identifier
+            logs: Optional list of logs to determine which cycles to fetch
+            
+        Returns:
+            Dict containing cycle status information for relevant cycles
+        """
+        try:
+            cycle_status = {}
+            
+            # Get unique cycles from logs if provided
+            cycles_to_fetch = set()
+            if logs:
+                cycles_to_fetch = set(log.get('cycle', 0) for log in logs)
+            else:
+                # If no logs provided, try to get all available cycles
+                try:
+                    cycle_keys = await self.redis.keys(f"flow:{flow_id}:cycle:*")
+                    for key in cycle_keys:
+                        parts = key.split(':')
+                        if len(parts) >= 4 and parts[4] != 'status':  # Skip non-status keys
+                            continue
+                        if len(parts) >= 4:
+                            try:
+                                cycle_num = int(parts[3])
+                                cycles_to_fetch.add(cycle_num)
+                            except ValueError:
+                                continue
+                except Exception as e:
+                    logger.warning("Could not scan for cycle keys: %s", str(e))
+            
+            # Fetch status for each cycle from Redis
+            for cycle_num in cycles_to_fetch:
+                try:
+                    cycle_key = f"flow:{flow_id}:cycle:{cycle_num}"
+                    cycle_data = await self.redis.hgetall(cycle_key)
+                    
+                    if cycle_data:
+                        cycle_status[cycle_num] = {
+                            'cycle': cycle_num,
+                            'status': cycle_data.get('status', 'unknown'),
+                            'start_time': cycle_data.get('start_time'),
+                            'end_time': cycle_data.get('end_time'),
+                            'flow_id': cycle_data.get('flow_id', flow_id)
+                        }
+                    else:
+                        # If no data found in Redis, set as unknown
+                        cycle_status[cycle_num] = {
+                            'cycle': cycle_num,
+                            'status': 'unknown',
+                            'start_time': None,
+                            'end_time': None,
+                            'flow_id': flow_id
+                        }
+                        
+                except Exception as cycle_error:
+                    logger.warning("Could not fetch cycle %s status: %s", cycle_num, str(cycle_error))
+                    # Set as unknown if we can't fetch the data
+                    cycle_status[cycle_num] = {
+                        'cycle': cycle_num,
+                        'status': 'unknown',
+                        'start_time': None,
+                        'end_time': None,
+                        'flow_id': flow_id
+                    }
+            
+            return cycle_status
+            
+        except Exception as e:
+            logger.error("Error getting cycle status info: %s", str(e))
+            return {}
 
     async def get_flow_cycle_node_logs(
         self,

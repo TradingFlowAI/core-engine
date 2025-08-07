@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import traceback
 from typing import Dict, Optional
 
@@ -21,55 +20,55 @@ BALANCE_HANDLE = "vault_balance"
 @register_node_type(
     "vault_node",
     default_params={
-        "chain": "aptos",  # 支持 "aptos" 或 "flow_evm"
-        "chain_id": None,  # Flow EVM 链ID，如 545 (Flow测试网)
-        "vault_address": None,  # 用户地址，必需参数
+        "chain": "aptos",  # Supports "aptos" or "flow_evm"
+        "chain_id": None,  # Flow EVM chain ID, such as 545 (Flow testnet)
+        "vault_address": None,  # User address, required parameter
     },
 )
 class VaultNode(NodeBase):
     """
-    Vault Node - 查询用户在 TradingFlow Vault 中的持仓信息
+    Vault Node - Query user holdings information in TradingFlow Vault
 
-    这个节点负责查询指定用户在 TradingFlow Vault 系统中的资产持仓情况。
-    支持多链查询，包括 Aptos 和 Flow EVM。
+    This node is responsible for querying the asset holdings of specified users in the TradingFlow Vault system.
+    Supports multi-chain queries, including Aptos and Flow EVM.
 
-    输入参数:
-    - chain: 区块链网络名称（支持 "aptos" 或 "flow_evm"）
-    - chain_id: Flow EVM 链ID（仅 Flow EVM 需要，默认 545）
-    - vault_address: 用户的钱包地址或 vault 地址
+    Input parameters:
+    - chain: Blockchain network name (supports "aptos" or "flow_evm")
+    - chain_id: Flow EVM chain ID (only required for Flow EVM, default 545)
+    - vault_address: User's wallet address or vault address
 
-    输出信号:
-    - VAULT_HOLDINGS: 包含用户完整持仓信息的信号
+    Output signals:
+    - VAULT_HOLDINGS: Signal containing complete user holdings information
 
-    持仓信息包括:
-    - holdings: 持仓代币列表，每个包含代币地址、数量、价值等信息
-    - total_value_usd: 总持仓价值（美元）
-    - timestamp: 查询时间戳
-    - vault_address: 查询的用户地址
+    Holdings information includes:
+    - holdings: List of held tokens, each containing token address, amount, value and other information
+    - total_value_usd: Total holdings value (USD)
+    - timestamp: Query timestamp
+    - vault_address: Queried user address
 
-    示例配置:
+    Example configuration:
     ```python
-    # Aptos 配置
+    # Aptos configuration
     node = VaultNode(
         chain="aptos",
         vault_address="0x6a1a233..."
     )
 
-    # Flow EVM 配置
+    # Flow EVM configuration
     node = VaultNode(
         chain="flow_evm",
-        chain_id=545,  # Flow 测试网
+        chain_id=545,  # Flow testnet
         vault_address="0x1234..."
     )
 
-    # 通过信号接收参数
+    # Receive parameters through signals
     node = VaultNode(
         chain="flow_evm"
-        # chain_id 和 vault_address 将通过信号接收
+        # chain_id and vault_address will be received through signals
     )
     ```
 
-    输出数据格式:
+    Output data format:
     ```python
     {
         "success": True,
@@ -88,7 +87,7 @@ class VaultNode(NodeBase):
         ],
         "total_value_usd": 1234.56,
         "timestamp": "2024-01-01T12:00:00Z",
-        "raw_result": {...}  # 原始查询结果
+        "raw_result": {...}  # Original query result
     }
     ```
     """
@@ -123,21 +122,19 @@ class VaultNode(NodeBase):
 
         # Validate chain
         if self.chain not in ["aptos", "flow_evm"]:
+            # Cannot use await in __init__, validation error will be logged in execute method
             raise ValueError(
                 f"Unsupported chain: {self.chain}. Supported chains: 'aptos', 'flow_evm'"
             )
         
         # Validate chain_id for flow_evm
         if self.chain == "flow_evm" and self.chain_id is None:
-            # 默认使用 Flow 测试网
+            # Get vault information to Flow testnet
             self.chain_id = 545
-            self.logger.warning("No chain_id provided for flow_evm, using default: 545 (Flow Testnet)")
+            # Warning log will be handled in execute method
 
         # Query result
         self.holdings_result = None
-
-        # Logging setup
-        self.logger = logging.getLogger(f"VaultNode.{node_id}")
 
         # Initialize vault service based on chain
         if self.chain == "aptos":
@@ -149,20 +146,18 @@ class VaultNode(NodeBase):
 
     async def query_user_holdings(self, vault_address: str) -> Dict:
         """
-        查询用户持仓信息
+        Query user holdings information
 
         Args:
-            vault_address: 用户地址
+            vault_address: User address
 
         Returns:
-            Dict: 持仓查询结果
+            Dict: Holdings query result
         """
         try:
-            self.logger.info(
-                "Querying holdings for user: %s on chain: %s (chain_id: %s)",
-                vault_address,
-                self.chain,
-                self.chain_id,
+            await self.persist_log(
+                f"Querying holdings for user: {vault_address} on chain: {self.chain} (chain_id: {self.chain_id})",
+                "INFO",
             )
 
             if not self.vault_service:
@@ -185,10 +180,11 @@ class VaultNode(NodeBase):
             else:
                 raise ValueError(f"Unsupported chain: {self.chain}")
 
-            self.logger.info(
-                "Successfully retrieved holdings for user: %s", vault_address
+            await self.persist_log(
+                f"Successfully retrieved {self.chain} vault holdings for address: {vault_address}",
+                "INFO",
             )
-            self.logger.debug("Holdings data: %s", holdings_data)
+            await self.persist_log(f"Holdings data: {holdings_data}", "DEBUG")
 
             return {
                 "success": True,
@@ -200,25 +196,26 @@ class VaultNode(NodeBase):
             }
 
         except Exception as e:
-            error_msg = f"Failed to query holdings for user {vault_address}: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(
+                f"Error querying {self.chain} vault holdings: {str(e)}", "ERROR"
+            )
+            await self.persist_log(traceback.format_exc(), "DEBUG")
 
             return {
                 "success": False,
                 "vault_address": vault_address,
                 "chain": self.chain,
                 "holdings_data": None,
-                "message": error_msg,
+                "message": f"Error querying {self.chain} vault holdings: {str(e)}",
                 "error": str(e),
             }
 
     async def prepare_holdings_output(self) -> Dict:
         """
-        准备持仓输出数据
+        Prepare holdings output data
 
         Returns:
-            Dict: 格式化的持仓数据
+            Dict: Formatted holdings data
         """
         if not self.holdings_result:
             return {
@@ -260,25 +257,25 @@ class VaultNode(NodeBase):
             try:
                 price_usd = get_aptos_token_price_usd(token_address)
                 if price_usd is None:
-                    self.logger.warning(
-                        f"Failed to get price for token: {token_address}"
+                    await self.persist_log(
+                        f"Failed to get price for token: {token_address}", "WARNING"
                     )
                     price_usd = 0.0
             except Exception as e:
-                self.logger.error(
-                    f"Error getting price for token {token_address}: {str(e)}"
+                await self.persist_log(
+                    f"Error getting price for token {token_address}: {str(e)}", "ERROR"
                 )
                 price_usd = 0.0
 
-            # 计算价值
+            # Calculate value
             if amount and decimals is not None and price_usd > 0:
                 try:
-                    # 将原始数量转换为人类可读格式
+                    # Convert raw amount to human-readable format
                     amount_decimal = float(amount) / (10**decimals)
                     value_usd = amount_decimal * price_usd
                 except (ValueError, TypeError, ZeroDivisionError) as e:
-                    self.logger.error(
-                        f"Error calculating value for token {token_address}: {str(e)}"
+                    await self.persist_log(
+                        f"Error calculating value for token {token_address}: {str(e)}", "ERROR"
                     )
                     amount_decimal = 0.0
                     value_usd = 0.0
@@ -286,7 +283,7 @@ class VaultNode(NodeBase):
                 amount_decimal = 0.0
                 value_usd = 0.0
 
-            # 格式化单个持仓数据
+            # Format individual holdings data
             formatted_holding = {
                 "token_address": token_address,
                 "amount": amount,
@@ -363,17 +360,16 @@ class VaultNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
-            self.logger.info(
-                "Starting vault node execution: chain=%s, vault_address=%s",
-                self.chain,
-                self.vault_address,
+            await self.persist_log(
+                f"Starting vault node execution: chain={self.chain}, vault_address={self.vault_address}",
+                "INFO",
             )
             await self.set_status(NodeStatus.RUNNING)
 
             # 验证必需参数
             if not self.vault_address:
                 error_msg = "vault_address is required but not provided"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
@@ -382,17 +378,16 @@ class VaultNode(NodeBase):
 
             # 准备输出数据 (现在是async方法)
             holdings_output = await self.prepare_holdings_output()
-            self.logger.info(
-                "Holdings query result: success=%s, result=%s",
-                holdings_output.get("success"),
-                holdings_output,
+            await self.persist_log(
+                f"Holdings query result: success={holdings_output.get('success')}, result={holdings_output}",
+                "INFO",
             )
 
             # 发送持仓信息信号给下游节点
             if not await self.send_signal(
                 BALANCE_HANDLE, SignalType.VAULT_INFO, payload=holdings_output
             ):
-                self.logger.error("Failed to send vault holdings signal")
+                await self.persist_log("Failed to send vault holdings signal", "ERROR")
                 await self.set_status(
                     NodeStatus.FAILED, "Failed to send vault holdings signal"
                 )
@@ -400,24 +395,21 @@ class VaultNode(NodeBase):
 
             # 完成节点执行
             await self.set_status(NodeStatus.COMPLETED)
-            self.logger.info(
-                "Vault node execution completed: user=%s, holdings_count=%d, total_value_usd=%.2f",
-                self.vault_address,
-                len(holdings_output.get("holdings", [])),
-                holdings_output.get("total_value_usd", 0.0),
+            await self.persist_log(
+                f"Vault node execution completed: user={self.vault_address}, holdings_count={len(holdings_output.get('holdings', []))}, total_value_usd={holdings_output.get('total_value_usd', 0.0)}",
+                "INFO",
             )
             return True
 
         except asyncio.CancelledError:
-            self.logger.info("Vault node execution cancelled")
+            await self.persist_log("Vault node execution cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Execution cancelled")
             return False
 
         except Exception as e:
-            error_message = f"Vault node execution error: {str(e)}"
-            self.logger.error("Vault node execution error: %s", str(e))
-            self.logger.error(traceback.format_exc())
-            await self.set_status(NodeStatus.FAILED, error_message)
+            await self.persist_log(f"Vault node execution error: {str(e)}", "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
+            await self.set_status(NodeStatus.FAILED, f"Vault node execution error: {str(e)}")
             return False
 
     def _register_input_handles(self) -> None:

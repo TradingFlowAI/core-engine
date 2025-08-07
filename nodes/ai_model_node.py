@@ -1,6 +1,6 @@
 import asyncio
 import json
-import logging
+# Removed logging import - using persist_log from NodeBase
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -13,14 +13,14 @@ from tradingflow.station.common.signal_formats import SignalFormats
 from tradingflow.station.common.signal_types import Signal, SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
-# 定义输入输出处理器名称
-# 输入句柄
-MODEL_INPUT_HANDLE = "model"  # 模型输入
-PROMPT_INPUT_HANDLE = "prompt"  # 提示词输入
-PARAMETERS_INPUT_HANDLE = "parameters"  # 参数输入
+# Define input and output handle names
+# Input handles
+MODEL_INPUT_HANDLE = "model"  # Model input
+PROMPT_INPUT_HANDLE = "prompt"  # Prompt input
+PARAMETERS_INPUT_HANDLE = "parameters"  # Parameters input
 
-# 输出句柄
-AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI响应输出
+# Output handles
+AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI response output
 
 
 @register_node_type(
@@ -31,22 +31,21 @@ AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI响应输出
         "system_prompt": "You are a helpful assistant.",
         "prompt": "Please analyze the following information:",
         "max_tokens": 1000,
-        "auto_format_output": True,  # 是否自动根据输出连接生成JSON格式要求
-    },
-)
+        "auto_format_output": True,  # Whether to automatically generate JSON format requirements based on output connections
+    },)
 class AIModelNode(NodeBase):
     """
-    AI大模型节点 - 接收各类信号作为上下文，调用大模型获取响应
-    自动根据输出连接情况生成JSON格式要求
+    AI Large Model Node - Receives various signals as context, calls large model to get response
+    Automatically generates JSON format requirements based on output connection status
 
-    输入参数:
-    - model: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
-    - prompt: 主提示词，指导 AI 如何处理输入数据
-    - parameters: 模型参数，如 temperature, max_tokens 等
-    - auto_format_output: 是否自动根据输出连接生成JSON格式要求
+    Input parameters:
+    - model: Large model name, such as "gpt-3.5-turbo", "gpt-4", etc.
+    - prompt: Main prompt, guiding AI on how to process input data
+    - parameters: Model parameters, such as temperature, max_tokens, etc.
+    - auto_format_output: Whether to automatically generate JSON format requirements based on output connections
 
-    输出信号:
-    - ai_response: AI响应数据，根据输出连接自动调整格式
+    Output signals:
+    - ai_response: AI response data, automatically adjusted format based on output connections
     """
 
     def __init__(
@@ -69,22 +68,22 @@ class AIModelNode(NodeBase):
         **kwargs,
     ):
         """
-        初始化AI大模型节点
+        Initialize AI Large Model Node
 
         Args:
-            node_id: 节点唯一标识符
-            name: 节点名称
-            model_name: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
-            temperature: 温度参数，控制随机性（0.0-2.0）
-            system_prompt: 系统提示词，设置AI的角色和行为
-            prompt: 主提示词，在上下文前添加的指导语
-            api_key: API密钥
-            api_endpoint: API端点URL
-            max_tokens: 最大返回token数
-            output_signal_type: 输出信号类型
-            input_edges: 输入边缘
-            output_edges: 输出边缘
-            **kwargs: 传递给基类的其他参数
+            node_id: Node unique identifier
+            name: Node name
+            model_name: Large model name, such as "gpt-3.5-turbo", "gpt-4", etc.
+            temperature: Temperature parameter, controls randomness (0.0-2.0)
+            system_prompt: System prompt, sets AI's role and behavior
+            prompt: Main prompt, guidance added before context
+            api_key: API key
+            api_endpoint: API endpoint URL
+            max_tokens: Maximum return token count
+            output_signal_type: Output signal type
+            input_edges: Input edges
+            output_edges: Output edges
+            **kwargs: Other parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -97,7 +96,7 @@ class AIModelNode(NodeBase):
             state_store=state_store,
         )
 
-        # 保存参数
+        # Save parameters
         self.model_name = model_name or "deepseek-r1-250120"
         self.system_prompt = system_prompt
         self.prompt = prompt
@@ -105,19 +104,18 @@ class AIModelNode(NodeBase):
         self.api_endpoint = CONFIG["AI_MODEL_NODE_ENDPOINT"]
         self.auto_format_output = auto_format_output
 
-        # 处理模型参数
+        # Process model parameters
         self.parameters = parameters or {}
         self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
         self.max_tokens = self.parameters.get("max_tokens", max(1, min(max_tokens, 4000)))
 
-        # 结果
+        # Results
         self.ai_response = None
 
-        # 日志设置
-        self.logger = logging.getLogger(f"AIModel.{node_id}")
+        # Logging will be handled by persist_log method
 
     def _register_input_handles(self) -> None:
-        """注册输入句柄"""
+        """Register input handles"""
         self.register_input_handle(
             name=MODEL_INPUT_HANDLE,
             data_type=str,
@@ -140,7 +138,7 @@ class AIModelNode(NodeBase):
             auto_update_attr="parameters",
         )
 
-    def _analyze_output_format_requirements(self) -> Dict[str, Any]:
+    async def _analyze_output_format_requirements(self) -> Dict[str, Any]:
         """
         分析输出句柄的连接情况，确定需要输出的JSON格式
 
@@ -151,27 +149,25 @@ class AIModelNode(NodeBase):
         field_descriptions = {}
         field_examples = {}
 
-        self.logger.debug(f"Analyzing {len(self._output_edges)} output edges for format requirements")
+        await self.persist_log(f"Analyzing {len(self._output_edges)} output edges for format requirements", "DEBUG")
 
-        # 遍历所有输出边，分析目标节点需要的输入格式
-        for edge in self._output_edges:
+        # Iterate over all output edges to analyze target node input formats
+        for i, edge in enumerate(self._output_edges):
             target_handle = edge.target_node_handle
             target_node = edge.target_node
             source_handle = edge.source_node_handle
 
-            self.logger.debug(
-                f"Output edge: {source_handle} -> {target_node}.{target_handle}"
+            await self.persist_log(
+                f"Edge {i}: source={edge.get('source_node')} -> target={edge.get('target_node')}, "
+                f"source_handle={edge.get('source_handle')}, target_handle={edge.get('target_handle')}", "DEBUG"
             )
 
-            # 将目标句柄名称作为必需的JSON字段
-            required_fields.add(target_handle)
-
-            # 根据常见句柄名称添加描述和示例
+            # Add descriptions and examples based on common handle names
             if "chain" in target_handle.lower():
-                field_descriptions[target_handle] = "区块链网络标识符"
+                field_descriptions[target_handle] = "Blockchain network identifier"
                 field_examples[target_handle] = "aptos"
             elif "amount" in target_handle.lower():
-                field_descriptions[target_handle] = "交易金额，数值类型"
+                field_descriptions[target_handle] = "Transaction amount, numeric type"
                 field_examples[target_handle] = 100.0
             elif "token" in target_handle.lower():
                 if "from" in target_handle.lower():
@@ -228,10 +224,10 @@ class AIModelNode(NodeBase):
                 json_str = json_matches[0].strip()
                 try:
                     structured_data = json.loads(json_str)
-                    self.logger.info(f"Extracted JSON from code block: {json_str[:100]}...")
+                    await self.persist_log(f"Extracted JSON from code block: {json_str[:100]}...", "INFO")
                     return structured_data
                 except json.JSONDecodeError as e:
-                    self.logger.warning(f"Failed to parse JSON from code block: {e}")
+                    await self.persist_log(f"Failed to parse JSON from code block: {e}", "WARNING")
 
             # 如果没有找到代码块，尝试直接查找JSON对象
             json_object_pattern = r'{[^{}]*(?:{[^{}]*}[^{}]*)*}'
@@ -240,7 +236,7 @@ class AIModelNode(NodeBase):
             for json_obj in json_objects:
                 try:
                     structured_data = json.loads(json_obj)
-                    self.logger.info(f"Extracted JSON object: {json_obj[:100]}...")
+                    await self.persist_log(f"Extracted JSON object: {json_obj[:100]}...", "INFO")
                     return structured_data
                 except json.JSONDecodeError:
                     continue
@@ -265,16 +261,16 @@ class AIModelNode(NodeBase):
                             extracted_data[field] = value
 
                 if extracted_data:
-                    self.logger.info(f"Extracted data from text patterns: {extracted_data}")
+                    await self.persist_log(f"Extracted data from text patterns: {extracted_data}", "INFO")
                     return extracted_data
 
             return None
 
         except Exception as e:
-            self.logger.error(f"Error in _extract_structured_data_from_response: {str(e)}")
+            await self.persist_log(f"Error in _extract_structured_data_from_response: {str(e)}", "ERROR")
             return None
 
-    def _signal_to_text(self, signal: Signal) -> str:
+    async def _signal_to_text(self, signal: Signal) -> str:
         """
         将信号转换为文本上下文
 
@@ -331,10 +327,10 @@ class AIModelNode(NodeBase):
 
             return text
         except Exception as e:
-            self.logger.error(f"Error converting signal to text: {str(e)}")
+            await self.persist_log(f"Error converting signal to text: {str(e)}", "ERROR")
             return f"[Error parsing signal: {str(e)}]"
 
-    def _prepare_context(self) -> str:
+    async def _prepare_context(self) -> str:
         """
         准备发送给AI模型的完整上下文
 
@@ -373,7 +369,7 @@ class AIModelNode(NodeBase):
         if self._input_signals:
             for i, (handle, signal) in enumerate(self._input_signals.items(), 1):
                 if signal is not None:
-                    signal_text = self._signal_to_text(signal)
+                    signal_text = await self._signal_to_text(signal)
                     context += (
                         f"\n--- Input {i} (Handle: {handle}) ---\n{signal_text}\n"
                     )
@@ -459,7 +455,7 @@ class AIModelNode(NodeBase):
             }
 
         except Exception as e:
-            self.logger.error(f"Error extracting structured data: {str(e)}")
+            await self.persist_log(f"Error extracting structured data: {str(e)}", "ERROR")
             return {"response": ai_response, "error": str(e)}
 
     async def call_ai_model(self, context: str) -> Optional[str]:
@@ -473,7 +469,7 @@ class AIModelNode(NodeBase):
             Optional[str]: AI响应文本，失败则返回None
         """
         if not self.api_key:
-            self.logger.error("API key not provided")
+            await self.persist_log("API key not provided", "ERROR")
             return None
 
         try:
@@ -496,7 +492,7 @@ class AIModelNode(NodeBase):
                 "max_tokens": self.max_tokens,
             }
 
-            self.logger.info(f"Calling AI model: {self.model_name}")
+            await self.persist_log(f"Calling AI model: {self.model_name}", "INFO")
 
             # 发送请求
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -511,22 +507,22 @@ class AIModelNode(NodeBase):
                 # 提取响应文本
                 if "choices" in response_data and len(response_data["choices"]) > 0:
                     ai_text = response_data["choices"][0]["message"]["content"]
-                    self.logger.info("AI response received successfully")
+                    await self.persist_log("AI response received successfully", "INFO")
                     return ai_text
                 else:
-                    self.logger.error(f"Invalid response format: {response_data}")
+                    await self.persist_log(f"Invalid response format: {response_data}", "ERROR")
                     return None
 
         except httpx.HTTPStatusError as e:
-            self.logger.error(
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
+            await self.persist_log(
+                f"HTTP error: {e.response.status_code} - {e.response.text}", "ERROR"
             )
             return None
         except httpx.RequestError as e:
-            self.logger.error(f"Request error: {str(e)}")
+            await self.persist_log(f"Request error: {str(e)}", "ERROR")
             return None
         except Exception as e:
-            self.logger.error(f"Error calling AI model: {str(e)}")
+            await self.persist_log(f"Error calling AI model: {str(e)}", "ERROR")
             return None
 
     async def execute(self) -> bool:
@@ -537,18 +533,18 @@ class AIModelNode(NodeBase):
             bool: 执行是否成功
         """
         try:
-            self.logger.info("Starting AI model node execution")
+            await self.persist_log("Starting AI model node execution", "INFO")
             await self.set_status(NodeStatus.RUNNING)
 
             # 准备上下文
-            context = self._prepare_context()
+            context = await self._prepare_context()
             input_signals_count = sum(
                 1 for signal in self._input_signals.values() if signal is not None
             )
-            self.logger.info(f"Prepared context with {input_signals_count} signals")
+            await self.persist_log(f"Prepared context with {input_signals_count} signals", "INFO")
 
             # 调用AI模型
-            self.logger.info(f"Calling AI model: {self.model_name}")
+            await self.persist_log(f"Calling AI model: {self.model_name}", "INFO")
             ai_response = await self.call_ai_model(context)
 
             if not ai_response:
@@ -558,7 +554,7 @@ class AIModelNode(NodeBase):
                 return False
 
             self.ai_response = ai_response
-            self.logger.info(f"Got AI response (length: {len(ai_response)})")
+            await self.persist_log(f"Got AI response (length: {len(ai_response)})", "INFO")
 
             # 构建 AI 响应 payload
             payload = {
@@ -580,11 +576,11 @@ class AIModelNode(NodeBase):
                     if structured_data:
                         # 将结构化数据添加到 payload 中
                         payload.update(structured_data)
-                        self.logger.info(f"Successfully extracted structured data: {list(structured_data.keys())}")
+                        await self.persist_log(f"Successfully extracted structured data: {list(structured_data.keys())}", "INFO")
                     else:
-                        self.logger.warning("Failed to extract structured data from AI response")
+                        await self.persist_log("Failed to extract structured data from AI response", "WARNING")
                 except Exception as e:
-                    self.logger.warning(f"Error extracting structured data: {str(e)}")
+                    await self.persist_log(f"Error extracting structured data: {str(e)}", "WARNING")
 
             # 发送AI响应信号 - 使用默认输出handle
             # output_handle = next(
@@ -609,26 +605,26 @@ class AIModelNode(NodeBase):
             if await self.send_stop_execution_signal(
                 reason=f"AI model node {self.node_id} decided not to trade",
             ):
-                self.logger.info(
-                    f"Successfully sent {self.output_signal_type} signal via handle {output_handle}"
+                await self.persist_log(
+                    f"Successfully sent {self.output_signal_type} signal via handle {output_handle}", "INFO"
                 )
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
                 error_message = f"Failed to send {self.output_signal_type} signal"
-                self.logger.error(error_message)
+                await self.persist_log(error_message, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_message)
                 return False
 
         except asyncio.CancelledError:
             # 任务被取消
-            self.logger.info("AI model node execution cancelled")
+            await self.persist_log("AI model node execution cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
             error_message = f"Error executing AIModelNode: {str(e)}"
-            self.logger.error(error_message)
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(error_message, "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
             await self.set_status(NodeStatus.FAILED, error_message)
             return False
 
@@ -644,7 +640,7 @@ class AIModelNode(NodeBase):
         """
         # 更新系统提示词
         self.system_prompt = signal.payload.get("system_prompt", self.system_prompt)
-        self.logger.info("Updated system prompt: %s", self.system_prompt)
+        await self.persist_log(f"Updated system prompt: {self.system_prompt}", "INFO")
         return True
 
     async def _on_signal_received_prompt_handle(self, signal: Signal) -> bool:
@@ -659,7 +655,7 @@ class AIModelNode(NodeBase):
         """
         # 更新主提示词
         self.prompt = signal.payload.get("prompt", self.prompt)
-        self.logger.info("Updated prompt: %s", self.prompt)
+        await self.persist_log(f"Updated prompt: {self.prompt}", "INFO")
         return True
 
     async def _get_vault_portfolio(self) -> Dict[str, Any]:

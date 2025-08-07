@@ -1,5 +1,5 @@
 import asyncio
-import logging
+# Removed logging import - using persist_log from NodeBase
 import traceback
 from decimal import Decimal, getcontext
 from typing import Dict, Optional
@@ -30,7 +30,7 @@ getcontext().prec = 50
 
 
 def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, slippage_tolerance: float) -> str:
-    """计算 Aptos sqrt_price_limit (Q64.64 格式)"""
+    """Calculate Aptos sqrt_price_limit (Q64.64 format)"""
     try:
         price_ratio = Decimal(str(output_price)) / Decimal(str(input_price))
         slippage_factor = Decimal(str(slippage_tolerance)) / Decimal("100")
@@ -40,7 +40,7 @@ def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, s
         sqrt_price_limit_q64_64 = int(sqrt_price_ratio * q64_64_multiplier)
         return str(sqrt_price_limit_q64_64)
     except Exception as e:
-        raise ValueError(f"计算 sqrt_price_limit 失败: {str(e)}")
+        raise ValueError(f"Failed to calculate sqrt_price_limit: {str(e)}")
 
 
 @register_node_type(
@@ -125,17 +125,15 @@ class SwapNode(NodeBase):
         self.output_token_decimals = None
         self.tx_result = None
 
-        self.logger = logging.getLogger(f"SwapNode.{node_id}")
-
         # Initialize vault service
         if self.chain == "aptos":
             self.vault_service = AptosVaultService.get_instance()
         elif self.chain == "flow_evm":
             self.vault_service = FlowEvmVaultService.get_instance(545)  # Flow Testnet
         
-        self.logger.info(f"Initialized SwapNode for chain: {self.chain}")
+        # Initialization log will be handled in execute method
 
-    def _resolve_token_addresses(self) -> None:
+    async def _resolve_token_addresses(self) -> None:
         """Resolve token addresses from symbols based on chain"""
         if not self.from_token or not self.to_token:
             raise ValueError("Both from_token and to_token must be provided")
@@ -159,14 +157,14 @@ class SwapNode(NodeBase):
             
         elif self.chain == "flow_evm":
             # For Flow EVM, use symbols as addresses (placeholder)
-            self.logger.warning("Flow EVM token symbol resolution not implemented, using symbols as addresses")
+            await self.persist_log("Flow EVM token symbol resolution not implemented, using symbols as addresses", "WARNING")
             self.input_token_address = self.from_token
             self.output_token_address = self.to_token
             self.input_token_decimals = 18  # Default for EVM
             self.output_token_decimals = 18
 
-        self.logger.info(
-            f"Resolved tokens: {self.from_token}={self.input_token_address}, {self.to_token}={self.output_token_address}"
+        await self.persist_log(
+            f"Resolved tokens: {self.from_token}({self.input_token_address}) -> {self.to_token}({self.output_token_address})", "INFO"
         )
 
     async def get_token_balance(self, token_address: str) -> Decimal:
@@ -178,7 +176,7 @@ class SwapNode(NodeBase):
             for holding in holdings:
                 if holding.get("token_address", "").lower() == token_address.lower():
                     amount_raw_str = holding.get("amount", "0")
-                    self.logger.info(f"Found Aptos balance: {token_address}={amount_raw_str}")
+                    await self.persist_log(f"Found Aptos balance: {token_address}={amount_raw_str}", "INFO")
                     return Decimal(amount_raw_str)
 
             raise ValueError(f"Token {token_address} not found in Aptos holdings")
@@ -186,7 +184,7 @@ class SwapNode(NodeBase):
         elif self.chain == "flow_evm":
             balance_data = await self.vault_service.get_token_balance(token_address, self.vault_address)
             balance_raw = balance_data.get("balance", "0")
-            self.logger.info(f"Found Flow EVM balance: {token_address}={balance_raw}")
+            await self.persist_log(f"Found Flow EVM balance: {token_address}={balance_raw}", "INFO")
             return Decimal(balance_raw)
 
     async def get_final_amount_in(self) -> int:
@@ -194,13 +192,13 @@ class SwapNode(NodeBase):
         if self.amount_in_human_readable is not None and self.amount_in_human_readable > 0:
             amount_decimal = Decimal(str(self.amount_in_human_readable))
             amount_wei = int(amount_decimal * Decimal(10**self.input_token_decimals))
-            self.logger.info(f"Using human readable: {self.amount_in_human_readable} -> {amount_wei}")
+            await self.persist_log(f"Using human readable: {self.amount_in_human_readable} -> {amount_wei}", "INFO")
             return amount_wei
 
         if self.amount_in_percentage is not None:
             balance_raw = await self.get_token_balance(self.input_token_address)
             calculated_amount = int(balance_raw * Decimal(self.amount_in_percentage) / Decimal(100))
-            self.logger.info(f"Using percentage: {self.amount_in_percentage}% -> {calculated_amount}")
+            await self.persist_log(f"Using percentage: {self.amount_in_percentage}% -> {calculated_amount}", "INFO")
             return calculated_amount
 
         raise ValueError("No valid amount specified")
@@ -226,7 +224,7 @@ class SwapNode(NodeBase):
         # 计算 sqrt_price_limit
         sqrt_price_limit = calculate_sqrt_price_limit_q64_64(input_price, output_price, slippage)
 
-        self.logger.info(f"Aptos estimation: output={output_amount_raw}, sqrt_limit={sqrt_price_limit}")
+        await self.persist_log(f"Aptos estimation: output={output_amount_raw}, sqrt_limit={sqrt_price_limit}", "INFO")
         return output_amount_raw, sqrt_price_limit
 
     async def get_estimated_min_output_amount_flow_evm(self, amount_in: int, slippage: float) -> int:
@@ -250,14 +248,14 @@ class SwapNode(NodeBase):
         output_amount_with_slippage = output_amount_decimal * slippage_factor
         output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
 
-        self.logger.info(f"Flow EVM estimation: output={output_amount_raw}")
+        await self.persist_log(f"Flow EVM estimation: output={output_amount_raw}", "INFO")
         return output_amount_raw
 
     async def execute_swap(self) -> bool:
         """Execute swap transaction based on chain"""
         try:
             # Resolve token addresses
-            self._resolve_token_addresses()
+            await self._resolve_token_addresses()
             
             # Get final amount
             final_amount_in = await self.get_final_amount_in()
@@ -295,15 +293,15 @@ class SwapNode(NodeBase):
             
             if not tx_result.get("success", False):
                 error_msg = tx_result.get("message", "Unknown error")
-                self.logger.error(f"Transaction failed: {error_msg}")
+                await self.persist_log(f"Transaction failed: {error_msg}", "ERROR")
                 await self.set_status(NodeStatus.FAILED, f"Transaction failed: {error_msg}")
                 return False
 
             return True
 
         except Exception as e:
-            self.logger.error(f"Error executing swap: {str(e)}")
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(f"Error executing swap: {str(e)}", "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
             await self.set_status(NodeStatus.FAILED, f"Error executing swap: {str(e)}")
             self.tx_result = {"success": False, "message": str(e)}
             return False
@@ -356,8 +354,8 @@ class SwapNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
-            self.logger.info(
-                f"Starting SwapNode: chain={self.chain}, {self.from_token}->{self.to_token}, vault={self.vault_address}"
+            await self.persist_log(
+                f"Starting SwapNode: chain={self.chain}, {self.from_token}->{self.to_token}, vault={self.vault_address}", "INFO"
             )
             await self.set_status(NodeStatus.RUNNING)
 
@@ -367,25 +365,25 @@ class SwapNode(NodeBase):
 
             # Prepare and send receipt
             trade_receipt = self.prepare_trade_receipt()
-            self.logger.info(f"Transaction receipt: {trade_receipt}")
+            await self.persist_log(f"Transaction receipt: {trade_receipt}", "INFO")
 
             if not await self.send_signal(TX_RECEIPT_HANDLE, SignalType.DEX_TRADE_RECEIPT, payload=trade_receipt):
-                self.logger.error("Failed to send receipt signal")
+                await self.persist_log("Failed to send receipt signal", "ERROR")
                 await self.set_status(NodeStatus.FAILED, "Failed to send receipt signal")
                 return False
 
             await self.set_status(NodeStatus.COMPLETED)
-            self.logger.info(f"SwapNode completed: tx_hash={trade_receipt.get('tx_hash')}")
+            await self.persist_log(f"SwapNode completed: tx_hash={trade_receipt.get('tx_hash')}", "INFO")
             return True
 
         except asyncio.CancelledError:
-            self.logger.info("SwapNode cancelled")
+            await self.persist_log("SwapNode cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Execution cancelled")
             return False
         except Exception as e:
             error_message = f"SwapNode error: {str(e)}"
-            self.logger.error(error_message)
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(error_message, "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
             await self.set_status(NodeStatus.FAILED, error_message)
             return False
 
@@ -505,7 +503,7 @@ class BuyNode(SwapNode):
         self.limited_price = kwargs.get('limited_price')
         
         # 重新设置日志名称
-        self.logger = logging.getLogger(f"BuyNode.{self.node_id}")
+        # Logger removed - using persist_log from NodeBase
         
     def _register_input_handles(self) -> None:
         """注册买入节点特化的输入句柄"""
@@ -575,13 +573,13 @@ class BuyNode(SwapNode):
         
     async def _on_buy_token_received(self, buy_token: str) -> None:
         """处理买入代币更新"""
-        self.logger.info(f"Received buy token: {buy_token}")
+        await self.persist_log(f"Received buy token: {buy_token}", "INFO")
         self.buy_token = buy_token
         self.to_token = buy_token
         
     async def _on_base_token_received(self, base_token: str) -> None:
-        """处理基础代币更新"""
-        self.logger.info(f"Received base token: {base_token}")
+        """Handle base token update"""
+        await self.persist_log(f"Received base token: {base_token}", "INFO")
         self.base_token = base_token
         self.from_token = base_token
 
@@ -646,8 +644,7 @@ class SellNode(SwapNode):
         self.order_type = kwargs.get('order_type', 'market')
         self.limited_price = kwargs.get('limited_price')
         
-        # 重新设置日志名称
-        self.logger = logging.getLogger(f"SellNode.{self.node_id}")
+        # Logger removed - using persist_log from NodeBase
         
     def _register_input_handles(self) -> None:
         """注册卖出节点特化的输入句柄"""
@@ -716,13 +713,13 @@ class SellNode(SwapNode):
         )
         
     async def _on_sell_token_received(self, sell_token: str) -> None:
-        """处理卖出代币更新"""
-        self.logger.info(f"Received sell token: {sell_token}")
+        """Handle sell token update"""
+        await self.persist_log(f"Received sell token: {sell_token}", "INFO")
         self.sell_token = sell_token
         self.from_token = sell_token
         
     async def _on_base_token_received(self, base_token: str) -> None:
-        """处理基础代币更新"""
-        self.logger.info(f"Received base token: {base_token}")
+        """Handle base token update"""
+        await self.persist_log(f"Received base token: {base_token}", "INFO")
         self.base_token = base_token
         self.to_token = base_token

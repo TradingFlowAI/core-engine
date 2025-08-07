@@ -1,5 +1,5 @@
 import asyncio
-import logging
+# Removed logging import - using persist_log from NodeBase
 import re
 import traceback
 import time
@@ -116,8 +116,7 @@ class XListenerNode(NodeBase):
         self.advanced_search_url = "https://api.twitterapi.io/twitter/tweet/advanced_search"
         self.headers = {"X-API-Key": self.api_key}
 
-        # 日志设置
-        self.logger = logging.getLogger(f"XListenerNode.{node_id}")
+        # Logger removed - using persist_log from NodeBase
 
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
@@ -136,12 +135,12 @@ class XListenerNode(NodeBase):
             auto_update_attr="keywords",
         )
 
-    def _build_search_query(self) -> str:
+    async def _build_search_query(self) -> str:
         """
-        构建高级搜索查询字符串
+        Build advanced search query string
 
         Returns:
-            str: 搜索查询字符串
+            str: Search query string
         """
         query_parts = []
 
@@ -160,7 +159,7 @@ class XListenerNode(NodeBase):
         if self.account and self.search_mode == "advanced_search":
             if is_user_id(self.account):
                 # 如果是用户ID，需要转换为用户名或使用其他方式
-                self.logger.warning(f"高级搜索不支持用户ID，跳过用户过滤: {self.account}")
+                await self.persist_log(f"Advanced search does not support user ID, skipping user filter: {self.account}", "WARNING")
             else:
                 query_parts.append(f"from:{self.account}")
 
@@ -170,15 +169,15 @@ class XListenerNode(NodeBase):
 
         return ' '.join(query_parts)
 
-    def _filter_tweets_by_keywords(self, tweets: List[Dict]) -> List[Dict]:
+    async def _filter_tweets_by_keywords(self, tweets: List[Dict]) -> List[Dict]:
         """
-        根据关键词过滤推文
+        Filter tweets by keywords
 
         Args:
-            tweets: 推文列表
+            tweets: List of tweets
 
         Returns:
-            List[Dict]: 过滤后的推文列表
+            List[Dict]: Filtered list of tweets
         """
         if not self.keywords or not tweets:
             return tweets
@@ -194,7 +193,7 @@ class XListenerNode(NodeBase):
             if any(keyword in tweet_text for keyword in keywords_list):
                 filtered_tweets.append(tweet)
 
-        self.logger.info(f"关键词过滤: {len(tweets)} -> {len(filtered_tweets)} 条推文")
+        await self.persist_log(f"Keyword filtering: {len(tweets)} -> {len(filtered_tweets)} tweets", "INFO")
         return filtered_tweets
 
     async def fetch_tweets_advanced_search(self, cursor="", max_pages=5) -> Dict[str, Any]:
@@ -208,8 +207,8 @@ class XListenerNode(NodeBase):
         Returns:
             Dict[str, Any]: 包含推文和用户信息的字典
         """
-        query = self._build_search_query()
-        self.logger.info(f"使用高级搜索查询: {query}")
+        query = await self._build_search_query()
+        await self.persist_log(f"Using advanced search query: {query}", "INFO")
 
         all_tweets = []
         current_page = 0
@@ -235,8 +234,8 @@ class XListenerNode(NodeBase):
 
                 # 检查响应状态
                 if response.status_code != 200:
-                    error_msg = f"高级搜索API请求失败: {response.status_code} - {response.text}"
-                    self.logger.error(error_msg)
+                    error_msg = f"Advanced search API request failed: {response.status_code} - {response.text}"
+                    await self.persist_log(error_msg, "ERROR")
                     return {"error": error_msg, "tweets": all_tweets}
 
                 # 解析响应
@@ -273,9 +272,9 @@ class XListenerNode(NodeBase):
             }
 
         except Exception as e:
-            error_msg = f"高级搜索时出错: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            error_msg = f"Advanced search execution error: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             return {"error": error_msg, "tweets": all_tweets}
 
     async def fetch_tweets(self, account:str = "", cursor="", max_pages=5) -> Dict[str, Any]:
@@ -344,9 +343,9 @@ class XListenerNode(NodeBase):
                 data = response_data.get("data", {})
                 tweets = data.get("tweets", [])
 
-                # 对推文进行关键词过滤
+                # Filter tweets by keywords
                 if self.keywords:
-                    tweets = self._filter_tweets_by_keywords(tweets)
+                    tweets = await self._filter_tweets_by_keywords(tweets)
 
                 all_tweets.extend(tweets)
 
@@ -400,15 +399,15 @@ class XListenerNode(NodeBase):
 
             # 根据搜索模式检查参数
             if self.search_mode == "user_tweets":
-                if not self.account:
-                    error_msg = "用户推文模式下必须提供account参数"
-                    self.logger.error(error_msg)
+                if not account:
+                    error_msg = "Account parameter is required when fetching user tweets"
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
             elif self.search_mode == "advanced_search":
                 if not self.keywords and not self.account:
-                    error_msg = "高级搜索模式下必须提供关键词或用户名"
-                    self.logger.error(error_msg)
+                    error_msg = "Keywords or account parameter is required for advanced search"
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
@@ -440,23 +439,23 @@ class XListenerNode(NodeBase):
             }
 
             if await self.send_signal(LATEST_TWEETS_OUTPUT_HANDLE, SignalType.DATASET, payload=tweets_data):
-                self.logger.info(f"成功发送 {len(result['tweets'])} 条推文数据")
+                await self.persist_log(f"Successfully sent {len(result['tweets'])} tweet data records", "INFO")
             else:
-                self.logger.warning("发送推文数据失败")
+                await self.persist_log("Failed to send tweet data", "WARNING")
 
-            # 设置完成状态
+            # Set completion status
             execution_time = time.time() - start_time
-            self.logger.info(f"XListenerNode执行完成，耗时: {execution_time:.2f}秒")
+            await self.persist_log(f"XListenerNode execution completed, time taken: {execution_time:.2f} seconds", "INFO")
             await self.set_status(NodeStatus.COMPLETED)
             return True
 
         except asyncio.CancelledError:
-            # 任务被取消
-            await self.set_status(NodeStatus.TERMINATED, "任务被取消")
+            # Task was cancelled
+            await self.set_status(NodeStatus.TERMINATED, "Task was cancelled")
             return True
         except Exception as e:
-            error_msg = f"XListenerNode执行错误: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            error_msg = f"XListenerNode execution error: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False

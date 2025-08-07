@@ -25,15 +25,15 @@ PRICE_DATA_HANDLE = "price_data"
 )
 class BinancePriceNode(NodeBase):
     """
-    币安价格数据节点 - 用于获取指定交易对的K线数据
+    Binance Price Data Node - Fetches K-line data for specified trading pairs
 
-    输入参数:
-    - symbol: 交易对符号，例如 'BTCUSDT'
-    - interval: K线时间间隔，如 '1m', '5m', '1h', '1d'等
-    - limit: 获取的K线数量，默认500，最大1000
+    Input Parameters:
+    - symbol: Trading pair symbol, e.g., 'BTCUSDT'
+    - interval: K-line time interval, e.g., '1m', '5m', '1h', '1d'
+    - limit: Number of K-lines to fetch, default 500, max 1000
 
-    输出信号:
-    - PRICE_DATA: 包含K线数据的信号
+    Output Signals:
+    - PRICE_DATA: Signal containing K-line data
     """
 
     def __init__(
@@ -52,19 +52,19 @@ class BinancePriceNode(NodeBase):
         **kwargs,
     ):
         """
-        初始化币安价格节点
+        Initialize Binance price node
 
         Args:
-            flow_id: 流程ID
-            cycle: 节点执行周期
-            node_id: 节点唯一标识符
-            name: 节点名称
-            symbol: 交易对符号，例如 'BTCUSDT'
-            interval: K线间隔，例如 '1m', '15m', '1h', '1d'
-            limit: 获取的K线数量，1-1000
-            api_key: 币安API Key，如果不提供则使用无需认证的公开接口
-            api_secret: 币安API Secret
-            **kwargs: 传递给基类的其他参数
+            flow_id: Flow ID
+            cycle: Node execution cycle
+            node_id: Unique node identifier
+            name: Node name
+            symbol: Trading pair symbol, e.g., 'BTCUSDT'
+            interval: K-line interval, e.g., '1m', '15m', '1h', '1d'
+            limit: Number of K-lines to fetch, 1-1000
+            api_key: Binance API Key, uses public interface if not provided
+            api_secret: Binance API Secret
+            **kwargs: Additional parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -78,106 +78,104 @@ class BinancePriceNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
-        self.symbol = symbol.upper()  # 转换为大写
+        # Save parameters
+        self.symbol = symbol.upper()  # Convert to uppercase
         self.interval = interval
-        self.limit = min(1000, max(1, limit))  # 限制在1-1000之间
+        self.limit = min(1000, max(1, limit))  # Limit between 1-1000
         self.api_key = CONFIG["BINANCE_API_KEY"]
         self.api_secret = CONFIG["BINANCE_API_SECRET"]
 
-        # 币安客户端
+        # Binance client
         self.client = None
 
-        # 日志设置
+        # Logger setup
         self.logger = logging.getLogger(f"BinancePrice.{node_id}")
 
     async def initialize_client(self) -> bool:
-        """初始化币安API客户端，带有重试机制"""
+        """Initialize Binance API client with retry mechanism"""
         max_retries = 3
         retry_count = 0
-        base_delay = 1  # 基础延迟为1秒
+        base_delay = 1  # Base delay of 1 second
 
         while retry_count <= max_retries:
             try:
-                # 根据是否提供API凭证创建客户端
+                # Create client based on whether API credentials are provided
                 if self.api_key and self.api_secret:
                     self.client = Client(
                         self.api_key,
                         self.api_secret,
                         base_endpoint=BaseClient.BASE_ENDPOINT_1,
                     )
-                    self.logger.info("Binance client initialized with API key")
+                    await self.persist_log("Binance client initialized with API key")
                 else:
                     self.client = Client()
-                    self.logger.info("Binance client initialized without API key")
+                    await self.persist_log("Binance client initialized without API key")
 
-                # 测试连接
+                # Test connection
                 server_time = self.client.get_server_time()
-                self.logger.info(f"Connected to Binance. Server time: {server_time}")
+                await self.persist_log(f"Connected to Binance. Server time: {server_time}")
                 return True
 
             except Exception as e:
                 retry_count += 1
                 if retry_count <= max_retries:
-                    # 计算指数退避延迟：1s, 2s, 4s
+                    # Calculate exponential backoff delay: 1s, 2s, 4s
                     delay = base_delay * (2 ** (retry_count - 1))
-                    self.logger.warning(
-                        f"Failed to initialize Binance client (attempt {retry_count}/{max_retries}): {str(e)}. "
-                        f"Retrying in {delay}s..."
+                    await self.persist_log(
+                        f"Failed to initialize Binance client (attempt {retry_count}/{max_retries + 1}): {str(e)}. Retrying in {delay} seconds...",
+                        log_level="WARNING"
                     )
                     await asyncio.sleep(delay)
                 else:
-                    self.logger.error(
-                        f"Failed to initialize Binance client after {max_retries} attempts: {str(e)}"
+                    await self.persist_log(
+                        f"Failed to initialize Binance client after {max_retries + 1} attempts: {str(e)}",
+                        log_level="ERROR"
                     )
                     await self.set_status(
                         NodeStatus.FAILED,
                         f"Binance client initialization failed after {max_retries} attempts: {str(e)}",
                     )
-                    self.logger.debug(traceback.format_exc())
                     return False
         return False
 
     async def fetch_klines(self) -> Optional[List]:
         """
-        获取K线数据
+        Fetch K-line data
 
         Returns:
-            List: K线数据列表，如果出错则返回None
+            List: K-line data list, returns None if error occurs
         """
         if not self.client:
-            self.logger.error("Binance client not initialized")
+            await self.persist_log("Binance client not initialized", log_level="ERROR")
             return None
 
         try:
-            # 使用线程池执行同步API调用
+            # Use thread pool to execute synchronous API call
             loop = asyncio.get_event_loop()
             klines = await loop.run_in_executor(
                 None,
                 lambda: self.client.get_klines(
-                    symbol=self.symbol, interval=self.interval, limit=self.limit,
+                    symbol=self.symbol, interval=self.interval, limit=self.limit
                 ),
             )
-
-            self.logger.info(
-                "Fetched %s klines for %s with interval %s",
-                len(klines),
-                self.symbol,
-                self.interval,
+            await self.persist_log(
+                f"Fetched {len(klines)} klines for {self.symbol} with interval {self.interval}",
+                log_level="DEBUG"
             )
-            self.logger.debug(
-                "Fetched klines: %s", klines
-            )  # 调试信息，实际使用中可以注释掉
+            await self.persist_log(
+                f"Fetched klines: {klines}",  # Debug info, can be commented out in production
+                log_level="DEBUG"
+            )
             return klines
         except BinanceAPIException as e:
-            self.logger.error("Binance API error: %s", e.message)
+            await self.persist_log(f"Binance API error: {e.message}", log_level="ERROR")
             return None
         except Exception as e:
-            self.logger.error("Error fetching klines: %s", str(e))
+            await self.persist_log(f"Error fetching klines: {str(e)}", log_level="ERROR")
             return None
 
     async def get_symbol_ticker(self) -> Optional[Dict]:
-        # 使用线程池执行同步API调用
+        # Use thread pool to execute synchronous API call
         loop = asyncio.get_event_loop()
         ticker = await loop.run_in_executor(
             None,
@@ -187,13 +185,13 @@ class BinancePriceNode(NodeBase):
 
     def process_klines(self, klines: List, ticker: Dict) -> Dict[str, Any]:
         """
-        处理K线数据，转换为更易用的格式
+        Process K-line data, convert to more usable format
 
         Args:
-            klines: 从币安API获取的原始K线数据
+            klines: Raw K-line data from Binance API
 
         Returns:
-            Dict: 处理后的K线数据
+            Dict: Processed K-line data
         """
         processed_data = {
             "symbol": self.symbol,
@@ -219,35 +217,35 @@ class BinancePriceNode(NodeBase):
 
     async def execute(self) -> bool:
         """
-        执行节点逻辑，获取K线数据并发送信号，获取一次数据后即完成
+        Execute node logic, fetch K-line data and send signal, completes after one data fetch
 
         Returns:
-            bool: 执行是否成功
+            bool: Whether execution was successful
         """
         try:
-            self.logger.info(
+            await self.persist_log(
                 f"Executing BinancePriceNode for {self.symbol} with interval {self.interval}"
             )
-            # 初始化客户端
+            # Initialize client
             if not await self.initialize_client():
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 获取K线数据（只获取一次）
+            # Fetch K-line data (only once)
             klines = await self.fetch_klines()
             ticker = await self.get_symbol_ticker()
 
             if klines and ticker:
-                # 处理数据
+                # Process data
                 processed_data = self.process_klines(klines, ticker)
 
-                # 发送数据信号
+                # Send data signal
                 if await self.send_signal(
                     PRICE_DATA_HANDLE, SignalType.PRICE_DATA, payload=processed_data
                 ):
-                    self.logger.info(
-                        "Successfully sent price data signal for %s", self.symbol
+                    await self.persist_log(
+                        f"Successfully sent price data signal for {self.symbol}"
                     )
                     await self.set_status(NodeStatus.COMPLETED)
                     return True
@@ -255,26 +253,26 @@ class BinancePriceNode(NodeBase):
                     error_message = (
                         f"Failed to send price data signal for {self.symbol}"
                     )
-                    self.logger.error(error_message)
+                    await self.persist_log(error_message, log_level="ERROR")
                     await self.set_status(NodeStatus.FAILED, error_message)
                     return False
             else:
                 error_message = f"Failed to fetch klines for {self.symbol}"
-                self.logger.warning(error_message)
+                await self.persist_log(error_message, log_level="WARNING")
                 await self.set_status(NodeStatus.FAILED, error_message)
                 return False
 
         except asyncio.CancelledError:
-            # 任务被取消
+            # Task was cancelled
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
             error_message = f"Error executing BinancePriceNode: {str(e)}"
-            self.logger.error(error_message)
+            await self.persist_log(error_message, log_level="ERROR")
             await self.set_status(NodeStatus.FAILED, error_message)
             return False
         finally:
-            # 清理资源
+            # Clean up resources
             if self.client:
-                # 币安客户端没有明确的关闭方法，但可以设置为None
+                # Binance client doesn't have explicit close method, but can be set to None
                 self.client = None

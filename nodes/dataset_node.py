@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import traceback
 import json
 import os
@@ -140,9 +139,6 @@ class DatasetNode(NodeBase):
         self.spreadsheet = None
         self.worksheet = None
 
-        # 日志设置
-        self.logger = logging.getLogger(f"DatasetNode.{node_id}")
-
     @staticmethod
     def _extract_spreadsheet_id(spreadsheet_input: str) -> str:
         """
@@ -198,8 +194,8 @@ class DatasetNode(NodeBase):
             try:
                 # 检查凭证路径
                 if not self.credentials_path:
-                    error_msg = "Google API credentials path not provided"
-                    self.logger.error(error_msg)
+                    error_msg = "Google Sheets credentials file not found"
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
@@ -216,22 +212,22 @@ class DatasetNode(NodeBase):
 
                 # 创建客户端
                 self.client = gspread.authorize(credentials)
-                self.logger.info("Google Sheets client initialized")
+                await self.persist_log("Google Sheets client initialized", "INFO")
 
                 # 检查 spreadsheet_id
                 if not self.spreadsheet_id:
                     error_msg = "Spreadsheet ID not provided"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
                 # 打开电子表格
                 try:
                     self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-                    self.logger.info(f"Opened spreadsheet: {self.spreadsheet.title}")
+                    await self.persist_log(f"Opened spreadsheet: {self.spreadsheet.title}", "INFO")
                 except SpreadsheetNotFound:
                     error_msg = f"Spreadsheet with ID '{self.spreadsheet_id}' not found"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
                 except APIError as e:
@@ -239,17 +235,17 @@ class DatasetNode(NodeBase):
                         error_msg = f"Permission denied to access spreadsheet: {str(e)}"
                     else:
                         error_msg = f"API error accessing spreadsheet: {str(e)}"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
                 # 打开工作表
                 try:
                     self.worksheet = self.spreadsheet.worksheet(self.worksheet_name)
-                    self.logger.info(f"Opened worksheet: {self.worksheet_name}")
+                    await self.persist_log(f"Opened worksheet: {self.worksheet_name}", "INFO")
                 except WorksheetNotFound:
                     error_msg = f"Worksheet '{self.worksheet_name}' not found"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
@@ -260,22 +256,20 @@ class DatasetNode(NodeBase):
                 if retry_count <= max_retries:
                     # 计算指数退避延迟
                     delay = base_delay * (2 ** (retry_count - 1))
-                    self.logger.warning(
+                    await self.persist_log(
                         f"Failed to initialize Google Sheets client (attempt {retry_count}/{max_retries}): {str(e)}. "
-                        f"Retrying in {delay}s..."
-                    )
+                        f"Retrying in {delay}s...", "WARNING")
                     await asyncio.sleep(delay)
                 else:
-                    error_msg = f"Failed to initialize Google Sheets client after {max_retries} attempts: {str(e)}"
-                    self.logger.error(error_msg)
+                    error_msg = f"Failed to initialize Google Sheets client: {str(e)}"
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
-                    self.logger.debug(traceback.format_exc())
                     return False
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
         """读取 Google Sheets 数据"""
         if not self.worksheet:
-            self.logger.error("Worksheet not initialized")
+            await self.persist_log("Worksheet not initialized", "ERROR")
             return None
 
         try:
@@ -286,7 +280,7 @@ class DatasetNode(NodeBase):
             )
 
             if not values:
-                self.logger.warning(f"No data found in range {self.range}")
+                await self.persist_log(f"No data found in range {self.range}", "WARNING")
                 return {"data": [], "headers": []}
 
             # 处理数据
@@ -308,23 +302,23 @@ class DatasetNode(NodeBase):
                 "column_count": len(headers) if headers else 0,
             }
 
-            self.logger.info(
-                f"Read {len(data)} rows from {self.spreadsheet.title}/{self.worksheet_name}"
+            await self.persist_log(
+                f"Successfully read {len(data)} rows from Google Sheets: {self.spreadsheet.title} - {self.worksheet_name}", "INFO"
             )
             return result
 
         except APIError as e:
             error_msg = f"Google Sheets API error: {str(e)}"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return None
         except Exception as e:
-            error_msg = f"Error reading data: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Unexpected error reading data: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return None
 
-    def _transform_input_data(self, raw_data: Any) -> Optional[Dict[str, Any]]:
+    async def _transform_input_data(self, raw_data: Any) -> Optional[Dict[str, Any]]:
         """
         将各种输入数据格式转换为Google Sheets期望的标准格式
         
@@ -344,16 +338,16 @@ class DatasetNode(NodeBase):
             Dict[str, Any]: 转换后的标准格式数据，如果转换失败返回None
         """
         try:
-            self.logger.debug(f"Transforming input data of type: {type(raw_data)}")
+            await self.persist_log(f"Transforming input data of type: {type(raw_data)}", "DEBUG")
             
             # 如果已经是标准格式，直接验证并返回
             if isinstance(raw_data, dict) and "data" in raw_data:
-                self.logger.debug("Input data is already in standard format")
+                await self.persist_log("Input data is already in standard format", "DEBUG")
                 return raw_data
             
             # 处理字符串输入
             if isinstance(raw_data, str):
-                return self._transform_string_data(raw_data)
+                return await self._transform_string_data(raw_data)
             
             # 处理列表输入
             elif isinstance(raw_data, list):
@@ -368,11 +362,11 @@ class DatasetNode(NodeBase):
                 return self._transform_primitive_data(raw_data)
                 
         except Exception as e:
-            self.logger.error(f"Error transforming input data: {str(e)}")
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(f"Error transforming input data: {str(e)}", "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             return None
     
-    def _transform_string_data(self, data: str) -> Dict[str, Any]:
+    async def _transform_string_data(self, data: str) -> Dict[str, Any]:
         """转换字符串数据"""
         data = data.strip()
         
@@ -380,10 +374,10 @@ class DatasetNode(NodeBase):
         if data.startswith(('{', '[')):
             try:
                 parsed_data = json.loads(data)
-                self.logger.debug("Successfully parsed string as JSON")
-                return self._transform_input_data(parsed_data)  # 递归处理解析后的数据
+                await self.persist_log("Successfully parsed string as JSON", "DEBUG")
+                return await self._transform_input_data(parsed_data)  # 递归处理解析后的数据
             except json.JSONDecodeError:
-                self.logger.debug("String is not valid JSON, treating as plain text")
+                await self.persist_log("String is not valid JSON, treating as plain text", "DEBUG")
         
         # 处理多行文本（按行分割）
         if '\n' in data:
@@ -575,7 +569,7 @@ class DatasetNode(NodeBase):
             "headers": ["value"]
         }
     
-    def _extract_sheet_name_from_edge_key(self, edge_key: str) -> str:
+    async def _extract_sheet_name_from_edge_key(self, edge_key: str) -> str:
         """
         从edge_key中提取工作表名称
         
@@ -605,7 +599,7 @@ class DatasetNode(NodeBase):
             return clean_key[:31]  # Google Sheets工作表名最多31个字符
             
         except Exception as e:
-            self.logger.warning(f"Failed to extract sheet name from edge_key '{edge_key}': {str(e)}")
+            await self.persist_log(f"Failed to extract sheet name from edge_key '{edge_key}': {str(e)}", "WARNING")
             # 默认工作表名
             return "data"
     
@@ -621,20 +615,20 @@ class DatasetNode(NodeBase):
             bool: 写入是否成功
         """
         if not self.client or not self.spreadsheet:
-            self.logger.error("Google Sheets client or spreadsheet not initialized")
+            await self.persist_log("Google Sheets client or spreadsheet not initialized", "ERROR")
             return False
         
         # 验证数据
         is_valid, error_msg = self.validate_data(data)
         if not is_valid:
-            self.logger.error(f"Data validation failed for sheet '{sheet_name}': {error_msg}")
+            await self.persist_log(f"Data validation failed for sheet '{sheet_name}': {error_msg}", "ERROR")
             return False
         
         try:
             # 获取或创建工作表
             target_worksheet = await self._get_or_create_worksheet(sheet_name)
             if not target_worksheet:
-                self.logger.error(f"Failed to get or create worksheet '{sheet_name}'")
+                await self.persist_log(f"Failed to get or create worksheet '{sheet_name}'", "ERROR")
                 return False
             
             # 提取数据
@@ -642,7 +636,7 @@ class DatasetNode(NodeBase):
             rows = data.get("data", [])
             
             if not rows:
-                self.logger.warning(f"No data to write to sheet '{sheet_name}'")
+                await self.persist_log(f"No data to write to sheet '{sheet_name}'", "WARNING")
                 return True  # 没有数据也算成功
             
             # 准备写入的值
@@ -678,35 +672,34 @@ class DatasetNode(NodeBase):
                             None,
                             lambda: target_worksheet.update(range_to_update, values_to_write),
                         )
-                        self.logger.info(
-                            f"{'Appended' if self.mode == 'append' else 'Wrote'} {len(values_to_write)} rows to sheet '{sheet_name}'"
-                        )
+                        await self.persist_log(
+                            f"{'Appended' if self.mode == 'append' else 'Wrote'} {len(values_to_write)} rows to sheet '{sheet_name}'",
+                            "INFO")
                         return True
                     except APIError as e:
                         retry_count += 1
                         if "rate_limit" in str(e).lower() and retry_count <= max_retries:
                             # 计算指数退避延迟
                             delay = base_delay * (2 ** (retry_count - 1))
-                            self.logger.warning(
+                            await self.persist_log(
                                 f"Rate limit exceeded for sheet '{sheet_name}' (attempt {retry_count}/{max_retries}). "
-                                f"Retrying in {delay}s..."
-                            )
+                                f"Retrying in {delay}s...", "WARNING")
                             await asyncio.sleep(delay)
                         else:
                             # 其他API错误或重试次数已用完
                             raise
                 
                 # 如果达到这里，说明所有重试都失败了
-                self.logger.error(f"Failed to update sheet '{sheet_name}' after {max_retries} attempts")
+                await self.persist_log(f"Failed to update sheet '{sheet_name}' after {max_retries} attempts", "ERROR")
                 return False
             else:
-                self.logger.warning(f"No data range to update for sheet '{sheet_name}'")
+                await self.persist_log(f"No data range to update for sheet '{sheet_name}'", "WARNING")
                 return False
                 
         except Exception as e:
             error_msg = f"Error writing data to sheet '{sheet_name}': {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             return False
     
     async def _get_or_create_worksheet(self, sheet_name: str):
@@ -723,10 +716,10 @@ class DatasetNode(NodeBase):
             # 首先尝试获取现有工作表
             try:
                 worksheet = self.spreadsheet.worksheet(sheet_name)
-                self.logger.debug(f"Found existing worksheet: {sheet_name}")
+                await self.persist_log(f"Found existing worksheet: {sheet_name}", "DEBUG")
                 return worksheet
             except WorksheetNotFound:
-                self.logger.debug(f"Worksheet '{sheet_name}' not found, creating new one")
+                await self.persist_log(f"Worksheet '{sheet_name}' not found, creating new one", "INFO")
             
             # 如果工作表不存在，创建新的
             loop = asyncio.get_event_loop()
@@ -734,14 +727,14 @@ class DatasetNode(NodeBase):
                 None,
                 lambda: self.spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=26)
             )
-            self.logger.info(f"Created new worksheet: {sheet_name}")
+            await self.persist_log(f"Created new worksheet: {sheet_name}", "INFO")
             return worksheet
             
         except Exception as e:
-            self.logger.error(f"Failed to get or create worksheet '{sheet_name}': {str(e)}")
+            await self.persist_log(f"Failed to get or create worksheet '{sheet_name}': {str(e)}", "ERROR")
             return None
     
-    def _get_output_edges_info(self) -> List[Dict[str, str]]:
+    async def _get_output_edges_info(self) -> List[Dict[str, str]]:
         """
         获取输出边的信息
         
@@ -762,14 +755,14 @@ class DatasetNode(NodeBase):
                             'output_handle': output_handle
                         })
             
-            self.logger.debug(f"Found {len(output_edges_info)} output edges")
+            await self.persist_log(f"Found {len(output_edges_info)} output edges", "DEBUG")
             return output_edges_info
             
         except Exception as e:
-            self.logger.warning(f"Failed to get output edges info: {str(e)}")
+            await self.persist_log(f"Failed to get output edges info: {str(e)}", "WARNING")
             return []
     
-    def _extract_sheet_name_from_output_handle(self, output_handle: str) -> str:
+    async def _extract_sheet_name_from_output_handle(self, output_handle: str) -> str:
         """
         从输出句柄名称中提取工作表名称
         
@@ -792,7 +785,7 @@ class DatasetNode(NodeBase):
             return clean_name[:31]  # 限制长度
             
         except Exception as e:
-            self.logger.warning(f"Failed to extract sheet name from output_handle '{output_handle}': {str(e)}")
+            await self.persist_log(f"Failed to extract sheet name from output_handle '{output_handle}': {str(e)}", "WARNING")
             # 默认工作表名
             return "data"
     
@@ -807,7 +800,7 @@ class DatasetNode(NodeBase):
             Dict[str, Any]: 读取的数据，失败返回None
         """
         if not self.client or not self.spreadsheet:
-            self.logger.error("Google Sheets client or spreadsheet not initialized")
+            await self.persist_log("Google Sheets client or spreadsheet not initialized", "ERROR")
             return None
         
         try:
@@ -816,21 +809,21 @@ class DatasetNode(NodeBase):
             
             try:
                 target_worksheet = self.spreadsheet.worksheet(sheet_name)
-                self.logger.debug(f"Found worksheet: {sheet_name}")
+                await self.persist_log(f"Found worksheet: {sheet_name}", "DEBUG")
             except WorksheetNotFound:
-                self.logger.warning(f"Worksheet '{sheet_name}' not found, trying to use first available worksheet")
+                await self.persist_log(f"Worksheet '{sheet_name}' not found, trying to use first available worksheet", "INFO")
                 
                 # 如果指定的工作表不存在，使用第一个可用的工作表
                 worksheets = self.spreadsheet.worksheets()
                 if worksheets:
                     target_worksheet = worksheets[0]
-                    self.logger.info(f"Using first available worksheet: {target_worksheet.title}")
+                    await self.persist_log(f"Using first available worksheet: {target_worksheet.title}", "INFO")
                 else:
-                    self.logger.error("No worksheets found in the spreadsheet")
+                    await self.persist_log("No worksheets found in the spreadsheet", "ERROR")
                     return None
             
             if not target_worksheet:
-                self.logger.error(f"Failed to get worksheet '{sheet_name}'")
+                await self.persist_log(f"Failed to get worksheet '{sheet_name}'", "ERROR")
                 return None
             
             # 使用线程池执行同步 API 调用
@@ -840,7 +833,7 @@ class DatasetNode(NodeBase):
             )
             
             if not values:
-                self.logger.warning(f"No data found in range {self.range} of sheet '{target_worksheet.title}'")
+                await self.persist_log(f"No data found in range {self.range} of sheet '{target_worksheet.title}'", "WARNING")
                 return {"data": [], "headers": []}
             
             # 处理数据
@@ -862,18 +855,17 @@ class DatasetNode(NodeBase):
                 "column_count": len(headers) if headers else 0,
             }
             
-            self.logger.info(
-                f"Read {len(data)} rows from {self.spreadsheet.title}/{target_worksheet.title}"
-            )
+            await self.persist_log(
+                f"Read {len(data)} rows from {self.spreadsheet.title}/{target_worksheet.title}", "INFO")
             return result
             
         except APIError as e:
             error_msg = f"Google Sheets API error reading sheet '{sheet_name}': {str(e)}"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             return None
         except Exception as e:
-            error_msg = f"Error reading data from sheet '{sheet_name}': {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"Error reading data from Google Sheets: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
             return None
 
     def validate_data(self, data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -921,13 +913,13 @@ class DatasetNode(NodeBase):
     async def write_data(self, data: Dict[str, Any]) -> bool:
         """写入数据到 Google Sheets"""
         if not self.worksheet:
-            self.logger.error("Worksheet not initialized")
+            await self.persist_log("Worksheet not initialized", "ERROR")
             return False
 
         # 验证数据
         is_valid, error_msg = self.validate_data(data)
         if not is_valid:
-            self.logger.error(f"Data validation failed: {error_msg}")
+            await self.persist_log(f"Data validation failed: {error_msg}", "ERROR")
             await self.set_status(NodeStatus.FAILED, f"Data validation failed: {error_msg}")
             return False
 
@@ -937,7 +929,7 @@ class DatasetNode(NodeBase):
             rows = data.get("data", [])
 
             if not rows:
-                self.logger.warning("No data to write")
+                await self.persist_log("No data to write", "WARNING")
                 return True  # 没有数据也算成功
 
             # 准备写入的值
@@ -973,8 +965,8 @@ class DatasetNode(NodeBase):
                             None,
                             lambda: self.worksheet.update(range_to_update, values_to_write),
                         )
-                        self.logger.info(
-                            f"{'Appended' if self.mode == 'append' else 'Wrote'} {len(values_to_write)} rows to {self.spreadsheet.title}/{self.worksheet_name}"
+                        await self.persist_log(
+                            f"{'Appended' if self.mode == 'append' else 'Wrote'} {len(values_to_write)} rows to Google Sheets: {self.spreadsheet.title} - {self.worksheet.title}", "INFO"
                         )
                         return True
                     except APIError as e:
@@ -982,9 +974,9 @@ class DatasetNode(NodeBase):
                         if "rate_limit" in str(e).lower() and retry_count <= max_retries:
                             # 计算指数退避延迟
                             delay = base_delay * (2 ** (retry_count - 1))
-                            self.logger.warning(
+                            await self.persist_log(
                                 f"Rate limit exceeded (attempt {retry_count}/{max_retries}). "
-                                f"Retrying in {delay}s..."
+                                f"Retrying in {delay}s...", "WARNING"
                             )
                             await asyncio.sleep(delay)
                         else:
@@ -992,10 +984,10 @@ class DatasetNode(NodeBase):
                             raise
 
                 # 如果达到这里，说明所有重试都失败了
-                self.logger.error(f"Failed to update sheet after {max_retries} attempts")
+                await self.persist_log(f"Failed to update sheet after {max_retries} attempts", "ERROR")
                 return False
             else:
-                self.logger.warning("No data range to update")
+                await self.persist_log("No data range to update", "WARNING")
                 return False
 
         except APIError as e:
@@ -1006,22 +998,21 @@ class DatasetNode(NodeBase):
                 error_msg = f"Rate limit exceeded: {str(e)}. Consider reducing request frequency."
             elif "quota" in str(e).lower():
                 error_msg = f"API quota exceeded: {str(e)}. Please try again later."
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
         except gspread.exceptions.GSpreadException as e:
             error_msg = f"Google Sheets error: {str(e)}"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
         except Exception as e:
-            error_msg = f"Error writing data: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            error_msg = f"Error writing data to Google Sheets: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
 
-    def get_safe_credentials_path(self) -> str:
+    async def get_safe_credentials_path(self) -> str:
         """获取安全的凭证路径，支持环境变量和相对路径"""
         # 首先检查环境变量
         env_cred_path = os.environ.get("GOOGLE_CREDENTIALS_PATH")
@@ -1033,193 +1024,123 @@ class DatasetNode(NodeBase):
                 env_cred_path = os.path.join(project_root, env_cred_path)
 
             if os.path.exists(env_cred_path):
-                self.logger.info(f"Using credentials from environment variable: {env_cred_path}")
+                await self.persist_log(f"Using credentials from environment variable: {env_cred_path}", "INFO")
                 return env_cred_path
 
         # 然后检查配置文件中的路径
         config_cred_path = self.credentials_path
         if config_cred_path and os.path.exists(config_cred_path):
-            self.logger.info(f"Using credentials from config: {config_cred_path}")
+            await self.persist_log(f"Using credentials from config: {config_cred_path}", "INFO")
             return config_cred_path
 
         # 最后返回空字符串
-        self.logger.warning("No valid Google credentials path found")
+        await self.persist_log("No valid Google credentials path found", "WARNING")
         return ""
 
     async def execute(self) -> bool:
-        """执行节点逻辑，根据模式读取或写入数据"""
+        """Execute node logic based on mode (read/write/append)"""
         start_time = time.time()
         try:
-            self.logger.info(
-                f"Executing DatasetNode in {self.mode} mode for spreadsheet {self.spreadsheet_id}"
+            await self.persist_log(
+                f"Starting DatasetNode execution: mode={self.mode}, spreadsheet_id={self.spreadsheet_id}, worksheet_name={self.worksheet_name}", "INFO"
             )
 
-            # 如果spreadsheet_id看起来像是从URL提取的，记录原始输入
+            # Log original input if extracted from URL
             original_input = getattr(self, '_original_spreadsheet_input', None)
             if original_input and original_input != self.spreadsheet_id:
-                self.logger.info(f"Extracted spreadsheet ID '{self.spreadsheet_id}' from input: {original_input}")
+                await self.persist_log(f"Extracted spreadsheet ID '{self.spreadsheet_id}' from input: {original_input}", "INFO")
 
-            # 检查模式是否有效
+            # Validate mode
             if self.mode not in ["read", "write", "append"]:
                 error_msg = f"Invalid mode: {self.mode}. Must be 'read', 'write', or 'append'"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
-            # 检查spreadsheet_id是否有效
+            # Validate spreadsheet_id
             if not self.spreadsheet_id:
                 error_msg = "Spreadsheet ID is required"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
-            # 初始化客户端
+            # Initialize client
             if not await self.initialize_client():
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 根据模式执行不同操作
+            # Execute based on mode
             if self.mode == "read":
-                # 支持多工作表读取 - 根据输出句柄读取不同工作表
-                output_edges_info = self._get_output_edges_info()
-                
-                if not output_edges_info:
-                    # 如果没有输出边，使用默认行为读取默认工作表
-                    data = await self.read_data()
-                    if data:
-                        # 发送数据信号
-                        if await self.send_signal(
-                            DATA_OUTPUT_HANDLE, SignalType.DATASET, payload=data
-                        ):
-                            self.logger.info("Successfully sent dataset signal")
-                            await self.set_status(NodeStatus.COMPLETED)
-                            return True
-                        else:
-                            error_msg = "Failed to send dataset signal"
-                            self.logger.error(error_msg)
-                            await self.set_status(NodeStatus.FAILED, error_msg)
-                            return False
+                data = await self.read_data()
+                if data:
+                    if await self.send_signal(DATA_OUTPUT_HANDLE, SignalType.DATASET, payload=data):
+                        await self.persist_log("Successfully sent dataset signal", "INFO")
+                        await self.set_status(NodeStatus.COMPLETED)
+                        return True
                     else:
-                        error_msg = "Failed to read data from Google Sheets"
-                        self.logger.warning(error_msg)
+                        error_msg = "Failed to send dataset signal"
+                        await self.persist_log(error_msg, "ERROR")
                         await self.set_status(NodeStatus.FAILED, error_msg)
                         return False
                 else:
-                    # 多工作表读取模式
-                    self.logger.info(f"Processing {len(output_edges_info)} output edges for multi-sheet reading")
-                    
-                    success_count = 0
-                    total_count = len(output_edges_info)
-                    
-                    for edge_info in output_edges_info:
-                        edge_key = edge_info['edge_key']
-                        output_handle = edge_info['output_handle']
-                        
-                        # 从输出句柄提取工作表名称
-                        sheet_name = self._extract_sheet_name_from_output_handle(output_handle)
-                        
-                        # 读取指定工作表的数据
-                        data = await self.read_data_from_sheet(sheet_name)
-                        
-                        if data:
-                            # 发送数据信号到对应的输出句柄
-                            if await self.send_signal(
-                                output_handle, SignalType.DATASET, payload=data
-                            ):
-                                self.logger.info(f"Successfully sent data from sheet '{sheet_name}' to output handle '{output_handle}'")
-                                success_count += 1
-                            else:
-                                self.logger.error(f"Failed to send data from sheet '{sheet_name}' to output handle '{output_handle}'")
-                        else:
-                            self.logger.error(f"Failed to read data from sheet '{sheet_name}' for output handle '{output_handle}'")
-                    
-                    # 检查读取结果
-                    if success_count == total_count:
-                        self.logger.info(f"Successfully read all {total_count} sheets from Google Sheets")
-                        await self.set_status(NodeStatus.COMPLETED)
-                        return True
-                    elif success_count > 0:
-                        self.logger.warning(f"Partially successful: {success_count}/{total_count} sheets read")
-                        await self.set_status(NodeStatus.COMPLETED)  # 部分成功也算完成
-                        return True
-                    else:
-                        error_msg = f"Failed to read any data from Google Sheets (0/{total_count} successful)"
-                        self.logger.error(error_msg)
-                        await self.set_status(NodeStatus.FAILED, error_msg)
-                        return False
+                    error_msg = "Failed to read data from Google Sheets"
+                    await self.persist_log(error_msg, "WARNING")
+                    await self.set_status(NodeStatus.FAILED, error_msg)
+                    return False
 
             elif self.mode in ["write", "append"]:
-                # 获取所有输入数据 - 支持多个输入句柄写入不同工作表
+                # Get input data from signals
                 input_signals_data = {}
-                
-                # 遍历所有接收到的输入信号，收集所有数据
                 for edge_key, signal in self._input_signals.items():
                     if signal and signal.payload:
                         input_signals_data[edge_key] = signal.payload
-                        self.logger.debug(f"Found input data from signal {edge_key}: {type(signal.payload)}")
 
                 if not input_signals_data:
                     error_msg = "No input data received for write operation"
-                    self.logger.warning(error_msg)
+                    await self.persist_log(error_msg, "WARNING")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
-                
-                self.logger.info(f"Processing {len(input_signals_data)} input signals for multi-sheet writing")
-                
-                # 写入多个工作表
-                success_count = 0
-                total_count = len(input_signals_data)
-                
+
+                # Write data
+                success = True
                 for edge_key, raw_data in input_signals_data.items():
-                    # 转换数据格式为Google Sheets期望的格式
-                    transformed_data = self._transform_input_data(raw_data)
-                    if not transformed_data:
-                        self.logger.error(f"Failed to transform input data for signal {edge_key}")
-                        continue
-                    
-                    # 从edge_key提取工作表名称
-                    sheet_name = self._extract_sheet_name_from_edge_key(edge_key)
-                    
-                    # 写入到对应的工作表
-                    if await self.write_data_to_sheet(transformed_data, sheet_name):
-                        self.logger.info(f"Successfully wrote data from signal {edge_key} to sheet '{sheet_name}'")
-                        success_count += 1
+                    transformed_data = await self._transform_input_data(raw_data)
+                    if transformed_data:
+                        if not await self.write_data(transformed_data):
+                            success = False
+                            break
                     else:
-                        self.logger.error(f"Failed to write data from signal {edge_key} to sheet '{sheet_name}'")
-                
-                # 检查写入结果
-                if success_count == total_count:
-                    self.logger.info(f"Successfully wrote all {total_count} datasets to Google Sheets")
+                        await self.persist_log(f"Failed to transform input data for signal {edge_key}", "ERROR")
+                        success = False
+                        break
+
+                if success:
+                    await self.persist_log("Successfully wrote data to Google Sheets", "INFO")
                     await self.set_status(NodeStatus.COMPLETED)
                     return True
-                elif success_count > 0:
-                    self.logger.warning(f"Partially successful: {success_count}/{total_count} datasets written")
-                    await self.set_status(NodeStatus.COMPLETED)  # 部分成功也算完成
-                    return True
                 else:
-                    error_msg = f"Failed to write any data to Google Sheets (0/{total_count} successful)"
-                    self.logger.error(error_msg)
+                    error_msg = "Failed to write data to Google Sheets"
+                    await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
             else:
-                error_msg = f"Invalid mode: {self.mode}. Must be 'read', 'write', or 'append'"
-                self.logger.error(error_msg)
+                error_msg = f"Unsupported mode: {self.mode}"
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
         except asyncio.CancelledError:
-            # 任务被取消
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
-            error_msg = f"Error executing DatasetNode: {str(e)}"
-            self.logger.error(error_msg)
+            error_msg = f"DatasetNode execution error: {str(e)}"
+            await self.persist_log(error_msg, "ERROR")
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
         finally:
-            # 清理资源
+            # Clean up resources
             self.client = None
             self.spreadsheet = None
             self.worksheet = None
@@ -1269,8 +1190,7 @@ class DatasetInputNode(DatasetNode):
 
         super().__init__(**kwargs)
 
-        # 重新设置日志名称
-        self.logger = logging.getLogger(f"DatasetInputNode.{self.node_id}")
+        # Logging will be handled by persist_log method
 
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Input特化"""
@@ -1326,8 +1246,7 @@ class DatasetOutputNode(DatasetNode):
 
         super().__init__(**kwargs)
 
-        # 重新设置日志名称
-        self.logger = logging.getLogger(f"DatasetOutputNode.{self.node_id}")
+        # Logging will be handled by persist_log method
 
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Output特化"""

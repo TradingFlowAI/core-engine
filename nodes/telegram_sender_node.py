@@ -1,5 +1,5 @@
 import asyncio
-import logging
+# Removed logging import - using persist_log from NodeBase
 import traceback
 import json
 import os
@@ -14,7 +14,7 @@ from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
-# 定义输入输出处理器名称
+# Define input and output handle names
 MESSAGE_INPUT_HANDLE = "message_input_handle"
 STATUS_OUTPUT_HANDLE = "status_output_handle"
 ERROR_HANDLE = "error_handle"
@@ -24,35 +24,35 @@ ERROR_HANDLE = "error_handle"
     "telegram_sender_node",
     default_params={
         "bot_token": "",  # Telegram Bot Token
-        "chat_id": "",    # 接收消息的聊天ID
-        "message_prefix": "",  # 消息前缀，可选
-        "parse_mode": "HTML",  # 消息解析模式：HTML, Markdown, MarkdownV2
-        "disable_web_page_preview": True,  # 是否禁用网页预览
-        "disable_notification": False,  # 是否静默发送消息
-        "timeout": 30,  # 请求超时时间（秒）
-        "retry_count": 3,  # 失败重试次数
+        "chat_id": "",    # Chat ID to receive messages
+        "message_prefix": "",  # Message prefix, optional
+        "parse_mode": "HTML",  # Message parsing mode: HTML, Markdown, MarkdownV2
+        "disable_web_page_preview": True,  # Whether to disable web page preview
+        "disable_notification": False,  # Whether to send message silently
+        "timeout": 30,  # Request timeout (seconds)
+        "retry_count": 3,  # Number of retries on failure
     },
 )
 class TelegramSenderNode(NodeBase):
     """
-    Telegram 发送器节点 - 用于将消息发送到 Telegram
+    Telegram Sender Node - Used to send messages to Telegram
 
-    输入参数:
+    Input parameters:
     - bot_token: Telegram Bot Token
-    - chat_id: 接收消息的聊天ID
-    - message_prefix: 消息前缀，可选
-    - parse_mode: 消息解析模式：HTML, Markdown, MarkdownV2
-    - disable_web_page_preview: 是否禁用网页预览
-    - disable_notification: 是否静默发送消息
-    - timeout: 请求超时时间（秒）
-    - retry_count: 失败重试次数
+    - chat_id: Chat ID to receive messages
+    - message_prefix: Message prefix, optional
+    - parse_mode: Message parsing mode: HTML, Markdown, MarkdownV2
+    - disable_web_page_preview: Whether to disable web page preview
+    - disable_notification: Whether to send message silently
+    - timeout: Request timeout (seconds)
+    - retry_count: Number of retries on failure
 
-    输入信号:
-    - MESSAGE_INPUT_HANDLE: 要发送的消息内容
+    Input signals:
+    - MESSAGE_INPUT_HANDLE: Message content to send
 
-    输出信号:
-    - STATUS_OUTPUT_HANDLE: 发送状态
-    - ERROR_HANDLE: 错误信息
+    Output signals:
+    - STATUS_OUTPUT_HANDLE: Send status
+    - ERROR_HANDLE: Error information
     """
 
     def __init__(
@@ -76,26 +76,26 @@ class TelegramSenderNode(NodeBase):
         **kwargs,
     ):
         """
-        初始化 Telegram 发送器节点
+        Initialize Telegram Sender Node
 
         Args:
-            flow_id: 流程ID
-            component_id: 组件ID
-            cycle: 节点执行周期
-            node_id: 节点唯一标识符
-            name: 节点名称
+            flow_id: Flow ID
+            component_id: Component ID
+            cycle: Node execution cycle
+            node_id: Node unique identifier
+            name: Node name
             bot_token: Telegram Bot Token
-            chat_id: 接收消息的聊天ID
-            message_prefix: 消息前缀，可选
-            parse_mode: 消息解析模式：HTML, Markdown, MarkdownV2
-            disable_web_page_preview: 是否禁用网页预览
-            disable_notification: 是否静默发送消息
-            timeout: 请求超时时间（秒）
-            retry_count: 失败重试次数
-            input_edges: 输入边列表
-            output_edges: 输出边列表
-            state_store: 状态存储
-            **kwargs: 传递给基类的其他参数
+            chat_id: Chat ID to receive messages
+            message_prefix: Message prefix, optional
+            parse_mode: Message parsing mode: HTML, Markdown, MarkdownV2
+            disable_web_page_preview: Whether to disable web page preview
+            disable_notification: Whether to send message silently
+            timeout: Request timeout (seconds)
+            retry_count: Number of retries on failure
+            input_edges: Input edge list
+            output_edges: Output edge list
+            state_store: State storage
+            **kwargs: Other parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -109,7 +109,7 @@ class TelegramSenderNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
+        # Save parameters
         self.bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN", "") or CONFIG.get("TELEGRAM_BOT_TOKEN", "")
         self.chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID", "") or CONFIG.get("TELEGRAM_CHAT_ID", "")
         self.message_prefix = message_prefix
@@ -119,28 +119,27 @@ class TelegramSenderNode(NodeBase):
         self.timeout = max(1, min(300, timeout))  # 限制在1-300秒之间
         self.retry_count = max(0, min(10, retry_count))  # 限制在0-10次之间
 
-        # 日志设置
-        self.logger = logging.getLogger(f"TelegramSenderNode.{node_id}")
+        # Logging will be handled by persist_log method
 
     async def send_telegram_message(self, message: str) -> Dict[str, Any]:
         """
-        发送 Telegram 消息
+        Send Telegram message
 
         Args:
-            message: 要发送的消息内容
+            message: Message content to send
 
         Returns:
-            Dict[str, Any]: 包含发送结果的字典
+            Dict[str, Any]: Dictionary containing send result
         """
-        # 检查必要参数
+        # Check required parameters
         if not self.bot_token:
-            error_msg = "Bot token is required"
-            self.logger.error(error_msg)
+            error_msg = "Bot token and chat ID are required"
+            await self.persist_log(error_msg, "ERROR")
             return {"success": False, "error": error_msg}
 
         if not self.chat_id:
             error_msg = "Chat ID is required"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             return {"success": False, "error": error_msg}
 
         # 添加消息前缀
@@ -171,7 +170,7 @@ class TelegramSenderNode(NodeBase):
 
                         # 检查响应状态
                         if response.status == 200 and response_data.get("ok"):
-                            self.logger.info(f"Successfully sent Telegram message to chat {self.chat_id}")
+                            await self.persist_log(f"Successfully sent Telegram message to chat {self.chat_id}", "INFO")
                             return {
                                 "success": True,
                                 "message_id": response_data.get("result", {}).get("message_id"),
@@ -180,7 +179,7 @@ class TelegramSenderNode(NodeBase):
                             }
                         else:
                             error_msg = f"Failed to send Telegram message: {response_data.get('description', 'Unknown error')}"
-                            self.logger.error(error_msg)
+                            await self.persist_log(error_msg, "ERROR")
 
                             # 如果是最后一次尝试，返回错误信息
                             if attempt == self.retry_count:
@@ -196,7 +195,7 @@ class TelegramSenderNode(NodeBase):
 
             except aiohttp.ClientError as e:
                 error_msg = f"HTTP request error: {str(e)}"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
 
                 if attempt == self.retry_count:
                     return {"success": False, "error": error_msg}
@@ -205,7 +204,7 @@ class TelegramSenderNode(NodeBase):
 
             except asyncio.TimeoutError:
                 error_msg = f"Request timed out after {self.timeout} seconds"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
 
                 if attempt == self.retry_count:
                     return {"success": False, "error": error_msg}
@@ -214,8 +213,8 @@ class TelegramSenderNode(NodeBase):
 
             except Exception as e:
                 error_msg = f"Unexpected error: {str(e)}"
-                self.logger.error(error_msg)
-                self.logger.debug(traceback.format_exc())
+                await self.persist_log(error_msg, "ERROR")
+                await self.persist_log(traceback.format_exc(), "DEBUG")
 
                 if attempt == self.retry_count:
                     return {"success": False, "error": error_msg}
@@ -225,15 +224,15 @@ class TelegramSenderNode(NodeBase):
         # 如果所有重试都失败
         return {"success": False, "error": "All retry attempts failed"}
 
-    def format_message(self, data: Any) -> str:
+    async def format_message(self, data: Any) -> str:
         """
-        格式化消息内容
+        Format message content
 
         Args:
-            data: 要格式化的数据
+            data: Data to format
 
         Returns:
-            str: 格式化后的消息字符串
+            str: Formatted message string
         """
         try:
             # 如果是字符串，直接返回
@@ -281,53 +280,53 @@ class TelegramSenderNode(NodeBase):
             return str(data)
 
         except Exception as e:
-            self.logger.error(f"Error formatting message: {str(e)}")
+            await self.persist_log(f"Error formatting message: {str(e)}", "ERROR")
             return f"Error formatting message: {str(e)}\nRaw data type: {type(data).__name__}"
 
     async def execute(self) -> bool:
-        """执行节点逻辑，发送 Telegram 消息"""
+        """Execute node logic, send Telegram message"""
         start_time = time.time()
         try:
-            self.logger.info(f"Executing TelegramSenderNode")
+            await self.persist_log(f"Executing TelegramSenderNode", "INFO")
 
-            # 验证必要参数
+            # Validate required parameters
             if not self.bot_token:
                 error_msg = "Bot token is required"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
             if not self.chat_id:
                 error_msg = "Chat ID is required"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 获取输入消息
+            # Get input message
             input_data = await self.get_input_signal(MESSAGE_INPUT_HANDLE)
 
             if input_data is None:
                 error_msg = "No input message received"
-                self.logger.warning(error_msg)
+                await self.persist_log(error_msg, "WARNING")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
-            # 格式化消息
-            formatted_message = self.format_message(input_data)
+            # Format message
+            formatted_message = await self.format_message(input_data)
 
-            # 发送消息
+            # Send message
             result = await self.send_telegram_message(formatted_message)
 
-            # 检查发送结果
+            # Check send result
             if result.get("success"):
-                self.logger.info(f"Successfully sent Telegram message to chat {self.chat_id}")
+                await self.persist_log(f"Successfully sent Telegram message to chat {self.chat_id}", "INFO")
 
-                # 发送状态信号
+                # Send status signal
                 status_data = {
                     "success": True,
                     "message_id": result.get("message_id"),
@@ -341,19 +340,19 @@ class TelegramSenderNode(NodeBase):
                 return True
             else:
                 error_msg = f"Failed to send Telegram message: {result.get('error', 'Unknown error')}"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
         except asyncio.CancelledError:
-            # 任务被取消
+            # Task cancelled
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
             error_msg = f"Error executing TelegramSenderNode: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
             await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
             return False

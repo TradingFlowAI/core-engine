@@ -1,5 +1,5 @@
 import asyncio
-import logging
+# Removed logging import - using persist_log from NodeBase
 import time
 import traceback
 from typing import Dict, Optional
@@ -106,8 +106,7 @@ class UniswapV3DEXTradeNode(NodeBase):
         # Signal publisher
         self.signal_publisher = None
 
-        # Logging setup
-        self.logger = logging.getLogger(f"DEXTradeNode.{node_id}")
+        # Logger removed - using persist_log from NodeBase
 
     async def initialize_publisher(self) -> bool:
         """Initialize trading signal publisher"""
@@ -119,16 +118,14 @@ class UniswapV3DEXTradeNode(NodeBase):
             )
 
             await self.signal_publisher.connect()
-            self.logger.info(
-                "Trading signal publisher initialized successfully: chain_id=%s, dex_name=%s",
-                self.chain_id,
-                self.dex_name,
+            await self.persist_log(
+                f"Trading signal publisher initialized successfully: chain_id={self.chain_id}, dex_name={self.dex_name}", "INFO"
             )
             return True
 
         except Exception as e:
-            self.logger.error(
-                "Failed to initialize trading signal publisher: %s", str(e)
+            await self.persist_log(
+                f"Failed to initialize trading signal publisher: {str(e)}", "ERROR"
             )
             await self.set_status(
                 NodeStatus.FAILED,
@@ -149,10 +146,8 @@ class UniswapV3DEXTradeNode(NodeBase):
                 "timestamp": int(time.time()),
             }
 
-            self.logger.info(
-                "Preparing to send %s signal: token_address=%s",
-                self.action,
-                self.token_address,
+            await self.persist_log(
+                f"Preparing to send {self.action} signal: token_address={self.token_address}", "INFO"
             )
 
             # Convert amount to Wei (if provided)
@@ -160,11 +155,11 @@ class UniswapV3DEXTradeNode(NodeBase):
             if self.amount_in:
                 try:
                     amount_in_wei = str(to_wei(float(self.amount_in)))
-                    self.logger.info(
-                        "Amount conversion: %s -> %s Wei", self.amount_in, amount_in_wei
+                    await self.persist_log(
+                        f"Amount conversion: {self.amount_in} -> {amount_in_wei} Wei", "INFO"
                     )
                 except ValueError as e:
-                    self.logger.error("Failed to convert amount to Wei: %s", str(e))
+                    await self.persist_log(f"Failed to convert amount to Wei: {str(e)}", "ERROR")
                     await self.set_status(
                         NodeStatus.FAILED, f"Failed to convert amount to Wei: {str(e)}"
                     )
@@ -176,13 +171,12 @@ class UniswapV3DEXTradeNode(NodeBase):
                 # User explicitly specified min_amount_out, use directly
                 try:
                     min_amount_out_wei = str(to_wei(float(self.min_amount_out)))
-                    self.logger.info(
-                        "Using specified minimum output amount: %s Wei",
-                        min_amount_out_wei,
+                    await self.persist_log(
+                        f"Min amount out conversion: {self.min_amount_out} -> {min_amount_out_wei} Wei", "INFO"
                     )
                 except ValueError as e:
-                    self.logger.error(
-                        "Failed to convert minimum output amount to Wei: %s", str(e)
+                    await self.persist_log(
+                        f"Failed to convert min amount out to Wei: {str(e)}", "ERROR"
                     )
                     await self.set_status(
                         NodeStatus.FAILED,
@@ -328,10 +322,9 @@ class UniswapV3DEXTradeNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
-            self.logger.info(
-                "Starting DEX trading node execution: action=%s, token=%s",
-                self.action,
-                self.token_address,
+            await self.persist_log(
+                f"Starting DEX trading node execution: action={self.action}, token={self.token_address}",
+                "INFO"
             )
             await self.set_status(NodeStatus.RUNNING)
 
@@ -345,13 +338,13 @@ class UniswapV3DEXTradeNode(NodeBase):
 
             # Prepare transaction receipt data
             trade_receipt = self.prepare_trade_receipt()
-            self.logger.info("Transaction receipt data: %s", trade_receipt)
+            await self.persist_log(f"Transaction receipt data: {trade_receipt}", "INFO")
 
             # Send transaction receipt signal to downstream nodes
             if not await self.send_signal(
                 "output", SignalType.DEX_TRADE_RECEIPT, payload=trade_receipt
             ):
-                self.logger.error("Failed to send transaction receipt signal")
+                await self.persist_log("Failed to send transaction receipt signal", "ERROR")
                 await self.set_status(
                     NodeStatus.FAILED, "Failed to send transaction receipt signal"
                 )
@@ -359,21 +352,21 @@ class UniswapV3DEXTradeNode(NodeBase):
 
             # Complete node execution
             await self.set_status(NodeStatus.COMPLETED)
-            self.logger.info(
-                "DEX trading node execution completed, transaction hash: %s",
-                trade_receipt.get("tx_hash"),
+            await self.persist_log(
+                f"DEX trading node execution completed, transaction hash: {trade_receipt.get('tx_hash')}",
+                "INFO"
             )
             return True
 
         except asyncio.CancelledError:
-            self.logger.info("DEX trading node execution cancelled")
+            await self.persist_log("DEX trading node execution cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Execution cancelled")
             return False
 
         except Exception as e:
             error_message = f"DEX trading node execution error: {str(e)}"
-            self.logger.error("DEX trading node execution error: %s", str(e))
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(f"DEX trading node execution error: {str(e)}", "ERROR")
+            await self.persist_log(f"Traceback: {traceback.format_exc()}", "ERROR")
             await self.set_status(NodeStatus.FAILED, error_message)
             return False
 
@@ -384,47 +377,46 @@ class UniswapV3DEXTradeNode(NodeBase):
                 self.signal_publisher = None
 
     def _register_input_handles(self) -> None:
-        """注册输入句柄"""
-        # 注册交易金额输入句柄
+        """Register input handles"""
+        # Register trading amount input handle
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE,
             data_type=float,
-            description="交易金额",
+            description="Trading amount",
             example=100.50,
         )
-        # 注册交易操作类型输入句柄
+        # Register trading action type input handle
         self.register_input_handle(
             name=DEX_TRADE_ACTION_HANDLE,
             data_type=str,
-            description="交易操作类型（buy/sell）",
+            description="Trading action type (buy/sell)",
             example="buy",
         )
 
     async def _on_amount_in_handle_received(self, amount_in):
         """Handle received amount_in signal"""
         try:
-            self.logger.info("handle amount_in received: %s", amount_in)
+            await self.persist_log(f"handle amount_in received: {amount_in}", "INFO")
             # Additional processing logic can be added here
             self.amount_in = amount_in
-            self.logger.info(
-                "Received amount_in: %s, type: %s",
-                self.amount_in,
-                type(self.amount_in).__name__,
+            await self.persist_log(
+                f"Received amount_in: {self.amount_in}, type: {type(self.amount_in).__name__}",
+                "INFO"
             )
             return True
         except Exception as e:
-            self.logger.error("Error processing amount_in handle: %s", str(e))
+            await self.persist_log(f"Error processing amount_in handle: {str(e)}", "ERROR")
             return False
 
     async def _on_trade_action_handle_received(self, trade_action):
         """Handle received trade action signal"""
         try:
-            self.logger.info("handle trade action received: %s", trade_action)
+            await self.persist_log(f"handle trade action received: {trade_action}", "INFO")
             # Additional processing logic can be added here
             self.action = trade_action.lower()  # Ensure action is lowercase
             if self.action not in ["buy", "sell"]:
                 raise ValueError(f"Unsupported action: {self.action}")
             return True
         except Exception as e:
-            self.logger.error("Error processing trade action handle: %s", str(e))
+            await self.persist_log(f"Error processing trade action handle: {str(e)}", "ERROR")
             return False
