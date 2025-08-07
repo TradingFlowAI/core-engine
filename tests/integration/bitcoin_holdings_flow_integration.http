@@ -4,17 +4,17 @@
 @baseUrl = http://localhost:7002
 @flowId = 689041637ff776371f18cda6
 @userId = 684c36ce23a411dff96ff68a
-@componentId = 1
-@cycle = 1
+@componentId = 0
+@cycle = 0
 @codeNodeId = code_node_1
 @datasetNodeId = dataset_output_node_1
-@docLink = 1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM
+@docLink = https://docs.google.com/spreadsheets/d/1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM/edit?gid=0#gid=0
 @createdAt = 2025-08-04T05:34:32.590Z
 
 ### 0. 输出所有 Nodes 的执行情况
 GET {{baseUrl}}/nodes
 
-### 1. 测试单个code_node节点执行
+### 1. 测试 [ code_node 执行 ]
 # @name execute_code_node
 POST {{baseUrl}}/nodes/execute
 Content-Type: application/json
@@ -41,11 +41,11 @@ Content-Type: application/json
   }
 }
 
-### 2. 检查code_node节点状态
+### 2. 检查
 # @name get_code_node_status
 GET {{baseUrl}}/nodes/{{codeNodeId}}/status
 
-### 3. 测试单个dataset_output_node节点执行
+### 3. 测试 [ dataset_output_node 执行 ]
 # @name execute_dataset_node
 POST {{baseUrl}}/nodes/execute
 Content-Type: application/json
@@ -67,21 +67,15 @@ Content-Type: application/json
   "output_edges": [],
   "config": {
     "node_class_type": "dataset_output_node",
-    "data": {
-      "bitcoin_summary": "成功收集到 4 家公司的比特币持仓数据",
-      "top_holders": ["MicroStrategy", "Tesla", "Marathon Digital"],
-      "data_count": 4,
-      "source": "bitcointreasuries.net"
-    },
     "doc_link": "{{docLink}}"
   }
 }
 
-### 4. 检查dataset_output_node节点状态
+### 4. 检查
 # @name get_dataset_node_status
 GET {{baseUrl}}/nodes/{{datasetNodeId}}/status
 
-### 5. 测试完整Flow执行（使用前端真实格式）
+### 5. 测试 [ flow 执行 ]
 # @name execute_complete_flow
 POST {{baseUrl}}/flows/execute
 Content-Type: application/json
@@ -123,11 +117,12 @@ Content-Type: application/json
   "created_at": "{{createdAt}}"
 }
 
-### 6. 检查完整Flow状态
+
+### 6. 检查 Flow
 # @name get_flow_status
 GET {{baseUrl}}/flows/{{flowId}}/status
 
-### 7. 停止Flow执行
+### 7. 停止 Flow
 # @name stop_flow
 POST {{baseUrl}}/flows/{{flowId}}/stop
 

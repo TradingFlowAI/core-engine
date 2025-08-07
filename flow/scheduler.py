@@ -730,13 +730,15 @@ class FlowScheduler:
 
                 if current_time >= next_execution:
                     # Execute new cycle
-                    logger.info(
-                        "Executing flow %s cycle at %s",
-                        flow_id,
-                        datetime.now().isoformat(),
-                    )
                     last_cycle = int(flow_data.get("last_cycle", -1))
                     new_cycle = last_cycle + 1
+                    logger.info(
+                        "Executing flow %s cycle %s at %s",
+                        flow_id,
+                        new_cycle,
+                        datetime.now().isoformat(),
+                    )
+
 
                     # Execute flow cycle
                     try:
