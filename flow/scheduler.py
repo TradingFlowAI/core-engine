@@ -32,6 +32,9 @@ class FlowScheduler:
         # Initialize Redis connection pool
         self.redis = None
         self.running_flows = set()  # Track currently scheduled flow_ids
+        
+        # Initialize flow execution log service
+        self._log_service = None
 
     async def initialize(self):
         """Initialize scheduler, connect to Redis"""
@@ -39,12 +42,112 @@ class FlowScheduler:
         redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis = await aioredis.from_url(redis_url, decode_responses=True)
         logger.info("Flow scheduler initialized, Redis connected to %s", redis_url)
+        
+        # Initialize log service
+        await self._initialize_log_service()
 
     async def shutdown(self):
         """Shutdown scheduler, release resources"""
         if self.redis:
             await self.redis.close()
         logger.info("Flow scheduler has been shut down")
+
+    async def _initialize_log_service(self):
+        """Initialize flow execution log service lazily"""
+        if self._log_service is None:
+            try:
+                from tradingflow.depot.python.db.services.flow_execution_log_service import (
+                    FlowExecutionLogService,
+                )
+                self._log_service = FlowExecutionLogService()
+            except Exception as e:
+                logger.warning("Failed to initialize log service: %s", str(e))
+
+    async def persist_log(
+        self,
+        flow_id: str,
+        cycle: int,
+        message: str,
+        log_level: str = "INFO",
+        log_source: str = "scheduler",
+        node_id: Optional[str] = None,
+        log_metadata: Optional[Dict] = None,
+    ):
+        """
+        Persist log message to database and also log to console
+
+        Args:
+            flow_id: Flow ID
+            cycle: Current cycle number
+            message: Log message content
+            log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            log_source: Log source (scheduler, node, system, user)
+            node_id: Optional node ID if log is related to specific node
+            log_metadata: Additional structured metadata
+        """
+        # Log to console first
+        log_level_upper = log_level.upper()
+        if log_level_upper == "DEBUG":
+            logger.debug(message)
+        elif log_level_upper == "INFO":
+            logger.info(message)
+        elif log_level_upper == "WARNING":
+            logger.warning(message)
+        elif log_level_upper == "ERROR":
+            logger.error(message)
+        elif log_level_upper == "CRITICAL":
+            logger.critical(message)
+        else:
+            logger.info(message)
+
+        # Persist to database
+        try:
+            await self._initialize_log_service()
+            if self._log_service:
+                await self._log_service.create_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=message,
+                    node_id=node_id,
+                    log_level=log_level_upper,
+                    log_source=log_source,
+                    log_metadata=log_metadata,
+                )
+        except Exception as e:
+            # Don't let logging errors break scheduler execution
+            logger.warning("Failed to persist log to database: %s", str(e))
+
+    async def cleanup_old_logs(self, flow_id: str, current_cycle: int, keep_cycles: int = 5):
+        """
+        Clean up logs older than specified number of cycles
+        
+        Args:
+            flow_id: Flow ID
+            current_cycle: Current cycle number
+            keep_cycles: Number of recent cycles to keep (default: 5)
+        """
+        try:
+            await self._initialize_log_service()
+            if self._log_service:
+                # Calculate the oldest cycle to keep
+                oldest_cycle_to_keep = max(0, current_cycle - keep_cycles + 1)
+                
+                # Delete logs older than the oldest cycle to keep
+                deleted_count = await self._log_service.delete_logs_before_cycle(
+                    flow_id=flow_id,
+                    cycle=oldest_cycle_to_keep
+                )
+                
+                if deleted_count > 0:
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=current_cycle,
+                        message=f"Cleaned up {deleted_count} old log entries (keeping last {keep_cycles} cycles)",
+                        log_level="INFO",
+                        log_source="scheduler"
+                    )
+        except Exception as e:
+            logger.warning("Failed to cleanup old logs for flow %s: %s", flow_id, str(e))
 
     async def register_flow(self, flow_id: str, flow_config: Dict):
         """
@@ -71,15 +174,19 @@ class FlowScheduler:
         #     json.dumps(flow_structure, indent=2),
         # )
 
+        # Check if flow already exists to preserve last_cycle
+        existing_flow = await self.redis.hgetall(f"flow:{flow_id}")
+        existing_last_cycle = int(existing_flow.get("last_cycle", -1)) if existing_flow else -1
+        
         # Store flow information in Redis
         flow_data = {
             "id": flow_id,
             "config": json.dumps(flow_config),
             "structure": json.dumps(flow_structure),
             "status": "registered",
-            "last_cycle": -1,  # Initialize as -1, indicating not yet executed
+            "last_cycle": existing_last_cycle,  # Preserve existing cycle count
             "next_execution": 0,  # Timestamp, 0 means execute immediately
-            "created_at": datetime.now().isoformat(),
+            "created_at": existing_flow.get("created_at") if existing_flow else datetime.now().isoformat(),
         }
 
         await self.redis.hset(f"flow:{flow_id}", mapping=flow_data)
@@ -192,6 +299,18 @@ class FlowScheduler:
         if cycle is None:
             last_cycle = int(flow_data.get("last_cycle", -1))
             cycle = last_cycle + 1
+            
+            # Clean up old logs when starting a new cycle
+            await self.cleanup_old_logs(flow_id, cycle)
+            
+            # Log cycle start
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=f"Starting new cycle {cycle} for flow {flow_id}",
+                log_level="INFO",
+                log_source="scheduler"
+            )
 
         # Execute cycle
         result = await self._execute_flow_cycle(flow_id, cycle)
@@ -812,13 +931,18 @@ class FlowScheduler:
                     # Execute new cycle
                     last_cycle = int(flow_data.get("last_cycle", -1))
                     new_cycle = last_cycle + 1
-                    logger.info(
-                        "Executing flow %s cycle %s at %s",
-                        flow_id,
-                        new_cycle,
-                        datetime.now().isoformat(),
+                    
+                    # Clean up old logs when starting a new cycle
+                    await self.cleanup_old_logs(flow_id, new_cycle)
+                    
+                    # Log cycle start
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=new_cycle,
+                        message=f"Executing scheduled flow {flow_id} cycle {new_cycle} at {datetime.now().isoformat()}",
+                        log_level="INFO",
+                        log_source="scheduler"
                     )
-
 
                     # Execute flow cycle
                     try:
@@ -878,11 +1002,26 @@ class FlowScheduler:
         This method executes all nodes in the flow, letting edge signal propagation
         control which nodes can run at a given time.
         """
-        logger.info("[_execute_flow_cycle] Executing flow %s cycle %s", flow_id, cycle)
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=f"[_execute_flow_cycle] Executing flow {flow_id} cycle {cycle}",
+            log_level="INFO",
+            log_source="scheduler"
+        )
+        
         # Get flow information
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
         if not flow_data:
-            raise ValueError(f"Flow {flow_id} does not exist")
+            error_msg = f"Flow {flow_id} does not exist"
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=error_msg,
+                log_level="ERROR",
+                log_source="scheduler"
+            )
+            raise ValueError(error_msg)
 
         flow_structure = json.loads(flow_data.get("structure", "{}"))
 
@@ -901,7 +1040,14 @@ class FlowScheduler:
         # Get all nodes from the structure
         node_map = flow_structure.get("node_map", {})
         if not node_map:
-            logger.error("No nodes found in flow structure for flow %s", flow_id)
+            error_msg = f"No nodes found in flow structure for flow {flow_id}"
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=error_msg,
+                log_level="ERROR",
+                log_source="scheduler"
+            )
             return {
                 "flow_id": flow_id,
                 "cycle": cycle,
@@ -969,14 +1115,39 @@ class FlowScheduler:
             try:
                 result = await task
                 completed_results[node_id] = result
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=f"Node {node_id} execution completed successfully",
+                    log_level="INFO",
+                    log_source="scheduler",
+                    node_id=node_id
+                )
             except Exception as e:
-                logger.exception("Error executing node %s: %s", node_id, str(e))
+                error_msg = f"Error executing node {node_id}: {str(e)}"
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=error_msg,
+                    log_level="ERROR",
+                    log_source="scheduler",
+                    node_id=node_id
+                )
                 completed_results[node_id] = {"status": "error", "error": str(e)}
 
         # Update cycle status to completed
         await self.redis.hset(
             cycle_key,
             mapping={"status": "completed", "end_time": datetime.now().isoformat()},
+        )
+        
+        # Log cycle completion
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=f"Flow {flow_id} cycle {cycle} completed. Nodes: {len(node_map)} total, {len(completed_results)} executed",
+            log_level="INFO",
+            log_source="scheduler"
         )
 
         return {
