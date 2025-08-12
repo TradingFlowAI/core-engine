@@ -358,7 +358,7 @@ class CodeNode(NodeBase):
             await self.persist_log(f"Gas estimation error: {e}, using default gas value", "WARNING")
             return self.base_gas * 5  # 如果估算失败，使用默认值
 
-    async def gas_tracking_callback(self, frame, event, arg) -> None:
+    def gas_tracking_callback(self, frame, event, arg) -> None:
         """跟踪代码执行并计算Gas消耗，同时检测无限循环和内存使用"""
         if event == "line":
             self.gas_used += 1  # 每执行一行代码增加1个Gas
@@ -378,7 +378,7 @@ class CodeNode(NodeBase):
 
             # 检查是否超出Gas限制
             if self.gas_used > self.max_gas:
-                await self.persist_log(f"Resource usage exceeded: Gas={self.gas_used}/{self.max_gas}", "INFO")
+                # 注意：在同步回调中不能使用 await，所以我们只能抛出异常
                 # 引发异常以终止执行
                 raise Exception(f"Gas limit exceeded: {self.gas_used}/{self.max_gas}")
 
@@ -419,7 +419,8 @@ class CodeNode(NodeBase):
                         )
                 except Exception as e:
                     # 如果psutil不可用或出错，记录错误但继续执行
-                    await self.persist_log(f"Memory monitoring error: {str(e)}", "WARNING")
+                    # 注意：在同步回调中不能使用 await，所以我们只能忽略这个错误
+                    pass
 
         return self.gas_tracking_callback
 
@@ -487,7 +488,7 @@ class CodeNode(NodeBase):
             log_metadata={"code_length": len(self.python_code)}
         )
 
-        security_result = self.analyze_security(self.python_code)
+        security_result = await self.analyze_security(self.python_code)
 
         if not security_result["is_safe"]:
             error_msg = "; ".join(security_result["violations"])

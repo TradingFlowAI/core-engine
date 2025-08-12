@@ -32,7 +32,7 @@ class FlowScheduler:
         # Initialize Redis connection pool
         self.redis = None
         self.running_flows = set()  # Track currently scheduled flow_ids
-        
+
         # Initialize flow execution log service
         self._log_service = None
 
@@ -42,7 +42,7 @@ class FlowScheduler:
         redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis = await aioredis.from_url(redis_url, decode_responses=True)
         logger.info("Flow scheduler initialized, Redis connected to %s", redis_url)
-        
+
         # Initialize log service
         await self._initialize_log_service()
 
@@ -120,7 +120,7 @@ class FlowScheduler:
     async def cleanup_old_logs(self, flow_id: str, current_cycle: int, keep_cycles: int = 5):
         """
         Clean up logs older than specified number of cycles
-        
+
         Args:
             flow_id: Flow ID
             current_cycle: Current cycle number
@@ -131,13 +131,13 @@ class FlowScheduler:
             if self._log_service:
                 # Calculate the oldest cycle to keep
                 oldest_cycle_to_keep = max(0, current_cycle - keep_cycles + 1)
-                
+
                 # Delete logs older than the oldest cycle to keep
                 deleted_count = await self._log_service.delete_logs_before_cycle(
                     flow_id=flow_id,
                     cycle=oldest_cycle_to_keep
                 )
-                
+
                 if deleted_count > 0:
                     await self.persist_log(
                         flow_id=flow_id,
@@ -169,15 +169,15 @@ class FlowScheduler:
 
         # Analyze flow structure, identify DAG components
         flow_structure = self._analyze_flow_structure(flow_config)
-        # logger.debug(
-        #     "Flow structure analysis completed: %s",
-        #     json.dumps(flow_structure, indent=2),
-        # )
+        logger.debug(
+            "Flow structure analysis completed: %s",
+            json.dumps(flow_structure, indent=2),
+        )
 
         # Check if flow already exists to preserve last_cycle
         existing_flow = await self.redis.hgetall(f"flow:{flow_id}")
         existing_last_cycle = int(existing_flow.get("last_cycle", -1)) if existing_flow else -1
-        
+
         # Store flow information in Redis
         flow_data = {
             "id": flow_id,
@@ -284,6 +284,85 @@ class FlowScheduler:
             "node_count": len(node_ids),
         }
 
+    async def get_comprehensive_flow_status(self, flow_id: str, cycle: int = None) -> Dict:
+        """
+        Get comprehensive flow status including all node statuses, logs, and signals
+
+        Args:
+            flow_id: Flow identifier
+            cycle: Optional cycle number (defaults to latest)
+
+        Returns:
+            Dict containing flow info and comprehensive node status data
+        """
+        try:
+            # Get flow data
+            flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+            if not flow_data:
+                raise ValueError(f"Flow {flow_id} does not exist")
+
+            # Use latest cycle if not specified
+            if cycle is None:
+                cycle = int(flow_data.get("last_cycle", 1))
+
+            # Get cycle data
+            cycle_data = await self.redis.hgetall(f"flow:{flow_id}:cycle:{cycle}")
+
+            # Get comprehensive node status from NodeTaskManager
+            node_manager = NodeTaskManager.get_instance()
+            await node_manager.initialize()
+
+            comprehensive_nodes = await node_manager.get_comprehensive_node_status(
+                flow_id=flow_id,
+                cycle=cycle
+            )
+
+            # Get basic flow statistics
+            total_nodes = len(comprehensive_nodes)
+            running_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'running')
+            completed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'completed')
+            error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
+
+            return {
+                "flow_id": flow_id,
+                "cycle": cycle,
+                "flow_status": cycle_data.get("status", "unknown"),
+                "start_time": cycle_data.get("start_time"),
+                "end_time": cycle_data.get("end_time"),
+                "nodes": comprehensive_nodes,
+                "statistics": {
+                    "total_nodes": total_nodes,
+                    "running_nodes": running_nodes,
+                    "completed_nodes": completed_nodes,
+                    "error_nodes": error_nodes,
+                    "pending_nodes": total_nodes - running_nodes - completed_nodes - error_nodes
+                },
+                "flow_metadata": {
+                    "name": flow_data.get("name"),
+                    "description": flow_data.get("description"),
+                    "created_at": flow_data.get("created_at"),
+                    "updated_at": flow_data.get("updated_at"),
+                    "total_cycles": int(flow_data.get("last_cycle", 0)) + 1
+                }
+            }
+
+        except Exception as e:
+            logger.exception(f"Error getting comprehensive flow status: {str(e)}")
+            return {
+                "flow_id": flow_id,
+                "cycle": cycle,
+                "flow_status": "error",
+                "error": str(e),
+                "nodes": {},
+                "statistics": {
+                    "total_nodes": 0,
+                    "running_nodes": 0,
+                    "completed_nodes": 0,
+                    "error_nodes": 0,
+                    "pending_nodes": 0
+                }
+            }
+
     async def execute_cycle(self, flow_id: str, cycle: Optional[int] = None) -> Dict:
         """
         Manually trigger execution of a specific flow cycle
@@ -299,10 +378,10 @@ class FlowScheduler:
         if cycle is None:
             last_cycle = int(flow_data.get("last_cycle", -1))
             cycle = last_cycle + 1
-            
+
             # Clean up old logs when starting a new cycle
             await self.cleanup_old_logs(flow_id, cycle)
-            
+
             # Log cycle start
             await self.persist_log(
                 flow_id=flow_id,
@@ -536,17 +615,17 @@ class FlowScheduler:
     async def _get_cycle_status_info(self, flow_id: str, logs: list = None) -> Dict:
         """
         Get cycle status information for a flow from Redis
-        
+
         Args:
             flow_id: Flow identifier
             logs: Optional list of logs to determine which cycles to fetch
-            
+
         Returns:
             Dict containing cycle status information for relevant cycles
         """
         try:
             cycle_status = {}
-            
+
             # Get unique cycles from logs if provided
             cycles_to_fetch = set()
             if logs:
@@ -567,13 +646,13 @@ class FlowScheduler:
                                 continue
                 except Exception as e:
                     logger.warning("Could not scan for cycle keys: %s", str(e))
-            
+
             # Fetch status for each cycle from Redis
             for cycle_num in cycles_to_fetch:
                 try:
                     cycle_key = f"flow:{flow_id}:cycle:{cycle_num}"
                     cycle_data = await self.redis.hgetall(cycle_key)
-                    
+
                     if cycle_data:
                         cycle_status[cycle_num] = {
                             'cycle': cycle_num,
@@ -591,7 +670,7 @@ class FlowScheduler:
                             'end_time': None,
                             'flow_id': flow_id
                         }
-                        
+
                 except Exception as cycle_error:
                     logger.warning("Could not fetch cycle %s status: %s", cycle_num, str(cycle_error))
                     # Set as unknown if we can't fetch the data
@@ -602,9 +681,9 @@ class FlowScheduler:
                         'end_time': None,
                         'flow_id': flow_id
                     }
-            
+
             return cycle_status
-            
+
         except Exception as e:
             logger.error("Error getting cycle status info: %s", str(e))
             return {}
@@ -672,8 +751,8 @@ class FlowScheduler:
                 log_source=log_source,
             )
 
-            # Convert logs to dict format
-            logs_data = [log.to_dict() for log in logs]
+            # logs is already in dict format from the service
+            logs_data = logs
 
             return {
                 "flow_id": flow_id,
@@ -928,13 +1007,13 @@ class FlowScheduler:
                 current_time = time.time()
 
                 if current_time >= next_execution:
-                    # Execute new cycle
-                    last_cycle = int(flow_data.get("last_cycle", -1))
+                    # Execute new cycle, if not exists, start from 1
+                    last_cycle = int(flow_data.get("last_cycle", 0))
                     new_cycle = last_cycle + 1
-                    
+
                     # Clean up old logs when starting a new cycle
                     await self.cleanup_old_logs(flow_id, new_cycle)
-                    
+
                     # Log cycle start
                     await self.persist_log(
                         flow_id=flow_id,
@@ -1009,7 +1088,7 @@ class FlowScheduler:
             log_level="INFO",
             log_source="scheduler"
         )
-        
+
         # Get flow information
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
         if not flow_data:
@@ -1140,7 +1219,7 @@ class FlowScheduler:
             cycle_key,
             mapping={"status": "completed", "end_time": datetime.now().isoformat()},
         )
-        
+
         # Log cycle completion
         await self.persist_log(
             flow_id=flow_id,

@@ -443,6 +443,30 @@ class NodeBase(abc.ABC):
                         # Update signal
                         self._input_signals[edge_key] = signal
                         self.logger.debug("Updated signal for edge: %s", edge_key)
+                        
+                        # Persist received signal data to database for comprehensive status API
+                        signal_data = {
+                            handle: {
+                                'signal_type': signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                'payload': signal.payload or {},
+                                'timestamp': signal.timestamp,
+                                'source_node': source_node,
+                                'source_handle': source_handle
+                            }
+                        }
+                        
+                        await self.persist_log(
+                            message=f"Signal received at {handle} from {source_node}:{source_handle}",
+                            log_level="INFO",
+                            log_source="node",
+                            log_metadata={
+                                'signal_data': signal_data,
+                                'target_handle': handle,
+                                'source_node': source_node,
+                                'source_handle': source_handle,
+                                'signal_type': str(signal.type)
+                            }
+                        )
                     else:
                         self.logger.warning(
                             "Edge key not found in input signals: %s", edge_key
@@ -458,6 +482,31 @@ class NodeBase(abc.ABC):
                         self._input_signals[edge_key] = signal
                         self.logger.debug(
                             f"Updated signal for edge (inferred): {edge_key}"
+                        )
+                        
+                        # Persist received signal data to database (inferred case)
+                        signal_data = {
+                            handle: {
+                                'signal_type': signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                'payload': signal.payload or {},
+                                'timestamp': signal.timestamp,
+                                'source_node': edge.source_node,
+                                'source_handle': edge.source_node_handle
+                            }
+                        }
+                        
+                        await self.persist_log(
+                            message=f"Signal received at {handle} from {edge.source_node}:{edge.source_node_handle} (inferred)",
+                            log_level="INFO",
+                            log_source="node",
+                            log_metadata={
+                                'signal_data': signal_data,
+                                'target_handle': handle,
+                                'source_node': edge.source_node,
+                                'source_handle': edge.source_node_handle,
+                                'signal_type': str(signal.type),
+                                'inferred': True
+                            }
                         )
                     else:
                         self.logger.warning(
@@ -488,6 +537,29 @@ class NodeBase(abc.ABC):
 
                 # 检查 payload 是否为字典类型
                 if payload and isinstance(payload, dict):
+                    # Persist wildcard signal data to database
+                    signal_data = {}
+                    for handle_name in payload.keys():
+                        if handle_name in input_handles:
+                            signal_data[handle_name] = {
+                                'signal_type': signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                'payload': payload[handle_name],
+                                'timestamp': signal.timestamp,
+                                'wildcard': True
+                            }
+                    
+                    if signal_data:
+                        await self.persist_log(
+                            message=f"Wildcard signal received with {len(signal_data)} handles",
+                            log_level="INFO",
+                            log_source="node",
+                            log_metadata={
+                                'signal_data': signal_data,
+                                'signal_type': str(signal.type),
+                                'wildcard': True
+                            }
+                        )
+                    
                     # Process each handle if it exists in the payload
                     for handle_name, handle_obj in input_handles.items():
                         if handle_name in payload:
@@ -758,6 +830,27 @@ class NodeBase(abc.ABC):
                 timestamp=None,
             )
             await self.node_signal_publisher.send_signal(source_handle, signal)
+            
+            # Persist signal data to database for comprehensive status API
+            signal_data = {
+                source_handle: {
+                    'signal_type': signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                    'payload': payload or {},
+                    'timestamp': signal.timestamp
+                }
+            }
+            
+            await self.persist_log(
+                message=f"Signal sent from {source_handle}: {signal_type}",
+                log_level="INFO",
+                log_source="node",
+                log_metadata={
+                    'signal_data': signal_data,
+                    'source_handle': source_handle,
+                    'signal_type': str(signal_type)
+                }
+            )
+            
             return True
         except Exception as e:
             self.logger.error("Failed to send signal: %s", str(e))

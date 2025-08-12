@@ -101,6 +101,33 @@ async def get_flow_status(request, flow_id):
         return sanic_json({"error": str(e)}, status=500)
 
 
+@flow_bp.get("/flows/<flow_id>/comprehensive-status")
+async def get_comprehensive_flow_status(request, flow_id):
+    """获取Flow综合状态的接口，包含所有节点状态、日志和信号"""
+    try:
+        scheduler = get_scheduler_instance()
+
+        # 确保调度器已初始化
+        if not scheduler.redis:
+            await scheduler.initialize()
+
+        # 获取可选的cycle参数
+        cycle = request.args.get("cycle")
+        if cycle is not None:
+            try:
+                cycle = int(cycle)
+            except ValueError:
+                return sanic_json({"error": "Invalid cycle parameter"}, status=400)
+
+        status = await scheduler.get_comprehensive_flow_status(flow_id, cycle)
+        return sanic_json(status)
+    except ValueError as e:
+        return sanic_json({"error": str(e)}, status=404)
+    except Exception as e:
+        logger.error("Error getting comprehensive flow status: %s", str(e))
+        return sanic_json({"error": str(e)}, status=500)
+
+
 @flow_bp.post("/flows/<flow_id>/stop")
 async def stop_flow(request, flow_id):
     """停止Flow的接口"""

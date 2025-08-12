@@ -41,6 +41,9 @@ Content-Type: application/json
   }
 }
 
+### 1.1 综合检查状态
+GET {{baseUrl}}/flows/{{flowId}}/comprehensive-status
+
 ### 2. 检查
 # @name get_code_node_status
 GET {{baseUrl}}/nodes/{{codeNodeId}}/status
