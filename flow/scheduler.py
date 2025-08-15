@@ -985,7 +985,9 @@ class FlowScheduler:
         Flow scheduling loop
         """
         try:
-            while flow_id in self.running_flows:
+            tried = 0
+            MAX_TRIED = 500
+            while flow_id in self.running_flows and tried < MAX_TRIED:
                 # Get flow information
                 flow_data = await self.redis.hgetall(f"flow:{flow_id}")
                 if not flow_data:
@@ -1066,7 +1068,8 @@ class FlowScheduler:
                         f"flow:{flow_id}", "last_cycle", str(new_cycle)
                     )
 
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(interval_seconds)
+                tried += 1
 
         except Exception as e:
             logger.error("Error in flow %s scheduling loop: %s", flow_id, str(e))

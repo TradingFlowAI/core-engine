@@ -233,7 +233,7 @@ async def stop_node(request: Request, node_task_id: str):
     import httpx
     from tradingflow.depot.python.config import CONFIG
 
-    SERVER_URL = CONFIG["SERVER_URL"]
+    # SERVER_URL = CONFIG["SERVER_URL"]
 
     node_info = await node_manager.get_task(node_task_id)
     if not node_info:
@@ -250,25 +250,25 @@ async def stop_node(request: Request, node_task_id: str):
 
     try:
         # 通过NodeManager设置终止标志
-        stop_success = await node_manager.stop_node(node_task_id)
+        stop_success = await node_manager.stop_task(node_task_id)
         if not stop_success:
             return sanic_json({"error": "Failed to stop node"}, status=500)
 
         # 通知server节点被停止
-        try:
-            stop_data = {
-                "node_task_id": node_task_id,
-                "worker_id": WORKER_ID,
-                "status": "stopping",
-                "stop_requested_at": datetime.now().isoformat(),
-            }
+        # try:
+        #     stop_data = {
+        #         "node_task_id": node_task_id,
+        #         "worker_id": WORKER_ID,
+        #         "status": "stopping",
+        #         "stop_requested_at": datetime.now().isoformat(),
+        #     }
 
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"{SERVER_URL}/api/nodes/{node_task_id}/callback", json=stop_data
-                )
-        except Exception as e:
-            logger.error(f"Failed to notify server about node stopping: {str(e)}")
+        #     async with httpx.AsyncClient() as client:
+        #         await client.post(
+        #             f"{SERVER_URL}/api/nodes/{node_task_id}/callback", json=stop_data
+        #         )
+        # except Exception as e:
+        #     logger.error(f"Failed to notify server about node stopping: {str(e)}")
 
         return sanic_json(
             {
