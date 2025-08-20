@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制项目文件
-COPY 3_weather_cluster/tradingflow/depot /app/tradingflow/depot
-COPY 3_weather_cluster/tradingflow/station /app/tradingflow/station
+COPY tradingflow/depot /app/tradingflow/depot
+COPY tradingflow/station /app/tradingflow/station
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir \
@@ -32,7 +32,7 @@ ENV PYTHONPATH=/app
 EXPOSE 7002
 
 # 复制并设置启动脚本权限
-COPY 3_weather_cluster/tradingflow/station/docker-entrypoint.sh /app/
+COPY tradingflow/station/docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh
 
 # 启动服务
