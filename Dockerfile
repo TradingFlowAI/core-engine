@@ -16,6 +16,7 @@ COPY tradingflow/station /app/tradingflow/station
 RUN pip install --no-cache-dir \
     sanic \
     aiohttp \
+    httpx \
     redis \
     pydantic \
     aio-pika \
