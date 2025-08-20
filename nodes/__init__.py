@@ -9,5 +9,5 @@ from .dataset_node import DatasetNode
 from .rsshub_node import RSSHubNode
 from .telegram_sender_node import TelegramSenderNode
 from .x_listener_node import XListenerNode
-from .uniswap_dex_trade_node import UniswapV3DEXTradeNode
+# from .uniswap_dex_trade_node import UniswapV3DEXTradeNode
 from .vault_node import VaultNode
