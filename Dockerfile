@@ -8,23 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# 复制 requirements 文件
+COPY 3_weather_cluster/requirements.txt /app/requirements.txt
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
 # 复制项目文件
 COPY tradingflow/depot /app/tradingflow/depot
 COPY tradingflow/station /app/tradingflow/station
-
-# 安装 Python 依赖
-RUN pip install --no-cache-dir \
-    sanic \
-    aiohttp \
-    httpx \
-    redis \
-    pydantic \
-    aio-pika \
-    numpy \
-    pandas \
-    scikit-learn \
-    python-dotenv \
-    prometheus-client
 
 # 设置环境变量
 ENV PYTHONPATH=/app
