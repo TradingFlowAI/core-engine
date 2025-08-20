@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制 requirements 文件
-COPY 3_weather_cluster/requirements.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r /app/requirements.txt
