@@ -2,9 +2,9 @@ import asyncio
 import traceback
 from typing import Dict, Optional
 
-from tradingflow.bank.services.aptos_vault_service import AptosVaultService
-from tradingflow.bank.services.flow_evm_vault_service import FlowEvmVaultService
-from tradingflow.bank.utils.token_price_util import get_aptos_token_price_usd
+from tradingflow.station.services.aptos_vault_service import AptosVaultService
+from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultService
+from tradingflow.station.utils.token_price_util import get_aptos_token_price_usd
 from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
@@ -126,7 +126,7 @@ class VaultNode(NodeBase):
             raise ValueError(
                 f"Unsupported chain: {self.chain}. Supported chains: 'aptos', 'flow_evm'"
             )
-        
+
         # Validate chain_id for flow_evm
         if self.chain == "flow_evm" and self.chain_id is None:
             # Get vault information to Flow testnet
@@ -229,7 +229,7 @@ class VaultNode(NodeBase):
             }
 
         holdings_data = self.holdings_result.get("holdings_data", {})
-        
+
         # 处理不同链的数据格式
         if self.chain == "aptos":
             return await self._prepare_aptos_holdings_output(holdings_data)
@@ -237,7 +237,7 @@ class VaultNode(NodeBase):
             return await self._prepare_flow_evm_holdings_output(holdings_data)
         else:
             raise ValueError(f"Unsupported chain: {self.chain}")
-    
+
     async def _prepare_aptos_holdings_output(self, holdings_data: Dict) -> Dict:
         """
         准备 Aptos 持仓输出数据
@@ -309,7 +309,7 @@ class VaultNode(NodeBase):
             "message": self.holdings_result.get("message", ""),
             "raw_result": self.holdings_result,  # 保留原始结果供参考
         }
-    
+
     async def _prepare_flow_evm_holdings_output(self, holdings_data: Dict) -> Dict:
         """
         准备 Flow EVM 持仓输出数据
@@ -325,11 +325,11 @@ class VaultNode(NodeBase):
                 "total_value_usd": 0.0,
                 "message": "Failed to retrieve Flow EVM holdings",
             }
-        
+
         vault_info = holdings_data.get("vault", {})
         portfolio_composition = vault_info.get("portfolio_composition", [])
         total_value_usd = float(vault_info.get("total_value_usd", "0"))
-        
+
         # 转换为统一格式
         formatted_holdings = []
         for token_data in portfolio_composition:
@@ -344,7 +344,7 @@ class VaultNode(NodeBase):
                 "percentage": token_data.get("percentage"),
             }
             formatted_holdings.append(formatted_holding)
-        
+
         return {
             "success": True,
             "vault_address": self.vault_address,

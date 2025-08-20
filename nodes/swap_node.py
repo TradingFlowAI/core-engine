@@ -4,9 +4,9 @@ import traceback
 from decimal import Decimal, getcontext
 from typing import Dict, Optional
 
-from tradingflow.bank.services.aptos_vault_service import AptosVaultService
-from tradingflow.bank.services.flow_evm_vault_service import FlowEvmVaultService
-from tradingflow.bank.utils.token_price_util import (
+from tradingflow.station.services.aptos_vault_service import AptosVaultService
+from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultService
+from tradingflow.station.utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd,
@@ -66,7 +66,7 @@ class SwapNode(NodeBase):
     Input parameters:
     - chain: Blockchain network ('aptos' or 'flow_evm')
     - from_token: Source token symbol
-    - to_token: Target token symbol  
+    - to_token: Target token symbol
     - vault_address: Vault contract address
     - amount_in_percentage: Trading amount as percentage of balance (0-100)
     - amount_in_human_readable: Trading amount in decimal format
@@ -103,7 +103,7 @@ class SwapNode(NodeBase):
 
         if chain not in ["aptos", "flow_evm"]:
             raise ValueError(f"Unsupported chain: {chain}")
-        
+
         self.chain = chain
         self.from_token = from_token
         self.to_token = to_token
@@ -130,7 +130,7 @@ class SwapNode(NodeBase):
             self.vault_service = AptosVaultService.get_instance()
         elif self.chain == "flow_evm":
             self.vault_service = FlowEvmVaultService.get_instance(545)  # Flow Testnet
-        
+
         # Initialization log will be handled in execute method
 
     async def _resolve_token_addresses(self) -> None:
@@ -141,20 +141,20 @@ class SwapNode(NodeBase):
         if self.chain == "aptos":
             self.input_token_address = get_aptos_token_address_by_symbol(self.from_token)
             self.output_token_address = get_aptos_token_address_by_symbol(self.to_token)
-            
+
             if not self.input_token_address or not self.output_token_address:
                 raise ValueError(f"Cannot resolve Aptos token addresses for symbols: {self.from_token}, {self.to_token}")
-            
+
             # Get token info for Aptos
             input_info = get_aptos_monitored_token_info(self.input_token_address)
             output_info = get_aptos_monitored_token_info(self.output_token_address)
-            
+
             if not input_info or not output_info:
                 raise ValueError(f"Cannot get token info for Aptos tokens: {self.from_token}, {self.to_token}")
-            
+
             self.input_token_decimals = input_info.get("decimals")
             self.output_token_decimals = output_info.get("decimals")
-            
+
         elif self.chain == "flow_evm":
             # For Flow EVM, use symbols as addresses (placeholder)
             await self.persist_log("Flow EVM token symbol resolution not implemented, using symbols as addresses", "WARNING")
@@ -215,7 +215,7 @@ class SwapNode(NodeBase):
         amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
         input_value_usd = amount_in_decimal * Decimal(str(input_price))
         output_amount_decimal = input_value_usd / Decimal(str(output_price))
-        
+
         # 应用滑点
         slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
         output_amount_with_slippage = output_amount_decimal * slippage_factor
@@ -231,7 +231,7 @@ class SwapNode(NodeBase):
         """估算 Flow EVM 输出金额"""
         token_addresses = [self.input_token_address, self.output_token_address]
         prices = await get_multiple_token_prices_usd(token_addresses, network_type="evm")
-        
+
         input_price = prices.get(self.input_token_address)
         output_price = prices.get(self.output_token_address)
 
@@ -242,7 +242,7 @@ class SwapNode(NodeBase):
         amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
         input_value_usd = amount_in_decimal * Decimal(str(input_price))
         output_amount_decimal = input_value_usd / Decimal(str(output_price))
-        
+
         # 应用滑点
         slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
         output_amount_with_slippage = output_amount_decimal * slippage_factor
@@ -256,7 +256,7 @@ class SwapNode(NodeBase):
         try:
             # Resolve token addresses
             await self._resolve_token_addresses()
-            
+
             # Get final amount
             final_amount_in = await self.get_final_amount_in()
 
@@ -290,7 +290,7 @@ class SwapNode(NodeBase):
                 )
 
             self.tx_result = tx_result
-            
+
             if not tx_result.get("success", False):
                 error_msg = tx_result.get("message", "Unknown error")
                 await self.persist_log(f"Transaction failed: {error_msg}", "ERROR")
@@ -459,10 +459,10 @@ class SwapNode(NodeBase):
 class BuyNode(SwapNode):
     """
     Buy Node - 专门用于买入代币的节点实例
-    
+
     输入参数:
     - buy_token: 要买入的代币符号 (string)
-    - base_token: 用于支付的基础代币符号 (string) 
+    - base_token: 用于支付的基础代币符号 (string)
     - chain: 区块链网络 (string)
     - vault_address: Vault合约地址 (string)
     - order_type: 订单类型 (string) - "market" 或 "limit"
@@ -470,21 +470,21 @@ class BuyNode(SwapNode):
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
     - slippery_tolerance: 滑点容忍度 (number)
-    
+
     输出信号:
     - trade_receipt: 交易收据 (json object)
     """
-    
+
     def __init__(self, **kwargs):
         # 设置买入逻辑：from_token = base_token, to_token = buy_token
         buy_token = kwargs.get('buy_token')
         base_token = kwargs.get('base_token')
-        
+
         if buy_token:
             kwargs['to_token'] = buy_token
         if base_token:
             kwargs['from_token'] = base_token
-            
+
         # 设置实例节点元数据
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Buy Node')
@@ -493,18 +493,18 @@ class BuyNode(SwapNode):
         kwargs.setdefault('description', 'Specialized node for buying tokens')
         kwargs.setdefault('author', 'TradingFlow Team')
         kwargs.setdefault('tags', ['trading', 'buy', 'dex'])
-        
+
         super().__init__(**kwargs)
-        
+
         # 保存买入特定参数
         self.buy_token = buy_token
         self.base_token = base_token
         self.order_type = kwargs.get('order_type', 'market')
         self.limited_price = kwargs.get('limited_price')
-        
+
         # 重新设置日志名称
         # Logger removed - using persist_log from NodeBase
-        
+
     def _register_input_handles(self) -> None:
         """注册买入节点特化的输入句柄"""
         self.register_input_handle(
@@ -570,13 +570,13 @@ class BuyNode(SwapNode):
             example=1.0,
             auto_update_attr="slippery_tolerance",
         )
-        
+
     async def _on_buy_token_received(self, buy_token: str) -> None:
         """处理买入代币更新"""
         await self.persist_log(f"Received buy token: {buy_token}", "INFO")
         self.buy_token = buy_token
         self.to_token = buy_token
-        
+
     async def _on_base_token_received(self, base_token: str) -> None:
         """Handle base token update"""
         await self.persist_log(f"Received base token: {base_token}", "INFO")
@@ -601,7 +601,7 @@ class BuyNode(SwapNode):
 class SellNode(SwapNode):
     """
     Sell Node - 专门用于卖出代币的节点实例
-    
+
     输入参数:
     - sell_token: 要卖出的代币符号 (string)
     - base_token: 换取的基础代币符号 (string)
@@ -612,21 +612,21 @@ class SellNode(SwapNode):
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
     - slippery_tolerance: 滑点容忍度 (number)
-    
+
     输出信号:
     - trade_receipt: 交易收据 (json object)
     """
-    
+
     def __init__(self, **kwargs):
         # 设置卖出逻辑：from_token = sell_token, to_token = base_token
         sell_token = kwargs.get('sell_token')
         base_token = kwargs.get('base_token')
-        
+
         if sell_token:
             kwargs['from_token'] = sell_token
         if base_token:
             kwargs['to_token'] = base_token
-            
+
         # 设置实例节点元数据
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Sell Node')
@@ -635,17 +635,17 @@ class SellNode(SwapNode):
         kwargs.setdefault('description', 'Specialized node for selling tokens')
         kwargs.setdefault('author', 'TradingFlow Team')
         kwargs.setdefault('tags', ['trading', 'sell', 'dex'])
-        
+
         super().__init__(**kwargs)
-        
+
         # 保存卖出特定参数
         self.sell_token = sell_token
         self.base_token = base_token
         self.order_type = kwargs.get('order_type', 'market')
         self.limited_price = kwargs.get('limited_price')
-        
+
         # Logger removed - using persist_log from NodeBase
-        
+
     def _register_input_handles(self) -> None:
         """注册卖出节点特化的输入句柄"""
         self.register_input_handle(
@@ -711,13 +711,13 @@ class SellNode(SwapNode):
             example=1.0,
             auto_update_attr="slippery_tolerance",
         )
-        
+
     async def _on_sell_token_received(self, sell_token: str) -> None:
         """Handle sell token update"""
         await self.persist_log(f"Received sell token: {sell_token}", "INFO")
         self.sell_token = sell_token
         self.from_token = sell_token
-        
+
     async def _on_base_token_received(self, base_token: str) -> None:
         """Handle base token update"""
         await self.persist_log(f"Received base token: {base_token}", "INFO")

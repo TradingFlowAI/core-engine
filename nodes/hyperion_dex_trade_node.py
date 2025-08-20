@@ -4,8 +4,8 @@ import traceback
 from decimal import Decimal, getcontext
 from typing import Dict, Optional
 
-from tradingflow.bank.services.aptos_vault_service import AptosVaultService
-from tradingflow.bank.utils.token_price_util import (
+from tradingflow.station.services.aptos_vault_service import AptosVaultService
+from tradingflow.station.utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd,
