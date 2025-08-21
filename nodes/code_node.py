@@ -175,18 +175,18 @@ class CodeNode(NodeBase):
         allowed_modules = set(ALLOWED_MODULES.keys())
 
         dangerous_functions = {
-            "eval": "动态代码执行",
-            "exec": "动态代码执行",
-            "__import__": "动态导入",
-            "globals": "访问全局变量",
-            "locals": "访问局部变量",
-            # "getattr": "动态属性访问",  # 移除：常用于对象操作
-            # "setattr": "动态属性设置",  # 移除：常用于对象操作
-            # "delattr": "删除属性",      # 移除：常用于对象操作
-            # "compile": "代码编译",      # 移除：已在危险模块中处理
-            # "open": "文件操作",         # 移除：在数据处理中常用
-            # "read": "文件读取",         # 移除：在数据处理中常用
-            # "write": "文件写入",        # 移除：在数据处理中常用
+            "eval": "Dynamic code execution",
+            "exec": "Dynamic code execution",
+            "__import__": "Dynamic imports",
+            "globals": "Access global variables",
+            "locals": "Access local variables",
+            # "getattr": "Dynamic attribute access",  # Removed: commonly used for object operations
+            # "setattr": "Dynamic attribute setting",  # Removed: commonly used for object operations
+            # "delattr": "Delete attributes",      # Removed: commonly used for object operations
+            # "compile": "Code compilation",      # Removed: already handled in dangerous modules
+            # "open": "File operations",         # Removed: commonly used in data processing
+            # "read": "File reading",         # Removed: commonly used in data processing
+            # "write": "File writing",        # Removed: commonly used in data processing
         }
 
         try:
@@ -236,7 +236,7 @@ class CodeNode(NodeBase):
                         and node.func.id in dangerous_functions
                     ):
                         result["violations"].append(
-                            f"危险函数调用: {node.func.id} - {dangerous_functions[node.func.id]}"
+                            f"Dangerous function call: {node.func.id} - {dangerous_functions[node.func.id]}"
                         )
                         result["is_safe"] = False
 
@@ -246,7 +246,7 @@ class CodeNode(NodeBase):
                     ):
                         if node.func.attr in ["system", "popen", "spawn", "call"]:
                             result["violations"].append(
-                                f"危险系统调用: {node.func.attr}"
+                                f"Dangerous system call: {node.func.attr}"
                             )
                             result["is_safe"] = False
 
@@ -256,21 +256,21 @@ class CodeNode(NodeBase):
                 if isinstance(node, ast.Str):
                     string_literals.append(node.s)
 
-            # 检查字符串中的危险模式（只保留真正危险的）
+            # Check dangerous patterns in strings (only keep truly dangerous ones)
             dangerous_patterns = [
-                (r"__import__\s*\(", "动态导入尝试"),
-                (r"eval\s*\(", "动态代码执行尝试"),
-                (r"exec\s*\(", "动态代码执行尝试"),
-                (r"os\.system", "系统命令执行尝试"),
-                (r"subprocess\.", "系统命令执行尝试"),
-                # (r"open\s*\(", "文件操作尝试"),  # 移除：在数据处理中常用
+                (r"__import__\s*\(", "Dynamic import attempt"),
+                (r"eval\s*\(", "Dynamic code execution attempt"),
+                (r"exec\s*\(", "Dynamic code execution attempt"),
+                (r"os\.system", "System command execution attempt"),
+                (r"subprocess\.", "System command execution attempt"),
+                # (r"open\s*\(", "File operation attempt"),  # Removed: commonly used in data processing
             ]
 
             for string in string_literals:
                 for pattern, description in dangerous_patterns:
                     if re.search(pattern, string):
                         result["violations"].append(
-                            f"字符串中的危险模式: {description}"
+                            f"Dangerous pattern in string: {description}"
                         )
                         result["is_safe"] = False
 
@@ -284,7 +284,7 @@ class CodeNode(NodeBase):
                         ):
                             if target.attr in ["__builtins__", "__dict__"]:
                                 result["violations"].append(
-                                    f"尝试修改内置函数或全局字典: {target.attr}"
+                                    f"Attempt to modify built-in functions or global dictionary: {target.attr}"
                                 )
                                 result["is_safe"] = False
 
@@ -296,7 +296,7 @@ class CodeNode(NodeBase):
 
         except Exception as e:
             await self.persist_log(f"Security analysis error: {e}", "WARNING")
-            result["violations"].append(f"代码分析错误: {str(e)}")
+            result["violations"].append(f"Code analysis error: {str(e)}")
             result["is_safe"] = False
             result["risk_level"] = "Medium"
 
@@ -433,7 +433,7 @@ class CodeNode(NodeBase):
             "output_data": None,
         }
 
-        await self.persist_log("开始导入常用模块...", log_level="INFO")
+        await self.persist_log("Starting to import common modules...", log_level="INFO")
 
         imported_modules = []
         failed_modules = []
@@ -468,7 +468,7 @@ class CodeNode(NodeBase):
             await self.persist_log("urllib module not available", "WARNING")
 
         await self.persist_log(
-            f"模块导入完成: 成功 {len(imported_modules)} 个，失败 {len(failed_modules)} 个",
+            f"Module import completed: {len(imported_modules)} successful, {len(failed_modules)} failed",
             log_level="INFO" if len(failed_modules) == 0 else "WARNING",
             log_metadata={
                 "imported_modules": imported_modules,
@@ -483,7 +483,7 @@ class CodeNode(NodeBase):
     async def _validate_security(self):
         """执行安全检查并记录结果"""
         await self.persist_log(
-            "开始代码安全检查...",
+            "Starting code security check...",
             log_level="INFO",
             log_metadata={"code_length": len(self.python_code)}
         )
@@ -493,7 +493,7 @@ class CodeNode(NodeBase):
         if not security_result["is_safe"]:
             error_msg = "; ".join(security_result["violations"])
             await self.persist_log(
-                f"安全检查失败: {error_msg}",
+                f"Security check failed: {error_msg}",
                 log_level="ERROR",
                 log_metadata={
                     "security_violations": security_result["violations"],
@@ -503,12 +503,12 @@ class CodeNode(NodeBase):
 
             await self.persist_log(f"Security violations detected: {error_msg}", "WARNING")
             await self.send_signal(STDERR_HANDLE, SignalType.TEXT, payload=error_msg)
-            await self.set_status(NodeStatus.FAILED, "代码安全检查失败")
+            await self.set_status(NodeStatus.FAILED, "Code security check failed")
             return False
 
         # 记录安全审计日志
         await self.persist_log(
-            f"代码安全检查通过 (风险等级: {security_result['risk_level']})",
+            f"Code security check passed (risk level: {security_result['risk_level']})",
             log_level="INFO",
             log_metadata={
                 "risk_level": security_result["risk_level"],
@@ -534,7 +534,7 @@ class CodeNode(NodeBase):
         )
 
         await self.persist_log(
-            f"代码执行环境准备完成，开始执行代码 (超时: {self.timeout}秒)",
+            f"Code execution environment ready, starting code execution (timeout: {self.timeout}s)",
             log_level="INFO",
             log_metadata={
                 "timeout": self.timeout,
@@ -559,7 +559,7 @@ class CodeNode(NodeBase):
             # 估算初始Gas
             estimated_gas = self.estimate_gas(self.python_code)
             await self.persist_log(
-                f"代码复杂度分析完成，估算Gas消耗: {estimated_gas}",
+                f"Code complexity analysis completed, estimated gas consumption: {estimated_gas}",
                 log_level="INFO",
                 log_metadata={
                     "estimated_gas": estimated_gas,
@@ -571,7 +571,7 @@ class CodeNode(NodeBase):
             # 收集所有输入数据
             input_data_dict = await self._parse_input_data_dict()
             await self.persist_log(
-                f"输入数据处理完成，收集到 {len(input_data_dict)} 个输入变量",
+                f"Input data processing completed, collected {len(input_data_dict)} input variables",
                 log_level="INFO",
                 log_metadata={
                     "input_variables": list(input_data_dict.keys()),
@@ -689,7 +689,7 @@ class CodeNode(NodeBase):
                 # 如果成功完成，设置成功状态
                 success = True
                 await self.persist_log(
-                    "代码执行成功完成",
+                    "Code execution completed successfully",
                     log_level="INFO",
                     log_metadata={
                         "execution_time": time.time() - start_time,
@@ -697,7 +697,7 @@ class CodeNode(NodeBase):
                     }
                 )
             except asyncio.TimeoutError:
-                error_msg = f"代码执行超时 (超过 {self.timeout} 秒)"
+                error_msg = f"Code execution timeout (exceeded {self.timeout} seconds)"
                 await self.persist_log(
                     error_msg,
                     log_level="ERROR",
@@ -708,18 +708,18 @@ class CodeNode(NodeBase):
                     }
                 )
                 await self.persist_log(error_msg, "WARNING")
-                stderr_capture.write(f"执行超时: 代码运行时间超过 {self.timeout} 秒\n")
+                stderr_capture.write(f"Execution timeout: code runtime exceeded {self.timeout} seconds\n")
                 # 即使超时，我们也不能立即终止线程，因为这可能导致资源泄漏
                 # 我们只能等待线程自然结束
                 # 注意：如果代码中有无限循环，这里不会终止它，但由于线程是守护线程，当主线程结束时它会被终止
             except Exception as e:
                 # 处理其他异常（如从线程传递的异常）
-                error_msg = f"代码执行异常: {str(e)}"
+                error_msg = f"Code execution exception: {str(e)}"
 
                 # 根据异常类型记录不同的日志
                 if "Gas limit exceeded" in str(e):
                     await self.persist_log(
-                        f"代码执行中止: Gas使用量超出限制 ({self.gas_used}/{self.max_gas})",
+                        f"Code execution terminated: Gas usage exceeded limit ({self.gas_used}/{self.max_gas})",
                         log_level="ERROR",
                         log_metadata={
                             "gas_used": self.gas_used,
@@ -730,7 +730,7 @@ class CodeNode(NodeBase):
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 elif "Potential infinite loop detected" in str(e):
                     await self.persist_log(
-                        f"代码执行中止: 检测到潜在的无限循环",
+                        f"Code execution terminated: Potential infinite loop detected",
                         log_level="ERROR",
                         log_metadata={
                             "exception_type": "infinite_loop_detected",
@@ -740,7 +740,7 @@ class CodeNode(NodeBase):
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 elif "Memory usage exceeded" in str(e):
                     await self.persist_log(
-                        f"代码执行中止: 内存使用量超出限制 ({self.max_memory_mb}MB)",
+                        f"Code execution terminated: Memory usage exceeded limit ({self.max_memory_mb}MB)",
                         log_level="ERROR",
                         log_metadata={
                             "max_memory_mb": self.max_memory_mb,
@@ -750,7 +750,7 @@ class CodeNode(NodeBase):
                     stderr_capture.write(f"Execution terminated: {str(e)}\n")
                 else:
                     await self.persist_log(
-                        f"代码执行异常: {str(e)}",
+                        f"Code execution exception: {str(e)}",
                         log_level="ERROR",
                         log_metadata={
                             "exception_type": "execution_error",
@@ -845,7 +845,7 @@ class CodeNode(NodeBase):
                     }
 
                 await self.persist_log(
-                    f"代码执行成功，产生输出数据 (类型: {type(output_data).__name__})",
+                    f"Code execution successful, generated output data (type: {type(output_data).__name__})",
                     log_level="INFO",
                     log_metadata={
                         "output_type": type(output_data).__name__,
@@ -872,7 +872,7 @@ class CodeNode(NodeBase):
 
                 if custom_outputs_sent > 0:
                     await self.persist_log(
-                        f"发送了 {custom_outputs_sent} 个自定义输出信号",
+                        f"Sent {custom_outputs_sent} custom output signals",
                         log_level="INFO",
                         log_metadata={
                             "custom_outputs_sent": custom_outputs_sent,
@@ -886,7 +886,7 @@ class CodeNode(NodeBase):
             else:
                 error_msg = "Code execution did not produce output_data"
                 await self.persist_log(
-                    "代码执行失败: 未产生output_data变量",
+                    "Code execution failed: did not generate output_data variable",
                     log_level="ERROR",
                     log_metadata={
                         "available_variables": [k for k in local_vars.keys() if not k.startswith('_')],
