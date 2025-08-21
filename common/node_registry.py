@@ -36,10 +36,10 @@ class NodeRegistry:
         self.redis = None
         self.worker_id = CONFIG.get("WORKER_ID", socket.gethostname())
         self.api_url = CONFIG.get("WORKER_API_URL")
-        # Set heartbeat interval to 2 minutes
-        self.heartbeat_interval = int(CONFIG.get("REGISTRY_HEARTBEAT_INTERVAL", 120))
-        # TTL set to be slightly longer than registration interval to ensure buffer time even if registration fails once
-        self.node_ttl = int(CONFIG.get("NODE_TTL", 45))
+        # Set heartbeat interval to 30 seconds
+        self.heartbeat_interval = int(CONFIG.get("REGISTRY_HEARTBEAT_INTERVAL", 30))
+        # TTL set to be 3x longer than heartbeat interval to ensure buffer time
+        self.node_ttl = int(CONFIG.get("NODE_TTL", 90))
         self._heartbeat_task = None
         self._is_running = False
         self.supported_node_types = set()  # Node types supported by current worker
@@ -358,13 +358,20 @@ class NodeRegistry:
     async def _heartbeat_loop(self):
         """Heartbeat loop, periodically update worker status and node type mappings"""
         try:
+            heartbeat_count = 0
             while self._is_running:
-                # First sync node type information from Redis
-                await self.sync_node_types_from_redis()
-                # Re-register worker information and all node type mappings
-                # This is more complete than a simple heartbeat, ensuring system state is always up to date
-                await self.register_worker()
+                # Every 10 heartbeats (5 minutes), do a full re-registration
+                # Otherwise just send a lightweight heartbeat
+                if heartbeat_count % 10 == 0:
+                    # First sync node type information from Redis
+                    await self.sync_node_types_from_redis()
+                    # Re-register worker information and all node type mappings
+                    await self.register_worker()
+                else:
+                    # Send lightweight heartbeat
+                    await self._send_heartbeat()
 
+                heartbeat_count += 1
                 # Wait until next heartbeat cycle
                 await asyncio.sleep(self.heartbeat_interval)
         except asyncio.CancelledError:
@@ -405,6 +412,11 @@ class NodeRegistry:
             # Update heartbeat information, reset expiration time
             await self.redis.hset(worker_key, mapping=heartbeat_data)
             await self.redis.expire(worker_key, self.node_ttl)
+
+            # Also refresh TTL for node type mappings
+            for node_type in self.supported_node_types:
+                type_workers_key = f"node_type:{node_type}:workers"
+                await self.redis.expire(type_workers_key, self.node_ttl)
 
             return True
         except Exception as e:
