@@ -557,7 +557,7 @@ class CodeNode(NodeBase):
                 return False
 
             # 估算初始Gas
-            estimated_gas = self.estimate_gas(self.python_code)
+            estimated_gas = await self.estimate_gas(self.python_code)
             await self.persist_log(
                 f"Code complexity analysis completed, estimated gas consumption: {estimated_gas}",
                 log_level="INFO",

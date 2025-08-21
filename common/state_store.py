@@ -579,17 +579,29 @@ class StateStoreFactory:
         创建状态存储实例
 
         Args:
-            store_type: 存储类型，支持"redis"和"memory"
-            config: 配置参数
+            store_type: 存储类型，支持"redis"和"memory"，如果为None则从CONFIG读取
+            config: 配置参数，如果为None则从CONFIG读取
 
         Returns:
             StateStore: 状态存储实例
         """
-        config = config or {}
+        # 导入CONFIG
+        from tradingflow.depot.python.config import CONFIG
+
+        # 如果没有提供store_type，从CONFIG读取
+        if store_type is None:
+            store_type = CONFIG.get("STATE_STORE_TYPE", "redis")
+
+        # 如果没有提供config，从CONFIG读取
+        if config is None:
+            config = {
+                "redis_url": CONFIG.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
+                "key_prefix": "trading_flow:",
+            }
 
         if store_type == "redis":
             return RedisStateStore(
-                redis_url=config.get("redis_url", "redis://127.0.0.1:6379/0"),
+                redis_url=config.get("redis_url", CONFIG.get("REDIS_URL", "redis://127.0.0.1:6379/0")),
                 key_prefix=config.get("key_prefix", "trading_flow:"),
             )
         elif store_type == "memory":
