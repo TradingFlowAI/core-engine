@@ -306,5 +306,3 @@ python -m station.quick_test
 ## 版权声明
 
 代码归 TradingFlow Company，未经 TradingFlow Company 和 TradingFlow DAO 授权，不得私自传播给第三方，违者要追究法律责任。
-
-(cicd tests)
