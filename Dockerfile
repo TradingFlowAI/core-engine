@@ -18,8 +18,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY tradingflow/depot /app/tradingflow/depot
 COPY tradingflow/station /app/tradingflow/station
 
-# 显式复制 Google 凭证文件（绕过 .gitignore）
-COPY tradingflow/station/config/google_credentials.json /app/tradingflow/station/config/google_credentials.json
+# 接收 Google 凭证作为构建参数
+ARG GOOGLE_CREDENTIALS_JSON
+RUN mkdir -p /app/tradingflow/station/config
+RUN echo "$GOOGLE_CREDENTIALS_JSON" > /app/tradingflow/station/config/google_credentials.json
 
 # 设置环境变量
 ENV PYTHONPATH=/app
