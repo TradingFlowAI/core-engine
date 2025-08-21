@@ -21,7 +21,10 @@ COPY tradingflow/station /app/tradingflow/station
 # 接收 Google 凭证作为构建参数
 ARG GOOGLE_CREDENTIALS_JSON
 RUN mkdir -p /app/tradingflow/station/config
-RUN echo "$GOOGLE_CREDENTIALS_JSON" > /app/tradingflow/station/config/google_credentials.json
+# 使用 printf 而不是 echo 来避免换行符问题，并确保 JSON 格式正确
+RUN printf '%s' "$GOOGLE_CREDENTIALS_JSON" > /app/tradingflow/station/config/google_credentials.json
+# 验证 JSON 格式是否正确
+RUN python3 -m json.tool /app/tradingflow/station/config/google_credentials.json > /dev/null || (echo "Invalid JSON format in Google credentials" && exit 1)
 
 # 设置环境变量
 ENV PYTHONPATH=/app
