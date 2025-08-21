@@ -169,10 +169,10 @@ class FlowScheduler:
 
         # Analyze flow structure, identify DAG components
         flow_structure = self._analyze_flow_structure(flow_config)
-        logger.debug(
-            "Flow structure analysis completed: %s",
-            json.dumps(flow_structure, indent=2),
-        )
+        # logger.debug(
+        #     "Flow structure analysis completed: %s",
+        #     json.dumps(flow_structure, indent=2),
+        # )
 
         # Check if flow already exists to preserve last_cycle
         existing_flow = await self.redis.hgetall(f"flow:{flow_id}")
@@ -1157,8 +1157,13 @@ class FlowScheduler:
             # Get node's component ID
             component_id = node_component_map.get(node_id)
             if not component_id:
-                logger.error(
-                    "Cannot find component ID for node %s, skipping execution", node_id
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=f"Cannot find component ID for node {node_id}, skipping execution",
+                    log_level="ERROR",
+                    log_source="scheduler",
+                    node_id=node_id
                 )
                 continue
 
@@ -1256,13 +1261,23 @@ class FlowScheduler:
         """
         Execute a single node
         """
-        logger.info("[_execute_node] ")
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=f"Starting execution of node {node_id} (type: {node_type})",
+            log_level="INFO",
+            log_source="scheduler",
+            node_id=node_id
+        )
         # Check if component has been marked for stopping
         if await self.is_component_stopped(flow_id, cycle, component_id):
-            logger.info(
-                "Component %s has been marked as stopped, skipping execution of node %s",
-                component_id,
-                node_id,
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=f"Component {component_id} has been marked as stopped, skipping execution of node {node_id}",
+                log_level="INFO",
+                log_source="scheduler",
+                node_id=node_id
             )
             return {"status": "skipped", "reason": "component_stopped"}
 
@@ -1273,12 +1288,26 @@ class FlowScheduler:
         if not node_registry.redis:
             await node_registry.initialize()
 
-        logger.debug("Looking for workers supporting node type %s", node_type)
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=f"Looking for workers supporting node type {node_type}",
+            log_level="DEBUG",
+            log_source="scheduler",
+            node_id=node_id
+        )
         workers = await node_registry.find_workers_for_node_type(node_type)
 
         if not workers:
             error_msg = f"No available workers found supporting node type {node_type}"
-            logger.error(error_msg)
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=error_msg,
+                log_level="ERROR",
+                log_source="scheduler",
+                node_id=node_id
+            )
 
             # Record node error status
             error_data = {
@@ -1312,21 +1341,44 @@ class FlowScheduler:
         try:
             # Call the selected worker's node execution API
             async with httpx.AsyncClient(timeout=30) as client:
-                logger.info(
-                    "Node %s (type: %s) will be executed by worker %s",
-                    node_id,
-                    node_type,
-                    selected_worker["id"],
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=f"Node {node_id} (type: {node_type}) will be executed by worker {selected_worker['id']}",
+                    log_level="INFO",
+                    log_source="scheduler",
+                    node_id=node_id
                 )
                 try:
-                    logger.debug("[node data] -> %s", json.dumps(node_data))
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=cycle,
+                        message=f"Node execution data: {json.dumps(node_data)}",
+                        log_level="DEBUG",
+                        log_source="scheduler",
+                        node_id=node_id
+                    )
                     response = await client.post(
                         f"{worker_api_url}/nodes/execute", json=node_data
                     )
                     response.raise_for_status()
                 except httpx.HTTPStatusError as e:
-                    logger.error("Node execution error: %s", e.response.text)
-                    logger.error("[node data] -> %s", json.dumps(node_data))
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=cycle,
+                        message=f"Node execution error: {e.response.text}",
+                        log_level="ERROR",
+                        log_source="scheduler",
+                        node_id=node_id
+                    )
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=cycle,
+                        message=f"Node execution data: {json.dumps(node_data)}",
+                        log_level="ERROR",
+                        log_source="scheduler",
+                        node_id=node_id
+                    )
                     raise
                 result = response.json()
 
@@ -1345,8 +1397,14 @@ class FlowScheduler:
                 return result
 
         except Exception as e:
-            logger.error("Error executing node %s: %s", node_id, str(e))
-            logger.error("Node execution error: %s", str(e))
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=f"Error executing node {node_id}: {str(e)}",
+                log_level="ERROR",
+                log_source="scheduler",
+                node_id=node_id
+            )
 
             # Record node error status
             error_data = {

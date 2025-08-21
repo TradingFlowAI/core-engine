@@ -790,7 +790,7 @@ class CodeNode(NodeBase):
                 if stdout_output:
                     await self.persist_log(f"Captured stdout content: {stdout_output}", "INFO")
                 if stderr_output:
-                    await self.persist_log(f"Captured stderr content: {stderr_output}", "WARNING")
+                    await self.persist_log(f"Captured stderr content: {stderr_output}", "ERROR")
                 if debug_output:
                     await self.persist_log(f"Captured debug content: {debug_output}", "DEBUG")
 
