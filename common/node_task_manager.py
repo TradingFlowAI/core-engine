@@ -446,16 +446,28 @@ class NodeTaskManager:
             - metadata: additional execution info
         """
         try:
+            import json
             from tradingflow.depot.python.db.services.flow_execution_log_service import FlowExecutionLogService
 
-            # Get all task info for this flow/cycle
-            all_tasks = await self.get_all_tasks()
+            # Get task data directly from Redis instead of memory
             flow_tasks = {}
-
-            # Filter tasks for this flow and cycle
-            for task_info in all_tasks:
-                if (task_info.get('flow_id') == flow_id and
-                    task_info.get('cycle') == cycle):
+            
+            # Use Redis pattern matching to find all node tasks for this flow/cycle
+            pattern = f"node_tasks:{flow_id}_{cycle}_*"
+            task_keys = await self.state_store.redis_client.keys(pattern)
+            
+            self.logger.debug(f"Found {len(task_keys)} task keys for pattern {pattern}")
+            
+            for task_key in task_keys:
+                try:
+                    # Get task data from Redis
+                    task_data_str = await self.state_store.redis_client.get(task_key)
+                    if not task_data_str:
+                        continue
+                        
+                    # Parse JSON data
+                    task_info = json.loads(task_data_str)
+                    
                     # Extract node_id from node_task_id (format: flow_id_cycle_node_id)
                     node_task_id = task_info.get('node_task_id', '')
                     if node_task_id:
@@ -466,11 +478,12 @@ class NodeTaskManager:
                             node_id = '_'.join(parts[2:])
                             if node_id and (not node_ids or node_id in node_ids):
                                 flow_tasks[node_id] = task_info
+                                
+                except Exception as e:
+                    self.logger.warning(f"Error parsing task data from key {task_key}: {str(e)}")
+                    continue
 
             comprehensive_status = {}
-
-            # Use database session context manager like in scheduler.py
-
             log_service = FlowExecutionLogService()
 
             for node_id, task_info in flow_tasks.items():
@@ -488,6 +501,17 @@ class NodeTaskManager:
                     # Extract signals from log metadata
                     signals = self._extract_signals_from_logs(logs_data)
 
+                    # Calculate execution time if available
+                    execution_time = None
+                    if task_info.get('start_time') and task_info.get('completed_at'):
+                        try:
+                            from datetime import datetime
+                            start_time = datetime.fromisoformat(task_info['start_time'].replace('Z', '+00:00'))
+                            completed_at = datetime.fromisoformat(task_info['completed_at'].replace('Z', '+00:00'))
+                            execution_time = (completed_at - start_time).total_seconds()
+                        except Exception:
+                            pass
+
                     comprehensive_status[node_id] = {
                         'status': task_info.get('status', 'unknown'),
                         'logs': logs_data,
@@ -497,7 +521,14 @@ class NodeTaskManager:
                             'worker_id': task_info.get('worker_id'),
                             'created_at': task_info.get('created_at'),
                             'updated_at': task_info.get('updated_at'),
-                            'execution_time': task_info.get('execution_time'),
+                            'start_time': task_info.get('start_time'),
+                            'completed_at': task_info.get('completed_at'),
+                            'registered_at': task_info.get('registered_at'),
+                            'execution_time': execution_time,
+                            'progress': task_info.get('progress'),
+                            'node_type': task_info.get('node_type'),
+                            'component_id': task_info.get('component_id'),
+                            'message': task_info.get('message'),
                             'error': task_info.get('error')
                         }
                     }
@@ -511,6 +542,7 @@ class NodeTaskManager:
                         'signals': {},
                         'metadata': {
                             'task_id': task_info.get('task_id'),
+                            'node_type': task_info.get('node_type'),
                             'error': str(e)
                         }
                     }
