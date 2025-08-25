@@ -795,6 +795,9 @@ class NodeBase(abc.ABC):
         self._stop_execution_reason = reason
         self._stop_execution_source = source_node
 
+        # 立即更新Redis状态为TERMINATED
+        await self.set_status(NodeStatus.TERMINATED, f"Stopped by {source_node}: {reason}")
+
         # 如果有等待中的future，取消它
         if self._signal_ready_future and not self._signal_ready_future.done():
             self._signal_ready_future.cancel()

@@ -31,7 +31,7 @@ def is_user_id(identifier: str) -> bool:
 @register_node_type(
     "x_listener_node",
     default_params={
-        "account": "",  # X账号，支持UserId和UserName
+        "accounts": [],  # X账号列表，支持UserId和UserName
         "limit": 20,  # 获取的推文数量限制
         "keywords": "",  # 关键词过滤，多个关键词用逗号分隔
         "search_mode": "user_tweets",  # 搜索模式: "user_tweets" 或 "advanced_search"
@@ -44,7 +44,7 @@ class XListenerNode(NodeBase):
     Twitter监听器节点 - 用于获取指定用户的最近推文或进行高级搜索
 
     输入参数:
-    - account: X 的用户名或id（用户推文模式下使用）
+    - accounts: X 的用户名或id列表（用户推文模式下使用）
     - keywords: 关键词过滤，多个关键词用逗号分隔
     - search_mode: 搜索模式 ("user_tweets" 或 "advanced_search")
     - query_type: 搜索类型 ("Latest" 或 "Top")
@@ -62,7 +62,7 @@ class XListenerNode(NodeBase):
             cycle: int,
             node_id: str,
             name: str,
-            account: str = "",
+            accounts: List[str] = None,
             limit: int = 20,
             keywords: str = "",
             search_mode: str = "user_tweets",
@@ -104,7 +104,7 @@ class XListenerNode(NodeBase):
         )
 
         # 保存参数
-        self.account = account
+        self.accounts = accounts or []
         self.keywords = keywords.strip() if keywords else ""
         self.search_mode = search_mode
         self.query_type = query_type
@@ -277,28 +277,28 @@ class XListenerNode(NodeBase):
             await self.persist_log(traceback.format_exc(), "DEBUG")
             return {"error": error_msg, "tweets": all_tweets}
 
-    async def fetch_tweets(self, account:str = "", cursor="", max_pages=5) -> Dict[str, Any]:
+    async def fetch_tweets_for_account(self, account: str, cursor="", max_pages=5) -> Dict[str, Any]:
         """
-        获取用户的最近推文
+        获取单个用户的最近推文
 
         Args:
-            account: Twitter用户名
+            account: Twitter用户名或ID
             cursor: 分页游标
             max_pages: 最大页数
 
         Returns:
             Dict[str, Any]: 包含推文和用户信息的字典
         """
-        if not self.account:
+        if not account:
             error_msg = "必须提供account参数"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             return {"error": error_msg, "tweets": []}
 
-        if is_user_id(self.account):
-            user_id = self.account
+        if is_user_id(account):
+            user_id = account
             user_name = None
         else:
-            user_name = self.account
+            user_name = account
             user_id = None
 
         # 准备结果容器
@@ -329,14 +329,14 @@ class XListenerNode(NodeBase):
                 # 检查响应状态
                 if response.status_code != 200:
                     error_msg = f"API请求失败: {response.status_code} - {response.text}"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
 
                 # 解析响应
                 response_data = response.json()
                 if response_data.get("status") != "success":
                     error_msg = f"API返回错误: {response_data.get('msg') or response_data.get('message')}"
-                    self.logger.error(error_msg)
+                    await self.persist_log(error_msg, "ERROR")
                     return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
 
                 # 获取推文 - 适应新的API响应结构
@@ -378,17 +378,75 @@ class XListenerNode(NodeBase):
 
         except Exception as e:
             error_msg = f"获取推文时出错: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
 
+    async def fetch_tweets_for_all_accounts(self) -> Dict[str, Any]:
+        """
+        获取所有账户的推文
+
+        Returns:
+            Dict[str, Any]: 包含所有推文的字典
+        """
+        all_tweets = []
+        all_errors = []
+        
+        await self.persist_log(f"开始获取 {len(self.accounts)} 个账户的推文", "INFO")
+        
+        for account in self.accounts:
+            await self.persist_log(f"正在获取账户 {account} 的推文", "INFO")
+            
+            # 为每个账户获取推文
+            account_result = await self.fetch_tweets_for_account(account)
+            
+            if "error" in account_result:
+                error_msg = f"账户 {account} 获取失败: {account_result['error']}"
+                await self.persist_log(error_msg, "WARNING")
+                all_errors.append(error_msg)
+            else:
+                tweets = account_result.get("tweets", [])
+                # 为每条推文添加来源账户信息
+                for tweet in tweets:
+                    tweet["source_account"] = account
+                
+                all_tweets.extend(tweets)
+                await self.persist_log(f"账户 {account} 获取到 {len(tweets)} 条推文", "INFO")
+            
+            # 简单的速率限制，避免API调用过快
+            await asyncio.sleep(0.5)
+        
+        # 按时间排序所有推文（如果有时间戳）
+        try:
+            all_tweets.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        except:
+            pass  # 如果排序失败，保持原顺序
+        
+        # 限制总推文数量
+        if len(all_tweets) > self.limit:
+            all_tweets = all_tweets[:self.limit]
+        
+        await self.persist_log(f"总共获取到 {len(all_tweets)} 条推文", "INFO")
+        
+        result = {
+            "tweets": all_tweets,
+            "total_count": len(all_tweets),
+            "accounts_processed": len(self.accounts),
+            "errors": all_errors
+        }
+        
+        # 如果所有账户都失败了，返回错误
+        if len(all_errors) == len(self.accounts) and len(all_tweets) == 0:
+            result["error"] = f"所有账户获取失败: {'; '.join(all_errors)}"
+        
+        return result
 
     async def execute(self) -> bool:
         """执行节点逻辑，获取Twitter用户的最近推文或进行高级搜索"""
         start_time = time.time()
         try:
-            mode_desc = "高级搜索" if self.search_mode == "advanced_search" else f"用户 {self.account} 的推文"
-            self.logger.info(f"执行XListenerNode，模式: {self.search_mode}，获取{mode_desc}")
+            mode_desc = "高级搜索" if self.search_mode == "advanced_search" else f"用户 {', '.join(self.accounts)} 的推文"
+            await self.persist_log(f"执行XListenerNode，模式: {self.search_mode}，获取{mode_desc}", "INFO")
 
             # 检查API密钥
             if not self.api_key:
@@ -399,14 +457,14 @@ class XListenerNode(NodeBase):
 
             # 根据搜索模式检查参数
             if self.search_mode == "user_tweets":
-                if not self.account:
-                    error_msg = "Account parameter is required when fetching user tweets"
+                if not self.accounts:
+                    error_msg = "Accounts parameter is required when fetching user tweets"
                     await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
             elif self.search_mode == "advanced_search":
-                if not self.keywords and not self.account:
-                    error_msg = "Keywords or account parameter is required for advanced search"
+                if not self.keywords and not self.accounts:
+                    error_msg = "Keywords or accounts parameter is required for advanced search"
                     await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
@@ -417,7 +475,7 @@ class XListenerNode(NodeBase):
             if self.search_mode == "advanced_search":
                 result = await self.fetch_tweets_advanced_search()
             else:
-                result = await self.fetch_tweets()
+                result = await self.fetch_tweets_for_all_accounts()
 
             # 检查是否有错误
             if "error" in result:
@@ -430,7 +488,7 @@ class XListenerNode(NodeBase):
             tweets_data = {
                 "tweets": result["tweets"],
                 "count": len(result["tweets"]),
-                "user": self.account,
+                "accounts": self.accounts,
                 "keywords": self.keywords,
                 "search_mode": self.search_mode,
                 "query_type": self.query_type,
