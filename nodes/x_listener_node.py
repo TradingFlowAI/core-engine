@@ -295,7 +295,7 @@ class XListenerNode(NodeBase):
             return {"error": error_msg, "tweets": []}
 
         if is_user_id(self.account):
-            user_id = account
+            user_id = self.account
             user_name = None
         else:
             user_name = self.account
@@ -399,7 +399,7 @@ class XListenerNode(NodeBase):
 
             # 根据搜索模式检查参数
             if self.search_mode == "user_tweets":
-                if not account:
+                if not self.account:
                     error_msg = "Account parameter is required when fetching user tweets"
                     await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
