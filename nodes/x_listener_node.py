@@ -290,7 +290,7 @@ class XListenerNode(NodeBase):
             Dict[str, Any]: 包含推文和用户信息的字典
         """
         if not account:
-            error_msg = "必须提供account参数"
+            error_msg = "Account parameter is required"
             await self.persist_log(error_msg, "ERROR")
             return {"error": error_msg, "tweets": []}
 
@@ -328,14 +328,14 @@ class XListenerNode(NodeBase):
 
                 # 检查响应状态
                 if response.status_code != 200:
-                    error_msg = f"API请求失败: {response.status_code} - {response.text}"
+                    error_msg = f"API request failed: {response.status_code} - {response.text}"
                     await self.persist_log(error_msg, "ERROR")
                     return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
 
                 # 解析响应
                 response_data = response.json()
                 if response_data.get("status") != "success":
-                    error_msg = f"API返回错误: {response_data.get('msg') or response_data.get('message')}"
+                    error_msg = f"API returned error: {response_data.get('msg') or response_data.get('message')}"
                     await self.persist_log(error_msg, "ERROR")
                     return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
 
@@ -377,7 +377,7 @@ class XListenerNode(NodeBase):
             }
 
         except Exception as e:
-            error_msg = f"获取推文时出错: {str(e)}"
+            error_msg = f"Error fetching tweets: {str(e)}"
             await self.persist_log(error_msg, "ERROR")
             await self.persist_log(traceback.format_exc(), "DEBUG")
             return {"error": error_msg, "tweets": all_tweets, "user_info": user_info}
@@ -392,16 +392,16 @@ class XListenerNode(NodeBase):
         all_tweets = []
         all_errors = []
         
-        await self.persist_log(f"开始获取 {len(self.accounts)} 个账户的推文", "INFO")
+        await self.persist_log(f"Starting to fetch tweets from {len(self.accounts)} accounts", "INFO")
         
         for account in self.accounts:
-            await self.persist_log(f"正在获取账户 {account} 的推文", "INFO")
+            await self.persist_log(f"Fetching tweets from account: {account}", "INFO")
             
             # 为每个账户获取推文
             account_result = await self.fetch_tweets_for_account(account)
             
             if "error" in account_result:
-                error_msg = f"账户 {account} 获取失败: {account_result['error']}"
+                error_msg = f"Failed to fetch from account {account}: {account_result['error']}"
                 await self.persist_log(error_msg, "WARNING")
                 all_errors.append(error_msg)
             else:
@@ -411,7 +411,7 @@ class XListenerNode(NodeBase):
                     tweet["source_account"] = account
                 
                 all_tweets.extend(tweets)
-                await self.persist_log(f"账户 {account} 获取到 {len(tweets)} 条推文", "INFO")
+                await self.persist_log(f"Fetched {len(tweets)} tweets from account {account}", "INFO")
             
             # 简单的速率限制，避免API调用过快
             await asyncio.sleep(0.5)
@@ -426,7 +426,7 @@ class XListenerNode(NodeBase):
         if len(all_tweets) > self.limit:
             all_tweets = all_tweets[:self.limit]
         
-        await self.persist_log(f"总共获取到 {len(all_tweets)} 条推文", "INFO")
+        await self.persist_log(f"Total fetched {len(all_tweets)} tweets", "INFO")
         
         result = {
             "tweets": all_tweets,
@@ -437,7 +437,7 @@ class XListenerNode(NodeBase):
         
         # 如果所有账户都失败了，返回错误
         if len(all_errors) == len(self.accounts) and len(all_tweets) == 0:
-            result["error"] = f"所有账户获取失败: {'; '.join(all_errors)}"
+            result["error"] = f"All accounts failed to fetch: {'; '.join(all_errors)}"
         
         return result
 
@@ -445,12 +445,12 @@ class XListenerNode(NodeBase):
         """执行节点逻辑，获取Twitter用户的最近推文或进行高级搜索"""
         start_time = time.time()
         try:
-            mode_desc = "高级搜索" if self.search_mode == "advanced_search" else f"用户 {', '.join(self.accounts)} 的推文"
-            await self.persist_log(f"执行XListenerNode，模式: {self.search_mode}，获取{mode_desc}", "INFO")
+            mode_desc = "advanced search" if self.search_mode == "advanced_search" else f"tweets from users {', '.join(self.accounts)}"
+            await self.persist_log(f"Executing XListenerNode, mode: {self.search_mode}, fetching {mode_desc}", "INFO")
 
             # 检查API密钥
             if not self.api_key:
-                error_msg = "未提供Twitter API密钥"
+                error_msg = "Twitter API key not provided"
                 self.logger.error(error_msg)
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
