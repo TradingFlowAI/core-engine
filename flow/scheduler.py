@@ -346,6 +346,9 @@ class FlowScheduler:
                 }
             }
 
+        except ValueError as e:
+            # ValueError should be re-raised to trigger 404 in API layer
+            raise e
         except Exception as e:
             logger.exception(f"Error getting comprehensive flow status: {str(e)}")
             return {
