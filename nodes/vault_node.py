@@ -228,7 +228,7 @@ class VaultNode(NodeBase):
                 "message": "No holdings data available",
             }
 
-        holdings_data = self.holdings_result.get("holdings_data", {})
+        holdings_data = self.holdings_result.get("holdings_data") or {}
 
         # 处理不同链的数据格式
         if self.chain == "aptos":
@@ -314,6 +314,18 @@ class VaultNode(NodeBase):
         """
         准备 Flow EVM 持仓输出数据
         """
+        # Check if holdings_data is None (connection failed)
+        if holdings_data is None:
+            return {
+                "success": False,
+                "vault_address": self.vault_address,
+                "chain": self.chain,
+                "chain_id": self.chain_id,
+                "holdings": [],
+                "total_value_usd": 0.0,
+                "message": "Failed to retrieve Flow EVM holdings - connection error",
+            }
+        
         # Flow EVM service 返回的数据格式已经包含价格信息
         if not holdings_data.get("success"):
             return {
