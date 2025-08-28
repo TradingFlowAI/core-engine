@@ -201,14 +201,15 @@ class VaultNode(NodeBase):
             )
             await self.persist_log(traceback.format_exc(), "DEBUG")
 
-            return {
-                "success": False,
-                "vault_address": vault_address,
-                "chain": self.chain,
-                "holdings_data": None,
-                "message": f"Error querying {self.chain} vault holdings: {str(e)}",
-                "error": str(e),
-            }
+            raise
+            # return {
+            #     "success": False,
+            #     "vault_address": vault_address,
+            #     "chain": self.chain,
+            #     "holdings_data": None,
+            #     "message": f"Error querying {self.chain} vault holdings: {str(e)}",
+            #     "error": str(e),
+            # }
 
     async def prepare_holdings_output(self) -> Dict:
         """
@@ -325,7 +326,7 @@ class VaultNode(NodeBase):
                 "total_value_usd": 0.0,
                 "message": "Failed to retrieve Flow EVM holdings - connection error",
             }
-        
+
         # Flow EVM service 返回的数据格式已经包含价格信息
         if not holdings_data.get("success"):
             return {
