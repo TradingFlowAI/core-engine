@@ -14,7 +14,7 @@ from tradingflow.depot.python.config import CONFIG
 setup_logging(CONFIG)
 logger = logging.getLogger(__name__)
 
-COMPANION_URL = CONFIG.get("COMPANION_URL")
+MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
 VAULT_API_EVENTS_URI = "/aptos/vault/events/{address}"
 VAULT_API_HOLDINGS_URI = "/aptos/vault/holdings/{address}"
 VAULT_API_TRADE_SIGNAL_URI = "/aptos/vault/trade-signal"
@@ -51,11 +51,11 @@ class AptosVaultService:
             logger.info("AptosVaultService instance created")
         return cls._instances
 
-    def __init__(self, companion_url=COMPANION_URL):
+    def __init__(self, monitor_url=MONITOR_URL):
         """
         Initialize AptosVaultService
         """
-        self._companion_url = companion_url
+        self._monitor_url = monitor_url
         self._client = httpx.AsyncClient(timeout=30.0)
 
     async def check_balance_manager(self, investor_address: str) -> Dict[str, any]:
@@ -82,7 +82,7 @@ class AptosVaultService:
             httpx.RequestError: 网络请求错误
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_BALANCE_MANAGER_URI.format(address=investor_address)}"
+            url = f"{self._monitor_url}{VAULT_API_BALANCE_MANAGER_URI.format(address=investor_address)}"
             logger.info(f"Checking balance manager for investor: {url}")
 
             response = await self._client.get(url)
@@ -168,7 +168,7 @@ class AptosVaultService:
         }
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_HOLDINGS_URI.format(address=investor_address)}"
+            url = f"{self._monitor_url}{VAULT_API_HOLDINGS_URI.format(address=investor_address)}"
             logger.info(f"Requesting investor holdings from: {url}")
 
             response = await self._client.get(url)
@@ -475,7 +475,7 @@ class AptosVaultService:
                 "deadline": deadline,
             }
 
-            url = f"{self._companion_url}{VAULT_API_TRADE_SIGNAL_URI}"
+            url = f"{self._monitor_url}{VAULT_API_TRADE_SIGNAL_URI}"
             logger.info(f"Executing admin swap: {url}")
             logger.info(f"Trade data: {trade_data}")
 
@@ -507,7 +507,7 @@ class AptosVaultService:
 
     async def get_contract_address(self) -> Dict[str, any]:
         """
-        从companion服务获取TradingFlow Vault合约地址
+        从 monitor  Vault合约地址
 
         Returns:
             Dict[str, any]: 合约地址信息
@@ -524,23 +524,23 @@ class AptosVaultService:
             httpx.RequestError: 网络请求错误
         """
         try:
-            url = f"{self._companion_url}/aptos/api/tf_vault/contract-address"
-            logger.info(f"Requesting contract address from companion: {url}")
+            url = f"{self._monitor_url}/aptos/vault/contract-address"
+            logger.info(f"Requesting contract address from monitor: {url}")
 
             response = await self._client.get(url)
             response.raise_for_status()
 
             data = response.json()
-            logger.info("Successfully retrieved contract address from companion")
+            logger.info("Successfully retrieved contract address from monitor")
 
             return data
 
         except httpx.HTTPStatusError as e:
-            error_msg = f"Failed to get contract address from companion. Status: {e.response.status_code}, Error: {e.response.text}"
+            error_msg = f"Failed to get contract address from monitor. Status: {e.response.status_code}, Error: {e.response.text}"
             logger.error(error_msg)
             raise
         except httpx.RequestError as e:
-            logger.error(f"Network error when requesting companion service: {e}")
+            logger.error(f"Network error when requesting monitor service: {e}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error getting contract address: {e}")

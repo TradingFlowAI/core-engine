@@ -14,7 +14,7 @@ from tradingflow.depot.python.config import CONFIG
 setup_logging(CONFIG)
 logger = logging.getLogger(__name__)
 
-COMPANION_URL = CONFIG.get("COMPANION_URL", "http://localhost:3000")
+MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
 VAULT_API_CREATE_URI = "/evm/vault/create"
 VAULT_API_INFO_URI = "/evm/vault/{chain_id}/{vault_address}"
 VAULT_API_INVESTOR_URI = "/evm/vault/investor/{chain_id}/{investor_address}"
@@ -34,7 +34,7 @@ class FlowEvmVaultService:
     """
     Service class for managing Flow EVM vaults.
 
-    Provides complete lifecycle management for Flow EVM Vault contracts through companion service,
+    Provides complete lifecycle management for Flow EVM Vault contracts through monitor. service,
     including deployment, transaction execution and query functions. This class implements a singleton
     factory pattern to ensure the same instance is always returned for the same chain_id.
     """
@@ -58,16 +58,16 @@ class FlowEvmVaultService:
             logger.info(f"FlowEvmVaultService instance created for chain_id: {chain_id}")
         return cls._instances[chain_id]
 
-    def __init__(self, chain_id: int, companion_url: str = COMPANION_URL):
+    def __init__(self, chain_id: int, monitor_url: str = MONITOR_URL):
         """
         Initialize FlowEvmVaultService
 
         Args:
             chain_id: 链ID
-            companion_url: companion服务URL
+            monitor_url: monitor服务URL
         """
         self.chain_id = chain_id
-        self._companion_url = companion_url
+        self._monitor_url = monitor_url
         self._client = httpx.AsyncClient(timeout=30.0)
 
     async def create_vault(
@@ -94,8 +94,8 @@ class FlowEvmVaultService:
             httpx.RequestError: 网络请求错误
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_CREATE_URI}"
-            logger.info(f"Creating vault via companion: {url}")
+            url = f"{self._monitor_url}{VAULT_API_CREATE_URI}"
+            logger.info(f"Creating vault via monitor: {url}")
 
             request_data = {
                 "chain_id": self.chain_id,
@@ -134,8 +134,8 @@ class FlowEvmVaultService:
             Dict[str, any]: vault信息
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_INFO_URI.format(chain_id=self.chain_id, vault_address=vault_address)}"
-            logger.info(f"Getting vault info from companion: {url}")
+            url = f"{self._monitor_url}{VAULT_API_INFO_URI.format(chain_id=self.chain_id, vault_address=vault_address)}"
+            logger.info(f"Getting vault info from monitor: {url}")
 
             response = await self._client.get(url)
             response.raise_for_status()
@@ -167,9 +167,9 @@ class FlowEvmVaultService:
             Dict[str, any]: vault信息
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_INVESTOR_URI.format(chain_id=self.chain_id, investor_address=investor_address)}"
+            url = f"{self._monitor_url}{VAULT_API_INVESTOR_URI.format(chain_id=self.chain_id, investor_address=investor_address)}"
             params = {"factory_address": factory_address}
-            logger.info(f"Getting vault by investor from companion: {url}")
+            logger.info(f"Getting vault by investor from monitor: {url}")
 
             response = await self._client.get(url, params=params)
             response.raise_for_status()
@@ -200,8 +200,8 @@ class FlowEvmVaultService:
             Dict[str, any]: 投资组合信息
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_PORTFOLIO_URI.format(chain_id=self.chain_id, vault_address=vault_address)}"
-            logger.info(f"Getting portfolio composition from companion: {url}")
+            url = f"{self._monitor_url}{VAULT_API_PORTFOLIO_URI.format(chain_id=self.chain_id, vault_address=vault_address)}"
+            logger.info(f"Getting portfolio composition from monitor: {url}")
 
             response = await self._client.get(url)
             response.raise_for_status()
@@ -376,8 +376,8 @@ class FlowEvmVaultService:
             Dict[str, any]: 交易结果
         """
         try:
-            url = f"{self._companion_url}{VAULT_API_SWAP_URI}"
-            logger.info(f"Executing swap via companion: {url}")
+            url = f"{self._monitor_url}{VAULT_API_SWAP_URI}"
+            logger.info(f"Executing swap via monitor: {url}")
 
             request_data = {
                 "chain_id": self.chain_id,
@@ -419,8 +419,8 @@ class FlowEvmVaultService:
             Dict[str, any]: 代币信息
         """
         try:
-            url = f"{self._companion_url}{TOKEN_API_INFO_URI.format(chain_id=self.chain_id, token_address=token_address)}"
-            logger.info(f"Getting token info from companion: {url}")
+            url = f"{self._monitor_url}{TOKEN_API_INFO_URI.format(chain_id=self.chain_id, token_address=token_address)}"
+            logger.info(f"Getting token info from monitor: {url}")
 
             response = await self._client.get(url)
             response.raise_for_status()
@@ -452,8 +452,8 @@ class FlowEvmVaultService:
             Dict[str, any]: 余额信息
         """
         try:
-            url = f"{self._companion_url}{TOKEN_API_BALANCE_URI.format(chain_id=self.chain_id, token_address=token_address, holder_address=holder_address)}"
-            logger.info(f"Getting token balance from companion: {url}")
+            url = f"{self._monitor_url}{TOKEN_API_BALANCE_URI.format(chain_id=self.chain_id, token_address=token_address, holder_address=holder_address)}"
+            logger.info(f"Getting token balance from monitor: {url}")
 
             response = await self._client.get(url)
             response.raise_for_status()
