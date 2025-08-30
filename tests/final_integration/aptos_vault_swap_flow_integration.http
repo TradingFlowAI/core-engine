@@ -53,67 +53,8 @@ Content-Type: application/json
         }
       }
     ],
-    "edges": [
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_balance",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_address",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "chain",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_balance",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_address",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "chain",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_balance",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "from_token"
-      },
-      {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "from_token"
-      },
-      {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "to_token"
-      },
+    "edges":
+    [
       {
         "source": "code_node_1",
         "source_handle": "output_data",
@@ -121,16 +62,22 @@ Content-Type: application/json
         "target_handle": "amount_in_human_readable"
       },
       {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "slippery"
+        "source": "vault_node_1",
+        "source_handle": "chain",
+        "target": "code_node_1",
+        "target_handle": "input_data"
       },
       {
         "source": "vault_node_1",
         "source_handle": "vault_address",
         "target": "swap_node_1",
         "target_handle": "vault_address"
+      },
+      {
+        "source": "code_node_1",
+        "source_handle": "output_data",
+        "target": "swap_node_1",
+        "target_handle": "slippery"
       }
     ]
   },
