@@ -133,6 +133,9 @@ class CodeNode(NodeBase):
         self.loop_count = 0
         self.recursion_depth = 0
 
+        # Initialize input data for aggregation (required for auto_update_attr)
+        self.input_data = {}
+
         # Save main thread's event loop for communication in worker threads
         self.loop = asyncio.get_event_loop()
 
