@@ -570,11 +570,11 @@ class CodeNode(NodeBase):
 
             # 使用BaseNode自动聚合的input_data（避免双重处理）
             input_data_dict = getattr(self, 'input_data', {})
-            
+
             # 确保input_data是字典格式
             if not isinstance(input_data_dict, dict):
                 input_data_dict = {}
-                
+
             await self.persist_log(
                 f"Using auto-aggregated input data, collected {len(input_data_dict)} input variables",
                 log_level="INFO",
@@ -587,7 +587,7 @@ class CodeNode(NodeBase):
             # 准备执行环境
             local_vars = await self._setup_execution_environment()
             local_vars.update(input_data_dict)
-            
+
             # 添加统一的 input_data 变量，方便代码中使用 input_data.get() 方式访问
             local_vars['input_data'] = input_data_dict
 
