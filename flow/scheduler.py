@@ -323,10 +323,18 @@ class FlowScheduler:
             completed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'completed')
             error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
 
+            # Calculate flow status based on node states
+            if error_nodes > 0:
+                flow_status = "error"
+            elif running_nodes > 0:
+                flow_status = "running"
+            else:
+                flow_status = "completed"
+
             return {
                 "flow_id": flow_id,
                 "cycle": cycle,
-                "flow_status": cycle_data.get("status", "unknown"),
+                "flow_status": flow_status,
                 "start_time": cycle_data.get("start_time"),
                 "end_time": cycle_data.get("end_time"),
                 "nodes": comprehensive_nodes,
