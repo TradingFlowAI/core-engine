@@ -1,9 +1,9 @@
 ### Aptos Vault + Code + Swap Node 完整流程集成测试
 ### 测试 vault_node -> code_node -> swap_node 的完整交易流程
 
-# @baseUrl = http://localhost:7002
-@baseUrl = http://34.226.189.27:7002
-@flowId = 68b27998b037ab769398a747
+@baseUrl = http://localhost:7002
+# @baseUrl = http://34.226.189.27:7002
+@flowId = 68b2f57894dac2d8e87be342
 @userId = 684c36ce23a411dff96ff68a
 @vaultAddress = 0xb2c2a894f5de4a7a0799e9872c71929ac608dd522f69ea1f36b8ac915257f182
 @createdAt = 2025-08-30T06:55:00.000Z
@@ -17,70 +17,69 @@ Content-Type: application/json
   "flow_id": "{{flowId}}",
   "cycle_interval": "0",
   "flow_json": {
-    "nodes": [
-      {
-        "id": "vault_node_1",
-        "type": "vault_node",
-        "config": {
-          "node_class_type": "vault_node",
-          "chain": "aptos",
-          "vault_address": "{{vaultAddress}}"
-        }
-      },
-      {
-        "id": "code_node_1",
-        "type": "code_node",
-        "config": {
-          "node_class_type": "code_node",
-          "python_code": "# input_data should contain vault_address, chain, vault_balance, etc.\n# Please customize logic as needed\noutput_data = {\n    'from_token': 'USDT',  # e.g., from vault_asset or user selection\n    'to_token': 'ETH',     # e.g., user target token\n    'chain': input_data.get('chain', ''),\n    'vault_address': input_data.get('vault_address', ''),\n    'amount_in_percentage': 50,  # example: swap 50% of holding\n    'amount_in_human_readable': 100,  # example: swap 100 units\n    'slippery': 0.005    # example: 0.5% slippage\n}\n",
-          "input_data": {
-            "vault_address": "",
-            "chain": ""
-          }
-        }
-      },
-      {
-        "id": "swap_node_1",
-        "type": "swap_node",
-        "config": {
-          "node_class_type": "swap_node",
-          "from_token": "USDC",
-          "to_token": "APT",
-          "amount_in_human_readable": 1,
-          "slippery": null,
-          "chain": "APTOS",
-          "vault_address": ""
+  "nodes": [
+    {
+      "id": "vault_node_1",
+      "type": "vault_node",
+      "config": {
+        "node_class_type": "vault_node",
+        "chain": "aptos",
+        "vault_address": "0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d"
+      }
+    },
+    {
+      "id": "code_node_1",
+      "type": "code_node",
+      "config": {
+        "node_class_type": "code_node",
+        "python_code": "output_data = {\n    'from_token': 'USDC',\n    'to_token': 'APT',\n    'chain': input_data.get('chain', ''),\n    'vault_address': input_data.get('vault_address', ''),\n    'amount_in_human_readable': 1\n}",
+        "input_data": {
+          "vault_address": "",
+          "chain": ""
         }
       }
-    ],
-    "edges":
-    [
-      {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "amount_in_human_readable"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "chain",
-        "target": "code_node_1",
-        "target_handle": "input_data"
-      },
-      {
-        "source": "vault_node_1",
-        "source_handle": "vault_address",
-        "target": "swap_node_1",
-        "target_handle": "vault_address"
-      },
-      {
-        "source": "code_node_1",
-        "source_handle": "output_data",
-        "target": "swap_node_1",
-        "target_handle": "slippery"
+    },
+    {
+      "id": "swap_node_1",
+      "type": "swap_node",
+      "config": {
+        "node_class_type": "swap_node",
+        "from_token": "USDC",
+        "to_token": "xBTC",
+        "amount_in_human_readable": 1,
+        "slippery": "0.5",
+        "chain": "aptos",
+        "vault_address": ""
       }
-    ]
-  },
+    }
+  ],
+  "edges": [
+    {
+      "source": "vault_node_1",
+      "source_handle": "chain",
+      "target": "code_node_1",
+      "target_handle": "input_data"
+    },
+    {
+      "source": "vault_node_1",
+      "source_handle": "vault_address",
+      "target": "code_node_1",
+      "target_handle": "input_data"
+    },
+    {
+      "source": "code_node_1",
+      "source_handle": "output_data",
+      "target": "swap_node_1",
+      "target_handle": "vault_address"
+    },
+    {
+      "source": "code_node_1",
+      "source_handle": "output_data",
+      "target": "swap_node_1",
+      "target_handle": "slippery_tolerance"
+    }
+  ]
+},
   "user_id": "{{userId}}",
   "created_at": "{{createdAt}}"
 }

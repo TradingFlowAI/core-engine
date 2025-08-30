@@ -568,10 +568,15 @@ class CodeNode(NodeBase):
                 }
             )
 
-            # 收集所有输入数据
-            input_data_dict = await self._parse_input_data_dict()
+            # 使用BaseNode自动聚合的input_data（避免双重处理）
+            input_data_dict = getattr(self, 'input_data', {})
+            
+            # 确保input_data是字典格式
+            if not isinstance(input_data_dict, dict):
+                input_data_dict = {}
+                
             await self.persist_log(
-                f"Input data processing completed, collected {len(input_data_dict)} input variables",
+                f"Using auto-aggregated input data, collected {len(input_data_dict)} input variables",
                 log_level="INFO",
                 log_metadata={
                     "input_variables": list(input_data_dict.keys()),
@@ -912,49 +917,6 @@ class CodeNode(NodeBase):
             await self.set_status(NodeStatus.FAILED, error_msg)
             return False
 
-    async def _parse_input_data_dict(self):
-        input_data_dict = {}
-        for edge_key, signal in self._input_signals.items():
-            await self.persist_log(
-                f"Processing input signal for edge {edge_key}: {signal}, type(signal)= {type(signal)}", "DEBUG"
-            )
-
-            if signal is not None:
-                # 从 edge_key 中解析出 source_handle
-                # edge_key 格式: "source_node:source_handle->target_handle"
-                if "->" in edge_key and ":" in edge_key:
-                    source_part = edge_key.split("->")[0]  # "source_node:source_handle"
-                    source_handle = source_part.split(":", 1)[1]  # "source_handle"
-
-                    # 获取信号的实际数据
-                    data = signal.payload if hasattr(signal, "payload") else signal
-
-                    # 使用 source_handle 作为 key 存储数据
-                    input_data_dict[source_handle] = data
-
-                    await self.persist_log(
-                        f"Added input data for source_handle '{source_handle}': {data}", "DEBUG"
-                    )
-
-                    # 如果数据是 dataset 格式，尝试转换为 pandas DataFrame
-                    if isinstance(data, dict) and "headers" in data and "data" in data:
-                        try:
-                            df = pd.DataFrame(data["data"], columns=data["headers"])
-                            input_data_dict[f"df_{source_handle}"] = df
-                            await self.persist_log(
-                                f"Created DataFrame for source_handle '{source_handle}'", "DEBUG"
-                            )
-                        except Exception as e:
-                            await self.persist_log(
-                                f"Failed to convert data to DataFrame for source_handle '{source_handle}': {e}", "WARNING"
-                            )
-                else:
-                    await self.persist_log(
-                        f"Invalid edge_key format: {edge_key}, expected 'source_node:source_handle->target_handle'", "WARNING"
-                    )
-            else:
-                await self.persist_log(f"No signal received for edge: {edge_key}", "DEBUG")
-        return input_data_dict
 
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
@@ -964,6 +926,7 @@ class CodeNode(NodeBase):
             description="Input data for the code execution",
             example={"input1": "value1", "input2": "value2"},
             auto_update_attr="input_data",
+            is_aggregate=True,  # 支持多信号聚合为字典
         )
         self.register_input_handle(
             name=PYTHON_CODE_HANDLE,

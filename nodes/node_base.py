@@ -656,15 +656,61 @@ class NodeBase(abc.ABC):
         # 更新成员变量
         if hasattr(self, handle_obj.auto_update_attr):
             old_value = getattr(self, handle_obj.auto_update_attr)
-            setattr(self, handle_obj.auto_update_attr, final_value)
-            self.logger.info(
-                "Auto-updated %s: %s -> %s (handle: %s, type: %s)",
-                handle_obj.auto_update_attr,
-                old_value,
-                final_value,
-                handle_name,
-                expected_type.__name__,
-            )
+            
+            # 处理聚合类型句柄
+            if handle_obj.is_aggregate and handle_obj.data_type == dict:
+                # 获取信号的源句柄名称作为key
+                signal_source_handle = getattr(signal, 'source_handle', None)
+                if signal_source_handle:
+                    # 如果当前值不是字典，初始化为空字典
+                    if not isinstance(old_value, dict):
+                        old_value = {}
+                    
+                    # 创建新的聚合字典
+                    new_aggregated_value = old_value.copy()
+                    
+                    # 如果接收到的是字典，合并所有键值
+                    if isinstance(final_value, dict):
+                        new_aggregated_value.update(final_value)
+                        self.logger.debug(
+                            "Merged dict signal for aggregate handle '%s': %s",
+                            handle_name,
+                            final_value,
+                        )
+                    else:
+                        # 使用源句柄名称作为key
+                        new_aggregated_value[signal_source_handle] = final_value
+                        self.logger.debug(
+                            "Added simple value to aggregate handle '%s': %s=%s",
+                            handle_name,
+                            signal_source_handle,
+                            final_value,
+                        )
+                    
+                    setattr(self, handle_obj.auto_update_attr, new_aggregated_value)
+                    self.logger.info(
+                        "Auto-updated aggregate %s: %s -> %s (handle: %s)",
+                        handle_obj.auto_update_attr,
+                        old_value,
+                        new_aggregated_value,
+                        handle_name,
+                    )
+                else:
+                    self.logger.warning(
+                        "No source_handle found for aggregate signal on handle '%s'",
+                        handle_name,
+                    )
+            else:
+                # 非聚合类型，直接替换
+                setattr(self, handle_obj.auto_update_attr, final_value)
+                self.logger.info(
+                    "Auto-updated %s: %s -> %s (handle: %s, type: %s)",
+                    handle_obj.auto_update_attr,
+                    old_value,
+                    final_value,
+                    handle_name,
+                    expected_type.__name__,
+                )
         else:
             self.logger.warning(
                 "Auto-update attribute '%s' not found in node (handle: %s)",
@@ -739,13 +785,24 @@ class NodeBase(abc.ABC):
 
         # 如果期望的是复杂类型（dict, list等），但接收到简单类型
         elif expected_type not in simple_types and not isinstance(raw_value, dict):
-            self.logger.warning(
-                "Expected complex type %s but received simple type %s for handle '%s'",
-                expected_type.__name__,
-                type(raw_value).__name__,
-                handle_name,
-            )
-            return raw_value
+            # 检查是否为聚合句柄
+            handle_obj = self._input_handles.get(handle_name)
+            if handle_obj and handle_obj.is_aggregate and expected_type == dict:
+                # 对于聚合类型的dict句柄，需要特殊处理
+                # 这里我们返回原值，实际聚合逻辑在上层处理
+                self.logger.debug(
+                    "Handle '%s' is aggregate type, simple value will be aggregated at higher level",
+                    handle_name,
+                )
+                return raw_value
+            else:
+                self.logger.warning(
+                    "Expected complex type %s but received simple type %s for handle '%s'",
+                    expected_type.__name__,
+                    type(raw_value).__name__,
+                    handle_name,
+                )
+                return raw_value
 
         # 3. 尝试JSON字符串解析（新增支持）
         elif isinstance(raw_value, str) and expected_type in simple_types:
