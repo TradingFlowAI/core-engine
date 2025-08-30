@@ -330,6 +330,9 @@ class FlowScheduler:
                 flow_status = "running"
             else:
                 flow_status = "completed"
+            # If flow is stopped, override the status
+            if cycle_data.get("status") == "stopped":
+                flow_status = "stopped"
 
             return {
                 "flow_id": flow_id,

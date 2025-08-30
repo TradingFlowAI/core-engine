@@ -22,7 +22,7 @@ TO_TOKEN_HANDLE = "to_token"
 AMOUNT_IN_HANDLE_HUMAN_READABLE = "amount_in_human_readable"
 AMOUNT_IN_HANDLE_PERCENTAGE = "amount_in_percentage"
 VAULT_ADDRESS_HANDLE = "vault_address"
-SLIPPAGE_TOLERANCE_HANDLE = "slippery_tolerance"
+SLIPPAGE_TOLERANCE_HANDLE = "slippery"
 CHAIN_HANDLE = "chain"
 TX_RECEIPT_HANDLE = "trade_receipt"
 
@@ -50,7 +50,7 @@ def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, s
         "from_token": None,
         "to_token": None,
         "vault_address": None,
-        "slippery_tolerance": 1.0,
+        "slippery": 1.0,
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
     },
@@ -70,7 +70,7 @@ class SwapNode(NodeBase):
     - vault_address: Vault contract address
     - amount_in_percentage: Trading amount as percentage of balance (0-100)
     - amount_in_human_readable: Trading amount in decimal format
-    - slippery_tolerance: Maximum slippage percentage (default: 1.0%)
+    - slippery: Maximum slippage percentage (default: 1.0%)
     """
 
     def __init__(
@@ -86,7 +86,7 @@ class SwapNode(NodeBase):
         vault_address: str = None,
         amount_in_percentage: Optional[float] = None,
         amount_in_human_readable: Optional[float] = None,
-        slippery_tolerance: float = 1.0,
+        slippery: float = 1.0,
         **kwargs,
     ):
         super().__init__(
@@ -108,7 +108,7 @@ class SwapNode(NodeBase):
         self.from_token = from_token
         self.to_token = to_token
         self.vault_address = vault_address
-        self.slippery_tolerance = slippery_tolerance
+        self.slippery = slippery
         self.amount_in_percentage = amount_in_percentage
         self.amount_in_human_readable = amount_in_human_readable
 
@@ -263,7 +263,7 @@ class SwapNode(NodeBase):
             if self.chain == "aptos":
                 # Aptos swap execution
                 estimated_min_output, sqrt_price_limit = await self.get_estimated_min_output_amount_aptos(
-                    final_amount_in, self.slippery_tolerance
+                    final_amount_in, self.slippery
                 )
 
                 tx_result = await self.vault_service.admin_execute_swap(
@@ -278,7 +278,7 @@ class SwapNode(NodeBase):
             elif self.chain == "flow_evm":
                 # Flow EVM swap execution
                 estimated_min_output = await self.get_estimated_min_output_amount_flow_evm(
-                    final_amount_in, self.slippery_tolerance
+                    final_amount_in, self.slippery
                 )
 
                 tx_result = await self.vault_service.execute_swap(
@@ -320,7 +320,7 @@ class SwapNode(NodeBase):
             "to_token": self.to_token,
             "input_token_address": self.input_token_address,
             "output_token_address": self.output_token_address,
-            "slippery_tolerance": self.slippery_tolerance,
+            "slippery": self.slippery,
             "raw_result": self.tx_result,
         }
 
@@ -436,7 +436,7 @@ class SwapNode(NodeBase):
             data_type=float,
             description="Slippery Tolerance - Maximum acceptable slippage percentage",
             example=1.0,
-            auto_update_attr="slippery_tolerance",
+            auto_update_attr="slippery",
         )
 
 
@@ -453,7 +453,7 @@ class SwapNode(NodeBase):
         "limited_price": None,
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
-        "slippery_tolerance": 1.0,
+        "slippery": 1.0,
     },
 )
 class BuyNode(SwapNode):
@@ -469,7 +469,7 @@ class BuyNode(SwapNode):
     - limited_price: 限价 (number) - 仅限价单使用
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
-    - slippery_tolerance: 滑点容忍度 (number)
+    - slippery: 滑点容忍度 (number)
 
     输出信号:
     - trade_receipt: 交易收据 (json object)
@@ -568,7 +568,7 @@ class BuyNode(SwapNode):
             data_type=float,
             description="Slippery Tolerance - Maximum acceptable slippage percentage",
             example=1.0,
-            auto_update_attr="slippery_tolerance",
+            auto_update_attr="slippery",
         )
 
     async def _on_buy_token_received(self, buy_token: str) -> None:
@@ -595,7 +595,7 @@ class BuyNode(SwapNode):
         "limited_price": None,
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
-        "slippery_tolerance": 1.0,
+        "slippery": 1.0,
     },
 )
 class SellNode(SwapNode):
@@ -611,7 +611,7 @@ class SellNode(SwapNode):
     - limited_price: 限价 (number) - 仅限价单使用
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
-    - slippery_tolerance: 滑点容忍度 (number)
+    - slippery: 滑点容忍度 (number)
 
     输出信号:
     - trade_receipt: 交易收据 (json object)
@@ -709,7 +709,7 @@ class SellNode(SwapNode):
             data_type=float,
             description="Slippery Tolerance - Maximum acceptable slippage percentage",
             example=1.0,
-            auto_update_attr="slippery_tolerance",
+            auto_update_attr="slippery",
         )
 
     async def _on_sell_token_received(self, sell_token: str) -> None:

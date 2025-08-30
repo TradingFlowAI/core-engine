@@ -1,5 +1,6 @@
 import abc
 import asyncio
+import json
 import logging
 import traceback
 from dataclasses import dataclass
@@ -746,31 +747,106 @@ class NodeBase(abc.ABC):
             )
             return raw_value
 
-        # 其他情况：尝试直接类型转换
-        else:
+        # 3. 尝试JSON字符串解析（新增支持）
+        elif isinstance(raw_value, str) and expected_type in simple_types:
+            # 首先尝试JSON解析
             try:
-                if expected_type in simple_types:
-                    if expected_type == str:
-                        return str(raw_value)
-                    elif expected_type == int:
-                        return int(raw_value)
-                    elif expected_type == float:
-                        return float(raw_value)
-                    elif expected_type == bool:
-                        return bool(raw_value)
-
-                # 对于复杂类型，直接返回原值
-                return raw_value
-
-            except (ValueError, TypeError) as e:
-                self.logger.warning(
-                    "Failed to convert value '%s' to type %s for handle '%s': %s",
-                    raw_value,
-                    expected_type.__name__,
+                parsed_json = json.loads(raw_value)
+                self.logger.debug(
+                    "Successfully parsed JSON string for handle '%s': %s",
                     handle_name,
-                    str(e),
+                    parsed_json,
                 )
-                return raw_value
+                
+                # 如果解析出来是字典，尝试从中提取字段
+                if isinstance(parsed_json, dict):
+                    if handle_name in parsed_json:
+                        extracted_value = parsed_json[handle_name]
+                        self.logger.debug(
+                            "Extracted value '%s' from JSON dict for handle '%s'",
+                            extracted_value,
+                            handle_name,
+                        )
+                        
+                        # 对提取的值进行类型转换
+                        try:
+                            if expected_type == str:
+                                return str(extracted_value)
+                            elif expected_type == int:
+                                return int(extracted_value)
+                            elif expected_type == float:
+                                return float(extracted_value)
+                            elif expected_type == bool:
+                                return bool(extracted_value)
+                        except (ValueError, TypeError) as e:
+                            self.logger.warning(
+                                "Failed to convert JSON extracted value '%s' to type %s for handle '%s': %s",
+                                extracted_value,
+                                expected_type.__name__,
+                                handle_name,
+                                str(e),
+                            )
+                            return extracted_value
+                    else:
+                        self.logger.warning(
+                            "Handle '%s' not found in JSON dict payload: %s",
+                            handle_name,
+                            list(parsed_json.keys()),
+                        )
+                
+                # 如果解析出来直接是期望的类型，尝试转换
+                else:
+                    try:
+                        if expected_type == str:
+                            return str(parsed_json)
+                        elif expected_type == int:
+                            return int(parsed_json)
+                        elif expected_type == float:
+                            return float(parsed_json)
+                        elif expected_type == bool:
+                            return bool(parsed_json)
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(
+                            "Failed to convert JSON value '%s' to type %s for handle '%s': %s",
+                            parsed_json,
+                            expected_type.__name__,
+                            handle_name,
+                            str(e),
+                        )
+                        return parsed_json
+                        
+            except json.JSONDecodeError:
+                # JSON解析失败，继续尝试直接类型转换
+                self.logger.debug(
+                    "JSON parsing failed for handle '%s', trying direct type conversion",
+                    handle_name,
+                )
+                pass
+
+        # 其他情况：尝试直接类型转换
+        try:
+            if expected_type in simple_types:
+                if expected_type == str:
+                    return str(raw_value)
+                elif expected_type == int:
+                    return int(raw_value)
+                elif expected_type == float:
+                    return float(raw_value)
+                elif expected_type == bool:
+                    return bool(raw_value)
+
+            # 对于复杂类型，直接返回原值
+            return raw_value
+
+        except (ValueError, TypeError) as e:
+            self.logger.warning(
+                "Failed to convert value '%s' to type %s for handle '%s': %s",
+                raw_value,
+                expected_type.__name__,
+                handle_name,
+                str(e),
+            )
+            return raw_value
 
     async def _handle_stop_execution_signal(self, signal: Signal) -> None:
         """
