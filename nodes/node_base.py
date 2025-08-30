@@ -445,6 +445,10 @@ class NodeBase(abc.ABC):
                         self._input_signals[edge_key] = signal
                         self.logger.debug("Updated signal for edge: %s", edge_key)
                         
+                        # Attach source_handle to signal object for aggregation logic
+                        signal.source_handle = source_handle
+                        signal.source_node = source_node
+                        
                         # Persist received signal data to database for comprehensive status API
                         signal_data = {
                             handle: {
@@ -484,6 +488,10 @@ class NodeBase(abc.ABC):
                         self.logger.debug(
                             f"Updated signal for edge (inferred): {edge_key}"
                         )
+                        
+                        # Attach source_handle to signal object for aggregation logic (inferred case)
+                        signal.source_handle = edge.source_node_handle
+                        signal.source_node = edge.source_node
                         
                         # Persist received signal data to database (inferred case)
                         signal_data = {
