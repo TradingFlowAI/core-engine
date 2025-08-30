@@ -963,6 +963,7 @@ class CodeNode(NodeBase):
             data_type=dict,
             description="Input data for the code execution",
             example={"input1": "value1", "input2": "value2"},
+            auto_update_attr="input_data",
         )
         self.register_input_handle(
             name=PYTHON_CODE_HANDLE,
