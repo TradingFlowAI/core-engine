@@ -660,7 +660,7 @@ class NodeBase(abc.ABC):
             # 处理聚合类型句柄
             if handle_obj.is_aggregate and handle_obj.data_type == dict:
                 # 获取信号的源句柄名称作为key
-                signal_source_handle = getattr(signal, 'source_handle', None)
+                signal_source_handle = getattr(signal_or_value, 'source_handle', None)
                 if signal_source_handle:
                     # 如果当前值不是字典，初始化为空字典
                     if not isinstance(old_value, dict):
