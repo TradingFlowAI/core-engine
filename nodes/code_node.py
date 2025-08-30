@@ -582,6 +582,9 @@ class CodeNode(NodeBase):
             # 准备执行环境
             local_vars = await self._setup_execution_environment()
             local_vars.update(input_data_dict)
+            
+            # 添加统一的 input_data 变量，方便代码中使用 input_data.get() 方式访问
+            local_vars['input_data'] = input_data_dict
 
             # debug信息
             await self.persist_log(
