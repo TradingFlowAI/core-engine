@@ -10,7 +10,7 @@ from tradingflow.station.utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd,
-    get_multiple_token_prices_usd,
+    get_flow_evm_token_prices_usd,
 )
 from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
@@ -236,7 +236,7 @@ class SwapNode(NodeBase):
     async def get_estimated_min_output_amount_flow_evm(self, amount_in: int, slippage: float) -> int:
         """估算 Flow EVM 输出金额"""
         token_addresses = [self.input_token_address, self.output_token_address]
-        prices = await get_multiple_token_prices_usd(token_addresses, network_type="evm")
+        prices = await get_flow_evm_token_prices_usd(token_addresses)
 
         input_price = prices.get(self.input_token_address)
         output_price = prices.get(self.output_token_address)

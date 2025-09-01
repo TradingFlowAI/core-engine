@@ -495,6 +495,59 @@ def get_multiple_token_prices_usd_by_chain(
 
 
 # Aptos 专用的便捷函数
+async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_contract_address: bool = True) -> Optional[float]:
+    """
+    从monitor API获取代币价格
+    
+    Args:
+        network: 网络名称 (如 'aptos', 'flow_evm')
+        token_identifier: 代币标识符（合约地址或coin ID）
+        is_contract_address: 是否为合约地址
+    
+    Returns:
+        USD价格或None
+    """
+    try:
+        monitor_url = CONFIG.get('monitor', {}).get('base_url', 'http://localhost:3000')
+        
+        if network == "aptos":
+            if is_contract_address:
+                url = f"{monitor_url}/aptos/tokens/{token_identifier}"
+            else:
+                # 对于APT等原生代币，使用coin ID
+                url = f"{monitor_url}/aptos/tokens/aptos"
+        elif network == "flow_evm":
+            chain_id = 747  # Flow EVM testnet
+            url = f"{monitor_url}/evm/tokens/{chain_id}/{token_identifier}"
+        else:
+            logger.error(f"不支持的网络: {network}")
+            return None
+            
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success', False):
+                        token_data = data.get('data', {})
+                        price_usd = token_data.get('price_usd')
+                        if price_usd is not None:
+                            logger.info(f"从monitor API获取到{network}代币价格: {token_identifier} = ${price_usd}")
+                            return float(price_usd)
+                        else:
+                            logger.warning(f"Monitor API返回数据中没有price_usd字段: {token_data}")
+                    else:
+                        logger.warning(f"Monitor API返回失败: {data.get('message', 'Unknown error')}")
+                else:
+                    logger.warning(f"Monitor API请求失败: HTTP {response.status}")
+                    
+    except asyncio.TimeoutError:
+        logger.warning(f"Monitor API请求超时: {network}/{token_identifier}")
+    except Exception as e:
+        logger.exception(f"Monitor API请求异常: {network}/{token_identifier}: {e}")
+    
+    return None
+
+
 def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
     """
     获取Aptos代币的USD价格，优先从缓存读取，失败时调用monitor API
@@ -515,7 +568,25 @@ def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
     
     # 缓存中没有，调用monitor API获取价格
     logger.info(f"Redis缓存中没有Aptos代币价格，调用monitor API: {token_address}")
-    return _fetch_aptos_price_from_monitor_api(token_address)
+    
+    try:
+        # 使用同步方式调用异步函数
+        loop = None
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if token_address.lower() == "0xa":
+            # APT使用coin ID
+            return loop.run_until_complete(_fetch_price_from_monitor_api("aptos", "aptos", False))
+        else:
+            # 其他代币使用合约地址
+            return loop.run_until_complete(_fetch_price_from_monitor_api("aptos", token_address, True))
+    except Exception as e:
+        logger.exception(f"获取Aptos代币价格失败: {token_address}: {e}")
+        return None
 
 
 def get_multiple_aptos_token_prices_usd(
@@ -569,10 +640,67 @@ def get_multiple_aptos_token_prices_usd(
                     
             return cached_prices
         
-        return asyncio.run(fetch_missing_prices())
+        # 使用同步方式调用异步函数
+        loop = None
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        return loop.run_until_complete(fetch_missing_prices())
         
     except Exception as e:
         logger.exception(f"批量获取Aptos代币价格失败: {e}")
+        return cached_prices
+
+
+# Flow EVM 专用的便捷函数
+async def get_flow_evm_token_prices_usd(token_addresses: List[str]) -> Dict[str, Optional[float]]:
+    """
+    批量获取Flow EVM代币的USD价格，优先从缓存读取，失败时调用monitor API
+
+    Args:
+        token_addresses: Flow EVM代币地址列表
+
+    Returns:
+        代币地址到USD价格的映射字典
+    """
+    # 首先尝试从Redis缓存批量获取（Flow EVM使用chain_id=747）
+    cached_prices = get_multiple_token_prices_usd(
+        token_addresses=token_addresses, chain_id=747, network_type="evm"
+    )
+    
+    # 检查哪些代币需要从API获取
+    missing_tokens = [addr for addr, price in cached_prices.items() if price is None]
+    
+    if not missing_tokens:
+        return cached_prices
+    
+    logger.info(f"需要从monitor API获取{len(missing_tokens)}个Flow EVM代币价格")
+    
+    # 异步获取缺失的价格
+    try:
+        tasks = []
+        for addr in missing_tokens:
+            task = _fetch_price_from_monitor_api("flow_evm", addr, True)
+            tasks.append((addr, task))
+        
+        results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+        
+        # 更新结果
+        for i, (addr, _) in enumerate(tasks):
+            result = results[i]
+            if isinstance(result, Exception):
+                logger.warning(f"获取Flow EVM代币{addr}价格失败: {result}")
+                cached_prices[addr] = None
+            else:
+                cached_prices[addr] = result
+                
+        return cached_prices
+        
+    except Exception as e:
+        logger.exception(f"批量获取Flow EVM代币价格失败: {e}")
         return cached_prices
 
 
@@ -588,7 +716,7 @@ def get_sui_token_price_usd(token_address: str) -> Optional[float]:
         成功时返回USD价格（浮点数），失败时返回None
     """
     return get_token_price_usd(
-        token_address=token_address, network="sui-network", network_type="sui"
+        token_address=token_address, network="sui", network_type="sui"
     )
 
 
@@ -605,7 +733,7 @@ def get_multiple_sui_token_prices_usd(
         代币地址到USD价格的映射字典
     """
     return get_multiple_token_prices_usd(
-        token_addresses=token_addresses, network="sui-network", network_type="sui"
+        token_addresses=token_addresses, network="sui", network_type="sui"
     )
 
 

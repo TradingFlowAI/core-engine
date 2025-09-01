@@ -39,7 +39,7 @@ class NodeRegistry:
         # Set heartbeat interval to 30 seconds
         self.heartbeat_interval = int(CONFIG.get("REGISTRY_HEARTBEAT_INTERVAL", 30))
         # TTL set to be 3x longer than heartbeat interval to ensure buffer time
-        self.node_ttl = int(CONFIG.get("NODE_TTL", 90))
+        self.node_ttl = int(CONFIG.get("NODE_TTL", 210))
         self._heartbeat_task = None
         self._is_running = False
         self.supported_node_types = set()  # Node types supported by current worker
@@ -525,6 +525,7 @@ class NodeRegistry:
             type_workers_key = f"node_type:{node_type}:workers"
             worker_ids = await self.redis.smembers(type_workers_key)
 
+            logger.info("Find %s worker: %s", node_type, worker_ids)
             if not worker_ids:
                 return []
 
