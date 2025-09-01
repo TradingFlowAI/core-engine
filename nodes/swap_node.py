@@ -31,45 +31,43 @@ getcontext().prec = 50
 
 def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, slippage_tolerance: float) -> str:
     """
-    Calculate sqrt_price_limit using Uniswap V3 standard Q64.96 format
+    Calculate sqrt_price_limit for Hyperion DEX
     
-    Based on Uniswap V3 documentation and Stack Overflow examples:
-    sqrtPriceX96 = floor(sqrt(price) * 2^96)
+    Based on Hyperion official docs:
+    sqrt_price_limit: a x64 fixed-point number, indicate price impact limit after swap
     
-    For APT->xBTC: price = xBTC_price/APT_price, adjusted for decimals
+    This is different from Uniswap's Q64.96 format!
     """
     try:
-        # Standard Aptos token decimals (APT=8, most others=8 or 6)
-        input_decimals = 8   # APT decimals
-        output_decimals = 8  # xBTC decimals (assume 8 like most)
+        # Hyperion uses x64 fixed-point format (multiply by 2^64, not 2^96)
+        # This is a price impact limit, not necessarily a complex price ratio
         
-        # Calculate price ratio with decimal adjustment (like Uniswap example)
-        decimal_adjustment = Decimal(10) ** (input_decimals - output_decimals)
-        raw_price = Decimal(str(output_price)) / Decimal(str(input_price))
-        adjusted_price = raw_price / decimal_adjustment
+        # Calculate price ratio
+        price_ratio = Decimal(str(output_price)) / Decimal(str(input_price))
         
-        # Apply slippage tolerance for minimum acceptable price
+        # Apply slippage tolerance 
         slippage_factor = Decimal(str(slippage_tolerance)) / Decimal("100")
-        limit_price = adjusted_price * (Decimal("1") - slippage_factor)
+        limit_price_ratio = price_ratio * (Decimal("1") - slippage_factor)
         
-        # Convert to sqrt price in Q64.96 format
-        sqrt_price = limit_price.sqrt()
-        q96_multiplier = Decimal(2) ** 96
-        sqrt_price_x96 = int(sqrt_price * q96_multiplier)
+        # Convert to x64 fixed-point format (Hyperion's format)
+        sqrt_price = limit_price_ratio.sqrt()
+        x64_multiplier = Decimal(2) ** 64
+        sqrt_price_x64 = int(sqrt_price * x64_multiplier)
         
-        # Apply safety bounds (uint160 range)
-        max_sqrt_price = (2**160) - 1
-        min_sqrt_price = 4295128740  # Safe minimum from test script
+        # Apply reasonable bounds for Hyperion DEX
+        # Based on test script value 4295128740 ≈ 2^32
+        max_sqrt_price = 2**64 - 1      # x64 format max
+        min_sqrt_price = 4295128740      # Known working value from test
         
-        if sqrt_price_x96 > max_sqrt_price:
-            sqrt_price_x96 = max_sqrt_price
-        elif sqrt_price_x96 < min_sqrt_price:
-            sqrt_price_x96 = min_sqrt_price
+        if sqrt_price_x64 > max_sqrt_price:
+            sqrt_price_x64 = max_sqrt_price
+        elif sqrt_price_x64 < min_sqrt_price:
+            sqrt_price_x64 = min_sqrt_price
             
-        return str(sqrt_price_x96)
+        return str(sqrt_price_x64)
         
     except Exception as e:
-        # Safe fallback matching test script
+        # Fallback to known working value
         return "4295128740"
 
 
