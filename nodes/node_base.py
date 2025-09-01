@@ -663,19 +663,18 @@ class NodeBase(abc.ABC):
 
         # 更新成员变量
         if hasattr(self, handle_obj.auto_update_attr):
-            old_value = getattr(self, handle_obj.auto_update_attr)
-            
             # 处理聚合类型句柄
             if handle_obj.is_aggregate and handle_obj.data_type == dict:
                 # 获取信号的源句柄名称作为key
                 signal_source_handle = getattr(signal_or_value, 'source_handle', None)
                 if signal_source_handle:
-                    # 如果当前值不是字典，初始化为空字典
-                    if not isinstance(old_value, dict):
-                        old_value = {}
+                    # 获取当前聚合状态，确保类型安全
+                    current_value = getattr(self, handle_obj.auto_update_attr)
+                    if not isinstance(current_value, dict):
+                        current_value = {}
                     
-                    # 创建新的聚合字典
-                    new_aggregated_value = old_value.copy()
+                    # 创建新的聚合字典，基于当前最新状态
+                    new_aggregated_value = current_value.copy()
                     
                     # 如果接收到的是字典，合并所有键值
                     if isinstance(final_value, dict):
@@ -695,13 +694,15 @@ class NodeBase(abc.ABC):
                             final_value,
                         )
                     
+                    # 更新聚合状态
                     setattr(self, handle_obj.auto_update_attr, new_aggregated_value)
                     self.logger.info(
-                        "Auto-updated aggregate %s: %s -> %s (handle: %s)",
+                        "Auto-updated aggregate %s: %s -> %s (handle: %s, source: %s)",
                         handle_obj.auto_update_attr,
-                        old_value,
+                        current_value,
                         new_aggregated_value,
                         handle_name,
+                        signal_source_handle,
                     )
                 else:
                     self.logger.warning(
