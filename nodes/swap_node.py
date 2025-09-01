@@ -9,7 +9,7 @@ from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultServ
 from tradingflow.station.utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
-    get_aptos_token_price_usd,
+    get_aptos_token_price_usd_async,
     get_flow_evm_token_prices_usd,
 )
 from tradingflow.station.common.node_decorators import register_node_type
@@ -211,8 +211,8 @@ class SwapNode(NodeBase):
 
     async def get_estimated_min_output_amount_aptos(self, amount_in: int, slippage: float) -> tuple[int, str]:
         """估算 Aptos 输出金额和 sqrt_price_limit"""
-        input_price = get_aptos_token_price_usd(self.input_token_address)
-        output_price = get_aptos_token_price_usd(self.output_token_address)
+        input_price = await get_aptos_token_price_usd_async(self.input_token_address)
+        output_price = await get_aptos_token_price_usd_async(self.output_token_address)
 
         if not input_price or not output_price or output_price <= 0:
             raise ValueError("Cannot get valid token prices for Aptos")

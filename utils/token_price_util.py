@@ -512,13 +512,14 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
         
         if network == "aptos":
             if is_contract_address:
-                url = f"{monitor_url}/aptos/tokens/{token_identifier}"
+                # 使用合约地址API端点
+                url = f"{monitor_url}/api/v1/price/contract/aptos/{token_identifier}"
             else:
                 # 对于APT等原生代币，使用coin ID
-                url = f"{monitor_url}/aptos/tokens/aptos"
+                url = f"{monitor_url}/api/v1/price/aptos"
         elif network == "flow_evm":
-            chain_id = 747  # Flow EVM testnet
-            url = f"{monitor_url}/evm/tokens/{chain_id}/{token_identifier}"
+            # Flow EVM使用合约地址API端点
+            url = f"{monitor_url}/api/v1/price/contract/flow_evm/{token_identifier}"
         else:
             logger.error(f"不支持的网络: {network}")
             return None
@@ -548,9 +549,9 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
     return None
 
 
-def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
+async def get_aptos_token_price_usd_async(token_address: str) -> Optional[float]:
     """
-    获取Aptos代币的USD价格，优先从缓存读取，失败时调用monitor API
+    获取Aptos代币的USD价格，优先从缓存读取，失败时调用monitor API (异步版本)
 
     Args:
         token_address: Aptos代币地址
@@ -570,23 +571,36 @@ def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
     logger.info(f"Redis缓存中没有Aptos代币价格，调用monitor API: {token_address}")
     
     try:
-        # 使用同步方式调用异步函数
-        loop = None
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
         if token_address.lower() == "0xa":
             # APT使用coin ID
-            return loop.run_until_complete(_fetch_price_from_monitor_api("aptos", "aptos", False))
+            return await _fetch_price_from_monitor_api("aptos", "aptos", False)
         else:
             # 其他代币使用合约地址
-            return loop.run_until_complete(_fetch_price_from_monitor_api("aptos", token_address, True))
+            return await _fetch_price_from_monitor_api("aptos", token_address, True)
     except Exception as e:
         logger.exception(f"获取Aptos代币价格失败: {token_address}: {e}")
         return None
+
+
+def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
+    """
+    获取Aptos代币的USD价格，优先从缓存读取，失败时返回None（同步版本，仅缓存）
+
+    Args:
+        token_address: Aptos代币地址
+
+    Returns:
+        成功时返回USD价格（浮点数），失败时返回None
+    """
+    # 仅从Redis缓存获取，不调用API（避免事件循环冲突）
+    price = get_token_price_usd(
+        token_address=token_address, network="aptos", network_type="aptos"
+    )
+    
+    if price is None:
+        logger.warning(f"Redis缓存中没有Aptos代币价格，请确保monitor服务正在运行: {token_address}")
+    
+    return price
 
 
 def get_multiple_aptos_token_prices_usd(
