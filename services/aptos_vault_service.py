@@ -505,6 +505,50 @@ class AptosVaultService:
             logger.error(error_msg)
             raise
 
+    async def get_token_metadata(self, token_address: str) -> Optional[Dict[str, any]]:
+        """
+        从monitor服务获取代币元数据
+        
+        Args:
+            token_address: 代币地址
+            
+        Returns:
+            Optional[Dict[str, any]]: 代币元数据，如果获取失败返回None
+            
+        Example Response:
+        {
+            "name": "Aptos Coin",
+            "symbol": "APT",
+            "decimals": 8,
+            "address": "0x1::aptos_coin::AptosCoin"
+        }
+        """
+        try:
+            url = f"{self._monitor_url}/aptos/tokens/metadata/{token_address}"
+            logger.info(f"Requesting token metadata from monitor: {url}")
+            
+            response = await self._client.get(url)
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"Successfully retrieved token metadata for {token_address}")
+            
+            return data
+            
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"Token metadata not found for address: {token_address}")
+                return None
+            else:
+                logger.error(f"HTTP error getting token metadata: {e.response.status_code} - {e.response.text}")
+                return None
+        except httpx.RequestError as e:
+            logger.error(f"Network error getting token metadata: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error getting token metadata: {e}")
+            return None
+
     async def get_contract_address(self) -> Dict[str, any]:
         """
         从 monitor  Vault合约地址

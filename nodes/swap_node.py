@@ -149,6 +149,12 @@ class SwapNode(NodeBase):
             input_info = get_aptos_monitored_token_info(self.input_token_address)
             output_info = get_aptos_monitored_token_info(self.output_token_address)
 
+            # If token info not found in database, try to fetch from monitor API
+            if not input_info:
+                input_info = await self._fetch_token_metadata_from_monitor(self.input_token_address)
+            if not output_info:
+                output_info = await self._fetch_token_metadata_from_monitor(self.output_token_address)
+
             if not input_info or not output_info:
                 raise ValueError(f"Cannot get token info for Aptos tokens: {self.from_token}, {self.to_token}")
 
@@ -250,6 +256,38 @@ class SwapNode(NodeBase):
 
         await self.persist_log(f"Flow EVM estimation: output={output_amount_raw}", "INFO")
         return output_amount_raw
+
+    async def _fetch_token_metadata_from_monitor(self, token_address: str) -> Optional[Dict[str, any]]:
+        """
+        从monitor服务获取代币元数据
+        
+        Args:
+            token_address: 代币地址
+            
+        Returns:
+            Optional[Dict[str, any]]: 代币元数据，格式与get_aptos_monitored_token_info兼容
+        """
+        try:
+            from tradingflow.station.services.aptos_vault_service import AptosVaultService
+            
+            vault_service = AptosVaultService.get_instance()
+            metadata = await vault_service.get_token_metadata(token_address)
+            
+            if metadata:
+                # 转换为与数据库查询结果兼容的格式
+                return {
+                    "token_address": metadata.get("address", token_address),
+                    "name": metadata.get("name"),
+                    "symbol": metadata.get("symbol"), 
+                    "decimals": metadata.get("decimals", 8),
+                    "network": "aptos",
+                    "network_type": "aptos"
+                }
+            return None
+            
+        except Exception as e:
+            await self.persist_log(f"Failed to fetch token metadata from monitor for {token_address}: {e}", "WARNING")
+            return None
 
     async def execute_swap(self) -> bool:
         """Execute swap transaction based on chain"""
