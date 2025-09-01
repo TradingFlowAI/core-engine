@@ -9,10 +9,67 @@ from tradingflow.depot.python.utils.redis_manager import RedisManager
 logger = logging.getLogger(__name__)
 
 _aptos_token_symbol_to_address = {
+    "aBTC": "0xf599112bc3a5b6092469890d6a2f353f485a6193c9d36626b480704467d3f4c8",
+    "amAPT": "0xa259be733b6a759909f92815927fa213904df6540519568692caf0b068fe8e62",
+    "AMI": "0xb36527754eb54d7ff55daf13bcb54b42b88ec484bd6f0e3b2e0d1db169de6451",
+    "ANI": "0x9660042a7c01d776938184278381d24c7009ca385d9a59cf9b22691f97615960",
+    "APE": "0xfad230e7d9df2baf83a68b6f50217ed3c06da593e766970a885965b43b894a04",
     "APT": "0xa",
+    "AURO": "0xbcff91abababee684b194219ff2113c26e63d57c8872e6fdaf25a41a45fb7197",
+    "AWUSDt": "0x173f3bc501dfe7e4cac8e4463cb277e205e9a299380bc22a87ce455f014f3fb7",
+    "BAPTMAN": "0xe9c6ae7a056ba49901fcc19ab3fcff0938f882cfd7f2cc5a72eea362d29f5b8f",
+    "BNB": "0x3fb0cd30095fc85c77eb5cb9edcdbead3cef34e449b1a6f07729282120bc6383",
+    "BUBBLES": "0xaca80bdba3a9f58af0c6348f15530e4d891d1c60abca4c2cfb4c1a73bff0f8dd",
+    "BUSD": "0xd47b65c45f5260c4f3c5de3f32ddaeabf7eab56c9493a7a955dff7f70ba8afaf",
+    "Cake": "0xad18575b0e51dd056e1e082223c0e014cbfe4b13bc55e92f450585884f4cf951",
+    "CAPTOS": "0x7fa78d58cccc849363df4ed1acd373b1f09397d1c322450101e3b0a4a7a14d80",
+    "CASH": "0xc692943f7b340f02191c5de8dac2f827e0b66b3ed2206206a3526bcb0cae6e40",
+    "CATTOS  ": "0xeeb5ba9616292d315edc8ce36a25b921bab879b2a7088d479d12b0c182bd28c8",
+    "CELL": "0x2ebb2ccac5e027a87fa0e2e5f656a3a4238d6a48d93ec9b610d570fc0aa0df12",
+    "CHEWY": "0x1fe81b3886ff129d42064f7ee934013de7ef968cb8f47adb5f7210192bcd4a23",
+    "DAI": "0x59c3a92ab1565a14d4133eb2a3418604341d37da47698a0e853c7bb22c342c55",
+    "DONK": "0x41944cf1d4dac152d692644944e2cc49ee81fafdfb37abd541d06388ec3f7eda",
+    "doodoo": "0xb27b0c6b60772f0fc804ec1cd3339f552badf9bd1e125a7dd700d8eb11248ef1",
+    "ECHO": "0xb2c7780f0a255a6137e5b39733f5a4c85fe093c549de5c359c1232deef57d1b7",
+    "EDOG": "0x1ff8bf54987b665fd0aa8b317a22a60f5927675d35021473a85d720e254ed77e",
+    "ETERN": "0x570e7e86130982704afcbb0e860eff90b4af97fb00b69bf7f0f71ddeee5697ee",
+    "FIABTC": "0x75de592a7e62e6224d13763c392190fda8635ebb79c798a5e9dd0840102f3f93",
+    "GUI": "0x0009da434d9b873b5159e8eeed70202ad22dc075867a7793234fbc981b63e119",
+    "kAPT": "0x821c94e69bc7ca058c913b7b5e6b0a5c9fd1523d58723a966fb8c1f5ea888105",
+    "LOON": "0x41dfe1fb3d33d4d9d0b460f03ce1c0a6af6520dd8bdc0f204583c4987faf81de",
+    "MGPT": "0x4c3efb98d8d3662352f331b3465c6df263d1a7e84f002844348519614a5fea30",
+    "MKL": "0x878370592f9129e14b76558689a4b570ad22678111df775befbfcbc9fb3d90ab",
+    "MOD": "0x94ed76d3d66cb0b6e7a3ab81acf830e3a50b8ae3cfb9edc0abea635a11185ff4",
+    "MODENG": "0x5dd9b0b5eea4d2bec9c8cabed2f1db7062fb6ed16471fd52de491426718b0d95",
+    "MOVE": "0x96d1ccca420ebc20fc8af6cacb864e44856ca879c6436d4e9be2b0a4b99bf852",
+    "MOVEPUMP": "0xa067de5ce739da1400a92945646f719a0265df6412ddab872cd670052c5cc12f",
+    "PEPE": "0x08bbc1e07f934be0862be6df1477dbab54d6ccdf594f1569a64fa2941cbfe368",
+    "PROPS": "0x6dba1728c73363be1bdd4d504844c40fbb893e368ccbeff1d1bd83497dbc756d",
+    "RION": "0x435ad41e7b383cef98899c4e5a22c8dc88ab67b22f95e5663d6c6649298c3a9d",
+    "SBTC": "0xef1f3c4126176b1aaff3bf0d460a9344b64ac4bd28ff3e53793d49ded5c2d42f",
+    "Sidelined": "0x073992b487d517a8fc710acf953248b2045e381e5eb6fd9a92828db64a269530",
+    "SLT": "0xd1c452f47abeae87027758de85520a1957a5e5a82cfd709c8d762e904b6fe043",
+    "stAPT": "0xb614bfdf9edc39b330bbf9c3c5bcd0473eee2f6d4e21748629cc367869ece627",
+    "sthAPT": "0x0a9ce1bddf93b074697ec5e483bc5050bc64cff2acd31e1ccfd8ac8cae5e4abe",
+    "stkAPT": "0x42556039b88593e768c97ab1a3ab0c6a17230825769304482dff8fdebe4c002b",
+    "STONE": "0x700e285ee9f4fc9b0e42a6217e329899e1353476bc532a484048008c8bc8e400",
+    "sUSDa": "0xda3e4d44156dce34efda861201eab1164c88b18c49c928a97caa2904be985ebf",
+    "sUSDe": "0xb30a694a344edee467d9f82330bbe7c3b89f440a1ecd2da1f3bca266560fce69",
+    "tAPT": "0x1912eb1a5f8f0d4c72c1687eb199b7f9d2df34da5931ec96830c557f7abaa0ad",
+    "thAPT": "0xa0d9d647c5737a5aed08d2cfeb39c31cf901d44bc4aa024eaa7e5e68b804e011",
+    "THL": "0x377adc4848552eb2ea17259be928001923efe12271fef1667e2b784f04a7cf3a",
+    "TruAPT": "0xaef6a8c3182e076db72d64324617114cacf9a52f28325edc10b483f7f05da0e7",
+    "USDa": "0xace541cbd9b5d60f38cf545ac27738353f70b4f9b970c37a54cf7acfd19dad76",
+    "USDA": "0x534e4c3dc0f038dab1a8259e89301c4da58779a5d482fb354a41c08147e6b9ec",
     "USDC": "0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b",
-    "xBTC": "0x81214a80d82035a190fcb76b6ff3c0145161c3a9f33d137f2bbaee4cfec8a387",
+    "USDD": "0xde368b120e750bbb0d8799356ea23511306ff19edd28eed15fe7b6cc72b04388",
     "USDt": "0x357b0b74bc833e95a115ad22604854d6b0fca151cecd94111770e5d6ffc9dc2b",
+    "USDT": "0xe568e9322107a5c9ba4cbd05a630a5586aa73e744ada246c3efb0f4ce3e295f3",
+    "USDY": "0xf0876baf6f8c37723f0e9d9c1bbad1ccb49324c228bcc906e2f1f5a9e139eda1",
+    "WBTC": "0xa64d2d6f5e26daf6a3552f51d4110343b1a8c8046d0a9e72fa4086a337f3236c",
+    "WETH": "0xae02f68520afd221a5cd6fda6f5500afedab8d0a2e19a916d6d8bc2b36e758db",
+    "wUSDM": "0x08993fd61f611eb186386962edec50c9d72532b3825f1c7d98e883268dbbc501",
+    "xBTC": "0x81214a80d82035a190fcb76b6ff3c0145161c3a9f33d137f2bbaee4cfec8a387",
 }
 
 # 内存缓存字典
@@ -29,7 +86,7 @@ def get_aptos_token_address_by_symbol(symbol: str) -> Optional[str]:
     Returns:
         成功时返回代币地址，失败时返回None
     """
-    return _aptos_token_symbol_to_address.get(symbol.upper(), None)
+    return _aptos_token_symbol_to_address.get(symbol, None)
 
 
 def _get_token_info_cache_key(
