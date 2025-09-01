@@ -119,7 +119,7 @@ class SwapNode(NodeBase):
                 self.amount_in_percentage = float(self.amount_in_percentage)
             if not (0 < self.amount_in_percentage <= 100):
                 raise ValueError("amount_in_percentage must be between 0 and 100")
-                
+
         if self.amount_in_human_readable is not None:
             # Convert to float if it's a string
             if isinstance(self.amount_in_human_readable, str):
@@ -269,31 +269,31 @@ class SwapNode(NodeBase):
     async def _fetch_token_metadata_from_monitor(self, token_address: str) -> Optional[Dict[str, any]]:
         """
         从monitor服务获取代币元数据
-        
+
         Args:
             token_address: 代币地址
-            
+
         Returns:
             Optional[Dict[str, any]]: 代币元数据，格式与get_aptos_monitored_token_info兼容
         """
         try:
             from tradingflow.station.services.aptos_vault_service import AptosVaultService
-            
+
             vault_service = AptosVaultService.get_instance()
             metadata = await vault_service.get_token_metadata(token_address)
-            
+
             if metadata:
                 # 转换为与数据库查询结果兼容的格式
                 return {
                     "token_address": metadata.get("address", token_address),
                     "name": metadata.get("name"),
-                    "symbol": metadata.get("symbol"), 
+                    "symbol": metadata.get("symbol"),
                     "decimals": metadata.get("decimals", 8),
                     "network": "aptos",
                     "network_type": "aptos"
                 }
             return None
-            
+
         except Exception as e:
             await self.persist_log(f"Failed to fetch token metadata from monitor for {token_address}: {e}", "WARNING")
             return None
@@ -309,34 +309,35 @@ class SwapNode(NodeBase):
 
             if self.chain == "aptos":
                 # 在执行交换前检查用户vault余额
-                try:
-                    import httpx
-                    vault_url = f"{self.vault_service._monitor_url}/aptos/vault/holdings/{self.vault_address}"
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(vault_url)
-                        if response.status_code == 200:
-                            holdings_data = response.json()
-                            holdings = holdings_data.get("holdings", [])
-                            
-                            # 检查是否有足够的源代币余额
-                            sufficient_balance = False
-                            for holding in holdings:
-                                if holding.get("token_address") == self.input_token_address:
-                                    balance = int(holding.get("amount", "0"))
-                                    if balance >= final_amount_in:
-                                        sufficient_balance = True
-                                        await self.persist_log(f"用户vault余额充足: {balance} >= {final_amount_in}", "INFO")
-                                    else:
-                                        await self.persist_log(f"用户vault余额不足: {balance} < {final_amount_in}", "WARNING")
-                                    break
-                            
-                            if not sufficient_balance:
-                                error_msg = f"用户vault中{self.from_token}余额不足，需要先存款"
-                                await self.persist_log(error_msg, "ERROR")
-                                return False
-                                
-                except Exception as balance_check_error:
-                    await self.persist_log(f"检查vault余额失败，继续执行交换: {balance_check_error}", "WARNING")
+                # CL：有点问题，下面先隐藏掉
+                # try:
+                #     import httpx
+                #     vault_url = f"{self.vault_service._monitor_url}/aptos/vault/holdings/{self.vault_address}"
+                #     async with httpx.AsyncClient() as client:
+                #         response = await client.get(vault_url)
+                #         if response.status_code == 200:
+                #             holdings_data = response.json()
+                #             holdings = holdings_data.get("holdings", [])
+
+                #             # 检查是否有足够的源代币余额
+                #             sufficient_balance = False
+                #             for holding in holdings:
+                #                 if holding.get("token_address") == self.input_token_address:
+                #                     balance = int(holding.get("amount", "0"))
+                #                     if balance >= final_amount_in:
+                #                         sufficient_balance = True
+                #                         await self.persist_log(f"用户vault余额充足: {balance} >= {final_amount_in}", "INFO")
+                #                     else:
+                #                         await self.persist_log(f"用户vault余额不足: {balance} < {final_amount_in}", "WARNING")
+                #                     break
+
+                #             if not sufficient_balance:
+                #                 error_msg = f"用户vault中{self.from_token}余额不足，需要先存款"
+                #                 await self.persist_log(error_msg, "ERROR")
+                #                 return False
+
+                # except Exception as balance_check_error:
+                #     await self.persist_log(f"检查vault余额失败，继续执行交换: {balance_check_error}", "WARNING")
 
                 # Aptos swap execution
                 estimated_min_output, sqrt_price_limit = await self.get_estimated_min_output_amount_aptos(

@@ -317,6 +317,9 @@ class FlowScheduler:
                 cycle=cycle
             )
 
+            # Get total nodes in the flow from Redis set
+            total_flow_nodes = await self.redis.scard(f"flow:{flow_id}:cycle:{cycle}:nodes")
+            
             # Get basic flow statistics
             total_nodes = len(comprehensive_nodes)
             running_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'running')
@@ -328,8 +331,13 @@ class FlowScheduler:
                 flow_status = "error"
             elif running_nodes > 0:
                 flow_status = "running"
-            else:
+            elif completed_nodes == total_flow_nodes and total_flow_nodes > 0:
+                # Only set to completed if ALL nodes in the flow are completed
                 flow_status = "completed"
+            else:
+                # If no nodes are running or errored, but not all are completed, flow is still running
+                flow_status = "running"
+            
             # If flow is stopped, override the status
             if flow_data.get("status") == "stopped":
                 flow_status = "stopped"
