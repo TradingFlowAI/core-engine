@@ -711,6 +711,7 @@ class NodeBase(abc.ABC):
                     )
             else:
                 # 非聚合类型，直接替换
+                old_value = getattr(self, handle_obj.auto_update_attr)
                 setattr(self, handle_obj.auto_update_attr, final_value)
                 self.logger.info(
                     "Auto-updated %s: %s -> %s (handle: %s, type: %s)",
