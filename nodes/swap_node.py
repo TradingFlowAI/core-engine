@@ -112,11 +112,20 @@ class SwapNode(NodeBase):
         self.amount_in_percentage = amount_in_percentage
         self.amount_in_human_readable = amount_in_human_readable
 
-        # Validate inputs
-        if self.amount_in_percentage is not None and not (0 < self.amount_in_percentage <= 100):
-            raise ValueError("amount_in_percentage must be between 0 and 100")
-        if self.amount_in_human_readable is not None and not (self.amount_in_human_readable > 0):
-            raise ValueError("amount_in_human_readable must be greater than 0")
+        # Convert and validate inputs
+        if self.amount_in_percentage is not None:
+            # Convert to float if it's a string
+            if isinstance(self.amount_in_percentage, str):
+                self.amount_in_percentage = float(self.amount_in_percentage)
+            if not (0 < self.amount_in_percentage <= 100):
+                raise ValueError("amount_in_percentage must be between 0 and 100")
+                
+        if self.amount_in_human_readable is not None:
+            # Convert to float if it's a string
+            if isinstance(self.amount_in_human_readable, str):
+                self.amount_in_human_readable = float(self.amount_in_human_readable)
+            if not (self.amount_in_human_readable > 0):
+                raise ValueError("amount_in_human_readable must be greater than 0")
 
         # Token info
         self.input_token_address = None
@@ -299,6 +308,36 @@ class SwapNode(NodeBase):
             final_amount_in = await self.get_final_amount_in()
 
             if self.chain == "aptos":
+                # 在执行交换前检查用户vault余额
+                try:
+                    import httpx
+                    vault_url = f"{self.vault_service._monitor_url}/aptos/vault/holdings/{self.vault_address}"
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(vault_url)
+                        if response.status_code == 200:
+                            holdings_data = response.json()
+                            holdings = holdings_data.get("holdings", [])
+                            
+                            # 检查是否有足够的源代币余额
+                            sufficient_balance = False
+                            for holding in holdings:
+                                if holding.get("token_address") == self.input_token_address:
+                                    balance = int(holding.get("amount", "0"))
+                                    if balance >= final_amount_in:
+                                        sufficient_balance = True
+                                        await self.persist_log(f"用户vault余额充足: {balance} >= {final_amount_in}", "INFO")
+                                    else:
+                                        await self.persist_log(f"用户vault余额不足: {balance} < {final_amount_in}", "WARNING")
+                                    break
+                            
+                            if not sufficient_balance:
+                                error_msg = f"用户vault中{self.from_token}余额不足，需要先存款"
+                                await self.persist_log(error_msg, "ERROR")
+                                return False
+                                
+                except Exception as balance_check_error:
+                    await self.persist_log(f"检查vault余额失败，继续执行交换: {balance_check_error}", "WARNING")
+
                 # Aptos swap execution
                 estimated_min_output, sqrt_price_limit = await self.get_estimated_min_output_amount_aptos(
                     final_amount_in, self.slippery
