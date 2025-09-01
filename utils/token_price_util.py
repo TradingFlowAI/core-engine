@@ -508,7 +508,7 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
         USD价格或None
     """
     try:
-        monitor_url = CONFIG.get('monitor', {}).get('base_url', 'http://localhost:3000')
+        monitor_url = CONFIG.get('MONITOR_URL', 'http://localhost:3000')
         
         if network == "aptos":
             if is_contract_address:

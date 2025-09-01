@@ -14,7 +14,7 @@ from tradingflow.depot.python.config import CONFIG
 setup_logging(CONFIG)
 logger = logging.getLogger(__name__)
 
-MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
+MONITOR_URL = CONFIG.get("MONITOR_URL")
 VAULT_API_EVENTS_URI = "/aptos/vault/events/{address}"
 VAULT_API_HOLDINGS_URI = "/aptos/vault/holdings/{address}"
 VAULT_API_TRADE_SIGNAL_URI = "/aptos/vault/trade-signal"

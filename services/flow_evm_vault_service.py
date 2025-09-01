@@ -14,7 +14,7 @@ from tradingflow.depot.python.config import CONFIG
 setup_logging(CONFIG)
 logger = logging.getLogger(__name__)
 
-MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
+MONITOR_URL = CONFIG.get("MONITOR_URL")
 VAULT_API_CREATE_URI = "/evm/vault/create"
 VAULT_API_INFO_URI = "/evm/vault/{chain_id}/{vault_address}"
 VAULT_API_INVESTOR_URI = "/evm/vault/investor/{chain_id}/{investor_address}"
