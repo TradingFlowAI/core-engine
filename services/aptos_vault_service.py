@@ -414,7 +414,7 @@ class AptosVaultService:
         from_token_metadata_id: str,
         to_token_metadata_id: str,
         amount_in: int,
-        fee_tier: int = 2,
+        fee_tier: int = 1,
         amount_out_min: int = 0,
         sqrt_price_limit: str = "0",
         deadline: Optional[int] = None,
@@ -427,7 +427,7 @@ class AptosVaultService:
             from_token_metadata_id: 输入代币元数据ID
             to_token_metadata_id: 输出代币元数据ID
             amount_in: 输入金额（已经乘以decimals的整数）
-            fee_tier: 费用等级，默认为2
+            fee_tier: 费用等级，默认为1
             amount_out_min: 最小输出金额，默认为0
             sqrt_price_limit: 价格限制，默认为"0"
             deadline: 交易截止时间戳，如果为None则使用当前时间+1小时
@@ -508,13 +508,13 @@ class AptosVaultService:
     async def get_token_metadata(self, token_address: str) -> Optional[Dict[str, any]]:
         """
         从monitor服务获取代币元数据
-        
+
         Args:
             token_address: 代币地址
-            
+
         Returns:
             Optional[Dict[str, any]]: 代币元数据，如果获取失败返回None
-            
+
         Example Response:
         {
             "name": "Aptos Coin",
@@ -526,15 +526,15 @@ class AptosVaultService:
         try:
             url = f"{self._monitor_url}/aptos/tokens/metadata/{token_address}"
             logger.info(f"Requesting token metadata from monitor: {url}")
-            
+
             response = await self._client.get(url)
             response.raise_for_status()
-            
+
             data = response.json()
             logger.info(f"Successfully retrieved token metadata for {token_address}")
-            
+
             return data
-            
+
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 logger.warning(f"Token metadata not found for address: {token_address}")
