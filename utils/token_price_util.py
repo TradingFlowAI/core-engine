@@ -524,18 +524,19 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
             logger.error(f"不支持的网络: {network}")
             return None
             
+        logger.info(f"正在请求monitor API: {url}")
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status == 200:
                     data = await response.json()
                     if data.get('success', False):
                         token_data = data.get('data', {})
-                        price_usd = token_data.get('price_usd')
+                        price_usd = token_data.get('current_price')  # 修正字段名为current_price
                         if price_usd is not None:
                             logger.info(f"从monitor API获取到{network}代币价格: {token_identifier} = ${price_usd}")
                             return float(price_usd)
                         else:
-                            logger.warning(f"Monitor API返回数据中没有price_usd字段: {token_data}")
+                            logger.warning(f"Monitor API返回数据中没有current_price字段: {token_data}")
                     else:
                         logger.warning(f"Monitor API返回失败: {data.get('message', 'Unknown error')}")
                 else:
