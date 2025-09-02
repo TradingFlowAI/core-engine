@@ -2,7 +2,9 @@ import asyncio
 # Removed logging import - using persist_log from NodeBase
 import traceback
 from decimal import Decimal, getcontext
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
+
+import httpx
 
 from tradingflow.station.services.aptos_vault_service import AptosVaultService
 from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultService
@@ -15,6 +17,7 @@ from tradingflow.station.utils.token_price_util import (
 from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from tradingflow.depot.python.config import CONFIG
 
 # input handles
 FROM_TOKEN_HANDLE = "from_token"
@@ -326,6 +329,172 @@ class SwapNode(NodeBase):
             await self.persist_log(f"Failed to fetch token metadata from monitor for {token_address}: {e}", "WARNING")
             return None
 
+    async def find_best_pool(self, token1: str, token2: str) -> Optional[Dict[str, any]]:
+        """
+        动态搜索最优的交易池子，使用新版monitor API
+        
+        Args:
+            token1: 第一个代币地址
+            token2: 第二个代币地址
+            
+        Returns:
+            Optional[Dict]: 最优池子信息，包含fee_tier
+        """
+        if self.chain != "aptos":
+            # 目前只支持Aptos链的池子搜索
+            return None
+            
+        try:
+            monitor_url = CONFIG.get("MONITOR_URL")
+            if not monitor_url:
+                await self.persist_log("Monitor URL not configured, using default fee tier", "WARNING")
+                return None
+                
+            # 费率等级优先级: 0.05%, 0.3%, 0.01%, 1%
+            fee_tiers = "1,2,0,3"
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = f"{monitor_url}/aptos/pools/pair"
+                params = {
+                    "token1": token1,
+                    "token2": token2,
+                    "feeTiers": fee_tiers
+                }
+                
+                await self.persist_log(f"Searching pool: {token1}/{token2} with priority tiers [{fee_tiers}]", "INFO")
+                
+                response = await client.get(url, params=params)
+                
+                if response.status_code == 200:
+                    pool_data = response.json()
+                    
+                    # 检查API返回是否成功
+                    if pool_data.get("success") and pool_data.get("pool"):
+                        pool_info = pool_data["pool"]
+                        fee_tier = pool_info.get("feeTier")
+                        
+                        # 检查池子是否有足够的流动性
+                        if self._is_pool_suitable(pool_data):
+                            best_pool = {
+                                "pool_info": pool_data,
+                                "fee_tier": fee_tier,
+                                "token1": token1,
+                                "token2": token2
+                            }
+                            await self.persist_log(
+                                f"Found optimal pool: fee_tier={fee_tier}, "
+                                f"TVL=${pool_data.get('tvlUSD', 'N/A')}, "
+                                f"tokens={pool_info.get('token1Info', {}).get('symbol', 'N/A')}-{pool_info.get('token2Info', {}).get('symbol', 'N/A')}", 
+                                "INFO"
+                            )
+                            return best_pool
+                        else:
+                            await self.persist_log(f"Found pool but has insufficient liquidity: TVL=${pool_data.get('tvlUSD', 'N/A')}", "WARNING")
+                    else:
+                        await self.persist_log("API response indicates no pool found", "WARNING")
+                        
+                elif response.status_code == 404:
+                    error_data = response.json() if response.content else {}
+                    await self.persist_log(f"No matching pool found: {error_data.get('error', 'Not found')}", "INFO")
+                else:
+                    await self.persist_log(f"Pool search failed: {response.status_code} - {response.text}", "WARNING")
+                    
+        except Exception as e:
+            await self.persist_log(f"Pool search failed: {e}", "ERROR")
+            return None
+            
+        await self.persist_log("No suitable pool found, will use default fee_tier=1", "WARNING")
+        return None
+
+    def _is_pool_suitable(self, pool_data: Dict) -> bool:
+        """
+        检查池子是否适合交易
+        
+        Args:
+            pool_data: 池子数据（新版API响应格式）
+            
+        Returns:
+            bool: 是否适合交易
+        """
+        try:
+            # 检查基本字段
+            sqrt_price = pool_data.get("sqrtPrice")
+            if not sqrt_price:
+                return False
+                
+            # 检查流动性：优先使用tvlUSD，其次使用liquidity
+            liquidity_value = 0
+            if pool_data.get("tvlUSD"):
+                try:
+                    liquidity_value = float(pool_data.get("tvlUSD"))
+                except (ValueError, TypeError):
+                    liquidity_value = 0
+            elif pool_data.get("liquidity"):
+                try:
+                    liquidity_value = float(pool_data.get("liquidity"))
+                except (ValueError, TypeError):
+                    liquidity_value = 0
+            
+            # 最小流动性要求：$1000 USD
+            if liquidity_value < 1000:
+                return False
+                
+            # 检查价格是否合理
+            try:
+                sqrt_price_value = float(sqrt_price)
+                if sqrt_price_value <= 0:
+                    return False
+            except (ValueError, TypeError):
+                return False
+                
+            return True
+            
+        except Exception:
+            return False
+
+    def calculate_sqrt_price_limit_from_pool(self, best_pool: dict, is_buy: bool = True, slippage_pct: float = 5.0) -> int:
+        """
+        Calculate sqrt_price_limit based on pool's current price and trade direction
+        
+        Args:
+            best_pool: Pool data from monitor API
+            is_buy: True for buying token2, False for selling token2  
+            slippage_pct: Slippage tolerance percentage
+            
+        Returns:
+            int: Appropriate sqrt_price_limit for the trade
+        """
+        try:
+            # Get current sqrt price from pool
+            pool_info = best_pool.get("pool_info", {})
+            current_sqrt_price = int(pool_info.get("sqrtPrice", 0))
+            
+            if current_sqrt_price == 0:
+                # Fallback to pool.sqrtPrice if top-level sqrtPrice is missing
+                pool_data = pool_info.get("pool", {})
+                current_sqrt_price = int(pool_data.get("sqrtPrice", 0))
+            
+            if current_sqrt_price == 0:
+                raise ValueError("No valid sqrtPrice found in pool data")
+            
+            # Calculate slippage multiplier
+            slippage_multiplier = 1 + (slippage_pct / 100)
+            
+            if is_buy:
+                # Buying: allow price to go up by slippage %
+                sqrt_price_limit = int(current_sqrt_price * slippage_multiplier)
+            else:
+                # Selling: allow price to go down by slippage %
+                sqrt_price_limit = int(current_sqrt_price / slippage_multiplier)
+                
+            return sqrt_price_limit
+            
+        except Exception as e:
+            # Return reasonable default (current price ± 10%)
+            fallback_multiplier = 1.1 if is_buy else 0.9
+            fallback_price = int(current_sqrt_price * fallback_multiplier) if current_sqrt_price > 0 else 0
+            return fallback_price
+
     async def execute_swap(self) -> bool:
         """Execute swap transaction based on chain"""
         try:
@@ -336,47 +505,49 @@ class SwapNode(NodeBase):
             final_amount_in = await self.get_final_amount_in()
 
             if self.chain == "aptos":
-                # 在执行交换前检查用户vault余额
-                # CL：有点问题，下面先隐藏掉
-                # try:
-                #     import httpx
-                #     vault_url = f"{self.vault_service._monitor_url}/aptos/vault/holdings/{self.vault_address}"
-                #     async with httpx.AsyncClient() as client:
-                #         response = await client.get(vault_url)
-                #         if response.status_code == 200:
-                #             holdings_data = response.json()
-                #             holdings = holdings_data.get("holdings", [])
+                # 搜索最优池子
+                await self.persist_log(f"Searching for best pool: {self.input_token_address} -> {self.output_token_address}", "INFO")
+                best_pool = await self.find_best_pool(self.input_token_address, self.output_token_address)
+                
+                # 确定使用的fee_tier
+                fee_tier = 1  # 默认值
+                if best_pool:
+                    fee_tier = best_pool["fee_tier"]
+                    await self.persist_log(f"Using pool with fee_tier={fee_tier}", "INFO")
+                else:
+                    await self.persist_log(f"Using default fee_tier={fee_tier}", "WARNING")
 
-                #             # 检查是否有足够的源代币余额
-                #             sufficient_balance = False
-                #             for holding in holdings:
-                #                 if holding.get("token_address") == self.input_token_address:
-                #                     balance = int(holding.get("amount", "0"))
-                #                     if balance >= final_amount_in:
-                #                         sufficient_balance = True
-                #                         await self.persist_log(f"用户vault余额充足: {balance} >= {final_amount_in}", "INFO")
-                #                     else:
-                #                         await self.persist_log(f"用户vault余额不足: {balance} < {final_amount_in}", "WARNING")
-                #                     break
-
-                #             if not sufficient_balance:
-                #                 error_msg = f"用户vault中{self.from_token}余额不足，需要先存款"
-                #                 await self.persist_log(error_msg, "ERROR")
-                #                 return False
-
-                # except Exception as balance_check_error:
-                #     await self.persist_log(f"检查vault余额失败，继续执行交换: {balance_check_error}", "WARNING")
-
-                # Aptos swap execution
-                estimated_min_output, sqrt_price_limit = await self.get_estimated_min_output_amount_aptos(
-                    final_amount_in, self.slippery
-                )
+                # Aptos swap execution - use pool's direct sqrtPrice
+                if best_pool:
+                    # Use pool's current sqrtPrice directly (no slippage calculation)
+                    pool_info = best_pool.get("pool_info", {})
+                    sqrt_price_limit = pool_info.get("sqrtPrice", "0")
+                    
+                    # Convert to string if it's an integer
+                    if isinstance(sqrt_price_limit, int):
+                        sqrt_price_limit = str(sqrt_price_limit)
+                    
+                    await self.persist_log(
+                        f"Using pool's direct sqrtPrice as limit: {sqrt_price_limit}", 
+                        "INFO"
+                    )
+                    
+                    # Still need estimated output for amount_out_min
+                    estimated_min_output, _ = await self.get_estimated_min_output_amount_aptos(
+                        final_amount_in, self.slippery
+                    )
+                else:
+                    # Fallback to old method if no pool found
+                    estimated_min_output, sqrt_price_limit = await self.get_estimated_min_output_amount_aptos(
+                        final_amount_in, self.slippery
+                    )
 
                 tx_result = await self.vault_service.admin_execute_swap(
                     self.vault_address,
                     self.input_token_address,
                     self.output_token_address,
                     final_amount_in,
+                    fee_tier=fee_tier,  # 使用动态搜索的fee_tier
                     sqrt_price_limit=sqrt_price_limit,
                     amount_out_min=estimated_min_output,
                 )
