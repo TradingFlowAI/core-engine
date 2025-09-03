@@ -522,17 +522,17 @@ class SwapNode(NodeBase):
                     pool_info = best_pool.get("pool_info", {})
                     current_sqrt_price = int(pool_info.get("sqrtPrice", "0"))
 
-                    # Test Option 1: Current price + 1% (upper bound for buying)
-                    sqrt_price_limit = str(int(current_sqrt_price * 1.01))
+                    # Test Option 3: Current price + 5% (upper bound for buying)
+                    sqrt_price_limit = str(int(current_sqrt_price * 1.05))
 
                     # Other options to test:
+                    # Option 1: sqrt_price_limit = str(int(current_sqrt_price * 1.01))  # +1%
                     # Option 2: sqrt_price_limit = str(int(current_sqrt_price * 0.99))  # -1%
-                    # Option 3: sqrt_price_limit = str(int(current_sqrt_price * 1.05))  # +5%
                     # Option 4: sqrt_price_limit = str(int(current_sqrt_price * 0.95))  # -5%
                     # Option 5: sqrt_price_limit = str(current_sqrt_price)              # exact
 
                     await self.persist_log(
-                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (+1%)",
+                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (+5%)",
                         "INFO"
                     )
 
