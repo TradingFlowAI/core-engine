@@ -517,18 +517,22 @@ class SwapNode(NodeBase):
                 else:
                     await self.persist_log(f"Using default fee_tier={fee_tier}", "WARNING")
 
-                # Aptos swap execution - use pool's direct sqrtPrice
+                # Aptos swap execution - test different sqrt_price_limit approaches
                 if best_pool:
-                    # Use pool's current sqrtPrice directly (no slippage calculation)
                     pool_info = best_pool.get("pool_info", {})
-                    sqrt_price_limit = pool_info.get("sqrtPrice", "0")
+                    current_sqrt_price = int(pool_info.get("sqrtPrice", "0"))
                     
-                    # Convert to string if it's an integer
-                    if isinstance(sqrt_price_limit, int):
-                        sqrt_price_limit = str(sqrt_price_limit)
+                    # Test Option 1: Current price + 1% (upper bound for buying)
+                    sqrt_price_limit = str(int(current_sqrt_price * 1.01))
+                    
+                    # Other options to test:
+                    # Option 2: sqrt_price_limit = str(int(current_sqrt_price * 0.99))  # -1%
+                    # Option 3: sqrt_price_limit = str(int(current_sqrt_price * 1.05))  # +5%
+                    # Option 4: sqrt_price_limit = str(int(current_sqrt_price * 0.95))  # -5%
+                    # Option 5: sqrt_price_limit = str(current_sqrt_price)              # exact
                     
                     await self.persist_log(
-                        f"Using pool's direct sqrtPrice as limit: {sqrt_price_limit}", 
+                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (+1%)", 
                         "INFO"
                     )
                     
