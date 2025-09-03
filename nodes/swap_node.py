@@ -35,40 +35,40 @@ getcontext().prec = 50
 def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, slippage_tolerance: float) -> str:
     """
     Calculate sqrt_price_limit for Hyperion DEX
-    
+
     Based on Hyperion official docs:
     sqrt_price_limit: a x64 fixed-point number, indicate price impact limit after swap
-    
+
     This is different from Uniswap's Q64.96 format!
     """
     try:
         # Hyperion uses x64 fixed-point format (multiply by 2^64, not 2^96)
         # This is a price impact limit, not necessarily a complex price ratio
-        
+
         # Calculate price ratio
         price_ratio = Decimal(str(output_price)) / Decimal(str(input_price))
-        
-        # Apply slippage tolerance 
+
+        # Apply slippage tolerance
         slippage_factor = Decimal(str(slippage_tolerance)) / Decimal("100")
         limit_price_ratio = price_ratio * (Decimal("1") - slippage_factor)
-        
+
         # Convert to x64 fixed-point format (Hyperion's format)
         sqrt_price = limit_price_ratio.sqrt()
         x64_multiplier = Decimal(2) ** 64
         sqrt_price_x64 = int(sqrt_price * x64_multiplier)
-        
+
         # Apply reasonable bounds for Hyperion DEX
         # Based on test script value 4295128740 ≈ 2^32
         max_sqrt_price = 2**64 - 1      # x64 format max
         min_sqrt_price = 4295128740      # Known working value from test
-        
+
         if sqrt_price_x64 > max_sqrt_price:
             sqrt_price_x64 = max_sqrt_price
         elif sqrt_price_x64 < min_sqrt_price:
             sqrt_price_x64 = min_sqrt_price
-            
+
         return str(sqrt_price_x64)
-        
+
     except Exception as e:
         # Fallback to known working value
         return "4295128740"
@@ -332,27 +332,27 @@ class SwapNode(NodeBase):
     async def find_best_pool(self, token1: str, token2: str) -> Optional[Dict[str, any]]:
         """
         动态搜索最优的交易池子，使用新版monitor API
-        
+
         Args:
             token1: 第一个代币地址
             token2: 第二个代币地址
-            
+
         Returns:
             Optional[Dict]: 最优池子信息，包含fee_tier
         """
         if self.chain != "aptos":
             # 目前只支持Aptos链的池子搜索
             return None
-            
+
         try:
             monitor_url = CONFIG.get("MONITOR_URL")
             if not monitor_url:
                 await self.persist_log("Monitor URL not configured, using default fee tier", "WARNING")
                 return None
-                
+
             # 费率等级优先级: 0.05%, 0.3%, 0.01%, 1%
             fee_tiers = "1,2,0,3"
-            
+
             async with httpx.AsyncClient(timeout=10.0) as client:
                 url = f"{monitor_url}/aptos/pools/pair"
                 params = {
@@ -360,19 +360,19 @@ class SwapNode(NodeBase):
                     "token2": token2,
                     "feeTiers": fee_tiers
                 }
-                
+
                 await self.persist_log(f"Searching pool: {token1}/{token2} with priority tiers [{fee_tiers}]", "INFO")
-                
+
                 response = await client.get(url, params=params)
-                
+
                 if response.status_code == 200:
                     pool_data = response.json()
-                    
+
                     # 检查API返回是否成功
                     if pool_data.get("success") and pool_data.get("pool"):
                         pool_info = pool_data["pool"]
                         fee_tier = pool_info.get("feeTier")
-                        
+
                         # 检查池子是否有足够的流动性
                         if self._is_pool_suitable(pool_data):
                             best_pool = {
@@ -384,7 +384,7 @@ class SwapNode(NodeBase):
                             await self.persist_log(
                                 f"Found optimal pool: fee_tier={fee_tier}, "
                                 f"TVL=${pool_data.get('tvlUSD', 'N/A')}, "
-                                f"tokens={pool_info.get('token1Info', {}).get('symbol', 'N/A')}-{pool_info.get('token2Info', {}).get('symbol', 'N/A')}", 
+                                f"tokens={pool_info.get('token1Info', {}).get('symbol', 'N/A')}-{pool_info.get('token2Info', {}).get('symbol', 'N/A')}",
                                 "INFO"
                             )
                             return best_pool
@@ -392,27 +392,27 @@ class SwapNode(NodeBase):
                             await self.persist_log(f"Found pool but has insufficient liquidity: TVL=${pool_data.get('tvlUSD', 'N/A')}", "WARNING")
                     else:
                         await self.persist_log("API response indicates no pool found", "WARNING")
-                        
+
                 elif response.status_code == 404:
                     error_data = response.json() if response.content else {}
                     await self.persist_log(f"No matching pool found: {error_data.get('error', 'Not found')}", "INFO")
                 else:
                     await self.persist_log(f"Pool search failed: {response.status_code} - {response.text}", "WARNING")
-                    
+
         except Exception as e:
             await self.persist_log(f"Pool search failed: {e}", "ERROR")
             return None
-            
+
         await self.persist_log("No suitable pool found, will use default fee_tier=1", "WARNING")
         return None
 
     def _is_pool_suitable(self, pool_data: Dict) -> bool:
         """
         检查池子是否适合交易
-        
+
         Args:
             pool_data: 池子数据（新版API响应格式）
-            
+
         Returns:
             bool: 是否适合交易
         """
@@ -421,7 +421,7 @@ class SwapNode(NodeBase):
             sqrt_price = pool_data.get("sqrtPrice")
             if not sqrt_price:
                 return False
-                
+
             # 检查流动性：优先使用tvlUSD，其次使用liquidity
             liquidity_value = 0
             if pool_data.get("tvlUSD"):
@@ -434,11 +434,11 @@ class SwapNode(NodeBase):
                     liquidity_value = float(pool_data.get("liquidity"))
                 except (ValueError, TypeError):
                     liquidity_value = 0
-            
+
             # 最小流动性要求：$1000 USD
             if liquidity_value < 1000:
                 return False
-                
+
             # 检查价格是否合理
             try:
                 sqrt_price_value = float(sqrt_price)
@@ -446,21 +446,21 @@ class SwapNode(NodeBase):
                     return False
             except (ValueError, TypeError):
                 return False
-                
+
             return True
-            
+
         except Exception:
             return False
 
     def calculate_sqrt_price_limit_from_pool(self, best_pool: dict, is_buy: bool = True, slippage_pct: float = 5.0) -> int:
         """
         Calculate sqrt_price_limit based on pool's current price and trade direction
-        
+
         Args:
             best_pool: Pool data from monitor API
-            is_buy: True for buying token2, False for selling token2  
+            is_buy: True for buying token2, False for selling token2
             slippage_pct: Slippage tolerance percentage
-            
+
         Returns:
             int: Appropriate sqrt_price_limit for the trade
         """
@@ -468,27 +468,27 @@ class SwapNode(NodeBase):
             # Get current sqrt price from pool
             pool_info = best_pool.get("pool_info", {})
             current_sqrt_price = int(pool_info.get("sqrtPrice", 0))
-            
+
             if current_sqrt_price == 0:
                 # Fallback to pool.sqrtPrice if top-level sqrtPrice is missing
                 pool_data = pool_info.get("pool", {})
                 current_sqrt_price = int(pool_data.get("sqrtPrice", 0))
-            
+
             if current_sqrt_price == 0:
                 raise ValueError("No valid sqrtPrice found in pool data")
-            
+
             # Calculate slippage multiplier
             slippage_multiplier = 1 + (slippage_pct / 100)
-            
+
             if is_buy:
                 # Buying: allow price to go up by slippage %
                 sqrt_price_limit = int(current_sqrt_price * slippage_multiplier)
             else:
                 # Selling: allow price to go down by slippage %
                 sqrt_price_limit = int(current_sqrt_price / slippage_multiplier)
-                
+
             return sqrt_price_limit
-            
+
         except Exception as e:
             # Return reasonable default (current price ± 10%)
             fallback_multiplier = 1.1 if is_buy else 0.9
@@ -508,7 +508,7 @@ class SwapNode(NodeBase):
                 # 搜索最优池子
                 await self.persist_log(f"Searching for best pool: {self.input_token_address} -> {self.output_token_address}", "INFO")
                 best_pool = await self.find_best_pool(self.input_token_address, self.output_token_address)
-                
+
                 # 确定使用的fee_tier
                 fee_tier = 1  # 默认值
                 if best_pool:
@@ -521,21 +521,21 @@ class SwapNode(NodeBase):
                 if best_pool:
                     pool_info = best_pool.get("pool_info", {})
                     current_sqrt_price = int(pool_info.get("sqrtPrice", "0"))
-                    
+
                     # Test Option 1: Current price + 1% (upper bound for buying)
                     sqrt_price_limit = str(int(current_sqrt_price * 1.01))
-                    
+
                     # Other options to test:
                     # Option 2: sqrt_price_limit = str(int(current_sqrt_price * 0.99))  # -1%
                     # Option 3: sqrt_price_limit = str(int(current_sqrt_price * 1.05))  # +5%
                     # Option 4: sqrt_price_limit = str(int(current_sqrt_price * 0.95))  # -5%
                     # Option 5: sqrt_price_limit = str(current_sqrt_price)              # exact
-                    
+
                     await self.persist_log(
-                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (+1%)", 
+                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (+1%)",
                         "INFO"
                     )
-                    
+
                     # Still need estimated output for amount_out_min
                     estimated_min_output, _ = await self.get_estimated_min_output_amount_aptos(
                         final_amount_in, self.slippery
