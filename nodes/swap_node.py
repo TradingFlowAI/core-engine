@@ -275,9 +275,22 @@ class SwapNode(NodeBase):
             await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "DEBUG")
             
             # Calculate price from sqrt_price: price = (sqrt_price / 2^64)^2
-            # For Uniswap V3 X64 format
-            sqrt_price_decimal = Decimal(current_sqrt_price) / Decimal(2**64)
-            price_decimal = sqrt_price_decimal ** 2
+            # Try different formats to find correct one
+            # X64 format
+            sqrt_price_x64 = Decimal(current_sqrt_price) / Decimal(2**64)
+            price_x64 = sqrt_price_x64 ** 2
+            
+            # X96 format (Uniswap V3 standard)
+            sqrt_price_x96 = Decimal(current_sqrt_price) / Decimal(2**96)
+            price_x96 = sqrt_price_x96 ** 2
+            
+            # Raw format (no scaling)
+            price_raw = Decimal(current_sqrt_price) ** 2
+            
+            await self.persist_log(f"Price formats - X64: {price_x64:.6f}, X96: {price_x96:.6f}, Raw: {price_raw:.6f}", "DEBUG")
+            
+            # Use X96 format as it's more standard for Uniswap V3-style AMMs
+            price_decimal = price_x96
             
             # Determine trade direction for price conversion
             trade_direction, token0, token1 = self._determine_trade_direction(
@@ -572,20 +585,30 @@ class SwapNode(NodeBase):
             import math
             slippage_decimal = slippage_pct / 100
             
-            if trade_direction == "token0_to_token1":
-                # Price goes UP, set upper limit: sqrt(1 + slippage)
-                sqrt_multiplier = math.sqrt(1 + slippage_decimal)
-                direction = "+"
-            else:
-                # Price goes DOWN, set lower limit: sqrt(1 - slippage)
+            # Determine slippage direction based on trade semantics, not just token order
+            # When selling volatile token (APT) for stable (USDC): use lower limit (protect against price drop)
+            # When buying volatile token (APT) with stable (USDC): use upper limit (protect against price rise)
+            
+            # Check if we're selling the "main" token (APT) or buying it
+            apt_address = "0xa"  # APT is always the main volatile token
+            is_selling_apt = (self.input_token_address == apt_address)
+            
+            if is_selling_apt:
+                # Selling APT: protect against price dropping, use lower limit
                 sqrt_multiplier = math.sqrt(1 - slippage_decimal)
                 direction = "-"
+                protection_type = "selling APT, lower limit"
+            else:
+                # Buying APT: protect against price rising, use upper limit  
+                sqrt_multiplier = math.sqrt(1 + slippage_decimal)
+                direction = "+"
+                protection_type = "buying APT, upper limit"
             
             sqrt_price_limit = int(current_sqrt_price * sqrt_multiplier)
             
             await self.persist_log(
                 f"Dynamic sqrt_price_limit: {self.input_token_address}→{self.output_token_address} "
-                f"= {trade_direction} → {direction}{slippage_pct}% → "
+                f"= {trade_direction} → {direction}{slippage_pct}% ({protection_type}) → "
                 f"sqrt_multiplier={sqrt_multiplier:.6f} → limit={sqrt_price_limit}",
                 "INFO"
             )
