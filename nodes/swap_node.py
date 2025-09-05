@@ -120,15 +120,17 @@ class SwapNode(NodeBase):
         slippery: float = 1.0,
         **kwargs,
     ):
+        # Set defaults for SwapNode metadata (but allow BuyNode to override)
+        kwargs.setdefault('version', "0.0.2")
+        kwargs.setdefault('display_name', "Swap Node")
+        kwargs.setdefault('node_category', "instance")
+        
         super().__init__(
             flow_id=flow_id,
             component_id=component_id,
             cycle=cycle,
             node_id=node_id,
             name=name,
-            version="0.0.2",
-            display_name="Swap Node",
-            node_category="instance",
             **kwargs,
         )
 
