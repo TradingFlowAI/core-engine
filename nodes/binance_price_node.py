@@ -12,7 +12,7 @@ from tradingflow.station.common.node_decorators import register_node_type
 from tradingflow.station.common.signal_types import SignalType
 from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
 
-PRICE_DATA_HANDLE = "price_data"
+PRICE_DATA_HANDLE = "kline_data"
 
 
 @register_node_type(

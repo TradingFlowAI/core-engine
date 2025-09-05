@@ -249,8 +249,75 @@ class SwapNode(NodeBase):
 
         raise ValueError("No valid amount specified")
 
+    async def get_estimated_min_output_amount_from_pool(self, amount_in: int, slippage: float, pool_data: dict) -> int:
+        """
+        Use pool exchange rate to calculate estimated min output amount (no price API dependency)
+        
+        Args:
+            amount_in: Input amount in wei
+            slippage: Slippage tolerance percentage (e.g., 0.5 for 0.5%)
+            pool_data: Pool information from monitor API
+            
+        Returns:
+            int: Estimated minimum output amount after slippage
+        """
+        try:
+            pool_info = pool_data.get("pool_info", {})
+            current_sqrt_price = int(pool_info.get("sqrtPrice", 0))
+            
+            if current_sqrt_price == 0:
+                pool_inner = pool_info.get("pool", {})
+                current_sqrt_price = int(pool_inner.get("sqrtPrice", 0))
+                
+            if current_sqrt_price == 0:
+                raise ValueError("No valid sqrtPrice found in pool data")
+
+            await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "DEBUG")
+            
+            # Calculate price from sqrt_price: price = (sqrt_price / 2^64)^2
+            # For Uniswap V3 X64 format
+            sqrt_price_decimal = Decimal(current_sqrt_price) / Decimal(2**64)
+            price_decimal = sqrt_price_decimal ** 2
+            
+            # Determine trade direction for price conversion
+            trade_direction, token0, token1 = self._determine_trade_direction(
+                self.input_token_address, 
+                self.output_token_address
+            )
+            
+            amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
+            
+            if trade_direction == "token0_to_token1":
+                # token0 -> token1: use price directly
+                # price = token1/token0, so token1_amount = token0_amount * price
+                output_amount_decimal = amount_in_decimal * price_decimal
+                await self.persist_log(f"Trade direction: token0->token1, price={price_decimal}", "DEBUG")
+            else:
+                # token1 -> token0: use inverse price
+                # price = token1/token0, so token0_amount = token1_amount / price
+                output_amount_decimal = amount_in_decimal / price_decimal
+                await self.persist_log(f"Trade direction: token1->token0, inverse_price={1/price_decimal}", "DEBUG")
+            
+            # Apply slippage protection
+            slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
+            output_amount_with_slippage = output_amount_decimal * slippage_factor
+            output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
+            
+            await self.persist_log(
+                f"Pool-based calculation: input={amount_in_decimal} -> "
+                f"output_before_slippage={output_amount_decimal} -> "
+                f"output_after_{slippage}%_slippage={output_amount_raw}", 
+                "INFO"
+            )
+            
+            return output_amount_raw
+            
+        except Exception as e:
+            await self.persist_log(f"Error calculating output from pool: {str(e)}", "ERROR")
+            raise ValueError(f"Cannot calculate output from pool data: {str(e)}")
+
     async def get_estimated_min_output_amount_aptos(self, amount_in: int, slippage: float) -> tuple[int, str]:
-        """估算 Aptos 输出金额和 sqrt_price_limit"""
+        """估算 Aptos 输出金额和 sqrt_price_limit (DEPRECATED: use pool-based calculation)"""
         input_price = await get_aptos_token_price_usd_async(self.input_token_address)
         output_price = await get_aptos_token_price_usd_async(self.output_token_address)
 
@@ -452,17 +519,33 @@ class SwapNode(NodeBase):
         except Exception:
             return False
 
-    def calculate_sqrt_price_limit_from_pool(self, best_pool: dict, is_buy: bool = True, slippage_pct: float = 5.0) -> int:
+    def _determine_trade_direction(self, input_token: str, output_token: str) -> tuple[str, str, str]:
         """
-        Calculate sqrt_price_limit based on pool's current price and trade direction
+        Determine trade direction based on token addresses (Uniswap V3 sorting rule)
+        
+        Returns:
+            tuple: (trade_direction, token0, token1)
+        """
+        # In Uniswap V3, token0 < token1 (lexicographic order by address)
+        if input_token < output_token:
+            token0, token1 = input_token, output_token
+            trade_direction = "token0_to_token1"  # Price goes UP
+        else:
+            token0, token1 = output_token, input_token  
+            trade_direction = "token1_to_token0"  # Price goes DOWN
+            
+        return trade_direction, token0, token1
+
+    async def calculate_dynamic_sqrt_price_limit(self, best_pool: dict, slippage_pct: float = 5.0) -> int:
+        """
+        Calculate sqrt_price_limit dynamically based on pool token order and trade direction
 
         Args:
             best_pool: Pool data from monitor API
-            is_buy: True for buying token2, False for selling token2
-            slippage_pct: Slippage tolerance percentage
+            slippage_pct: User's slippage tolerance percentage (e.g., 5.0 for 5%)
 
         Returns:
-            int: Appropriate sqrt_price_limit for the trade
+            int: Correct sqrt_price_limit for the trade
         """
         try:
             # Get current sqrt price from pool
@@ -477,21 +560,42 @@ class SwapNode(NodeBase):
             if current_sqrt_price == 0:
                 raise ValueError("No valid sqrtPrice found in pool data")
 
-            # Calculate slippage multiplier
-            slippage_multiplier = 1 + (slippage_pct / 100)
+            await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "INFO")
 
-            if is_buy:
-                # Buying: allow price to go up by slippage %
-                sqrt_price_limit = int(current_sqrt_price * slippage_multiplier)
+            # Determine trade direction
+            trade_direction, token0, token1 = self._determine_trade_direction(
+                self.input_token_address, 
+                self.output_token_address
+            )
+            
+            # Calculate correct sqrt multiplier: sqrt(1 ± slippage)
+            import math
+            slippage_decimal = slippage_pct / 100
+            
+            if trade_direction == "token0_to_token1":
+                # Price goes UP, set upper limit: sqrt(1 + slippage)
+                sqrt_multiplier = math.sqrt(1 + slippage_decimal)
+                direction = "+"
             else:
-                # Selling: allow price to go down by slippage %
-                sqrt_price_limit = int(current_sqrt_price / slippage_multiplier)
+                # Price goes DOWN, set lower limit: sqrt(1 - slippage)
+                sqrt_multiplier = math.sqrt(1 - slippage_decimal)
+                direction = "-"
+            
+            sqrt_price_limit = int(current_sqrt_price * sqrt_multiplier)
+            
+            await self.persist_log(
+                f"Dynamic sqrt_price_limit: {self.input_token_address}→{self.output_token_address} "
+                f"= {trade_direction} → {direction}{slippage_pct}% → "
+                f"sqrt_multiplier={sqrt_multiplier:.6f} → limit={sqrt_price_limit}",
+                "INFO"
+            )
 
             return sqrt_price_limit
 
         except Exception as e:
-            # Return reasonable default (current price ± 10%)
-            fallback_multiplier = 1.1 if is_buy else 0.9
+            await self.persist_log(f"Failed to calculate dynamic sqrt_price_limit: {e}", "ERROR")
+            # Fallback: use conservative 1% in correct direction
+            fallback_multiplier = math.sqrt(1.01) if trade_direction == "token0_to_token1" else math.sqrt(0.99)
             fallback_price = int(current_sqrt_price * fallback_multiplier) if current_sqrt_price > 0 else 0
             return fallback_price
 
@@ -517,28 +621,18 @@ class SwapNode(NodeBase):
                 else:
                     await self.persist_log(f"Using default fee_tier={fee_tier}", "WARNING")
 
-                # Aptos swap execution - test different sqrt_price_limit approaches
+                # Aptos swap execution - use dynamic sqrt_price_limit calculation
                 if best_pool:
-                    pool_info = best_pool.get("pool_info", {})
-                    current_sqrt_price = int(pool_info.get("sqrtPrice", "0"))
-
-                    # Test Option 4: Current price - 5% (lower bound for selling)
-                    sqrt_price_limit = str(int(current_sqrt_price * 0.95))
-
-                    # Other options to test:
-                    # Option 1: sqrt_price_limit = str(int(current_sqrt_price * 1.01))  # +1%
-                    # Option 2: sqrt_price_limit = str(int(current_sqrt_price * 0.99))  # -1%
-                    # Option 3: sqrt_price_limit = str(int(current_sqrt_price * 1.05))  # +5%
-                    # Option 5: sqrt_price_limit = str(current_sqrt_price)              # exact
-
-                    await self.persist_log(
-                        f"Testing sqrt_price_limit: current={current_sqrt_price}, limit={sqrt_price_limit} (-5%)",
-                        "INFO"
+                    # Calculate dynamic sqrt_price_limit based on trade direction and user slippage
+                    sqrt_price_limit_int = await self.calculate_dynamic_sqrt_price_limit(
+                        best_pool, 
+                        slippage_pct=self.slippery  # User input is already percentage (e.g., 0.5 for 0.5%)
                     )
+                    sqrt_price_limit = str(sqrt_price_limit_int)
 
-                    # Still need estimated output for amount_out_min
-                    estimated_min_output, _ = await self.get_estimated_min_output_amount_aptos(
-                        final_amount_in, self.slippery
+                    # Use pool-based calculation for estimated output (no price API dependency)
+                    estimated_min_output = await self.get_estimated_min_output_amount_from_pool(
+                        final_amount_in, self.slippery, best_pool
                     )
                 else:
                     # Fallback to old method if no pool found
