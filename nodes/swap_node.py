@@ -294,22 +294,34 @@ class SwapNode(NodeBase):
             
             amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
             
-            # Debug the price interpretation issue
-            await self.persist_log(f"Price analysis: APT should be ~$4.27, calculated price_x64={price_decimal}", "DEBUG")
+            # Debug detailed pool and token info
+            await self.persist_log(
+                f"Pool info details: "
+                f"sqrt_price={current_sqrt_price}, "
+                f"input_token={self.input_token_address} (decimals={self.input_token_decimals}), "
+                f"output_token={self.output_token_address} (decimals={self.output_token_decimals}), "
+                f"trade_direction={trade_direction}",
+                "DEBUG"
+            )
             
-            # Check if price needs to be inverted based on token pair
-            # If price_decimal is much smaller than expected APT price (~4.27), it might be USDC/APT instead of APT/USDC
-            expected_apt_price = Decimal("4.27")  # Approximate current APT price in USD
-            price_ratio = expected_apt_price / price_decimal if price_decimal > 0 else 0
+            # Raw X64 price calculation
+            await self.persist_log(f"Raw X64 price (no decimal adjustment): {price_decimal}", "DEBUG")
             
-            await self.persist_log(f"Price ratio check: expected_apt_price={expected_apt_price}, calculated_price={price_decimal}, ratio={price_ratio}", "DEBUG")
+            # Adjust price for token decimal differences
+            # Pool price is in terms of base units, need to convert to human-readable units
+            # If output has more decimals than input, we need to scale up the price
+            decimal_adjustment = Decimal(10) ** (self.output_token_decimals - self.input_token_decimals)
+            adjusted_price = price_decimal * decimal_adjustment
             
-            # If ratio is close to 100, the price might be inverted
-            if price_ratio > 50:  # Allow some tolerance
-                await self.persist_log(f"Price seems inverted (ratio={price_ratio}), using inverse", "DEBUG")
-                corrected_price = Decimal("1") / price_decimal
-                await self.persist_log(f"Corrected price: {corrected_price} (should be closer to 4.27)", "DEBUG")
-                price_decimal = corrected_price
+            await self.persist_log(
+                f"Decimal adjustment: input_decimals={self.input_token_decimals}, "
+                f"output_decimals={self.output_token_decimals}, "
+                f"adjustment_factor={decimal_adjustment}, "
+                f"adjusted_price={adjusted_price}",
+                "DEBUG"
+            )
+            
+            price_decimal = adjusted_price
             
             if trade_direction == "token0_to_token1":
                 # token0 -> token1: use price directly
