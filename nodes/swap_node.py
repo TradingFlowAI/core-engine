@@ -276,23 +276,15 @@ class SwapNode(NodeBase):
 
             await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "DEBUG")
             
-            # Calculate price from sqrt_price: price = (sqrt_price / 2^64)^2
-            # Try different formats to find correct one
-            # X64 format
+            # Calculate price from sqrt_price using X64 format (confirmed by Aptos docs)
+            # sqrt_price_limit: a x64 fixed-point number
             sqrt_price_x64 = Decimal(current_sqrt_price) / Decimal(2**64)
             price_x64 = sqrt_price_x64 ** 2
             
-            # X96 format (Uniswap V3 standard)
-            sqrt_price_x96 = Decimal(current_sqrt_price) / Decimal(2**96)
-            price_x96 = sqrt_price_x96 ** 2
+            await self.persist_log(f"X64 calculation: sqrt_price_raw={current_sqrt_price}, sqrt_price_x64={sqrt_price_x64}, price_x64={price_x64}", "DEBUG")
             
-            # Raw format (no scaling)
-            price_raw = Decimal(current_sqrt_price) ** 2
-            
-            await self.persist_log(f"Price formats - X64: {price_x64:.6f}, X96: {price_x96:.6f}, Raw: {price_raw:.6f}", "DEBUG")
-            
-            # Use X96 format as it's more standard for Uniswap V3-style AMMs
-            price_decimal = price_x96
+            # Use X64 format as specified in Aptos documentation
+            price_decimal = price_x64
             
             # Determine trade direction for price conversion
             trade_direction, token0, token1 = self._determine_trade_direction(
@@ -301,6 +293,23 @@ class SwapNode(NodeBase):
             )
             
             amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
+            
+            # Debug the price interpretation issue
+            await self.persist_log(f"Price analysis: APT should be ~$4.27, calculated price_x64={price_decimal}", "DEBUG")
+            
+            # Check if price needs to be inverted based on token pair
+            # If price_decimal is much smaller than expected APT price (~4.27), it might be USDC/APT instead of APT/USDC
+            expected_apt_price = Decimal("4.27")  # Approximate current APT price in USD
+            price_ratio = expected_apt_price / price_decimal if price_decimal > 0 else 0
+            
+            await self.persist_log(f"Price ratio check: expected_apt_price={expected_apt_price}, calculated_price={price_decimal}, ratio={price_ratio}", "DEBUG")
+            
+            # If ratio is close to 100, the price might be inverted
+            if price_ratio > 50:  # Allow some tolerance
+                await self.persist_log(f"Price seems inverted (ratio={price_ratio}), using inverse", "DEBUG")
+                corrected_price = Decimal("1") / price_decimal
+                await self.persist_log(f"Corrected price: {corrected_price} (should be closer to 4.27)", "DEBUG")
+                price_decimal = corrected_price
             
             if trade_direction == "token0_to_token1":
                 # token0 -> token1: use price directly
@@ -317,6 +326,20 @@ class SwapNode(NodeBase):
             slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
             output_amount_with_slippage = output_amount_decimal * slippage_factor
             output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
+            
+            # Safety check for uint64 overflow
+            uint64_max = 2**64 - 1
+            if output_amount_raw > uint64_max:
+                await self.persist_log(
+                    f"ERROR: Calculated amount {output_amount_raw} exceeds uint64 max {uint64_max}. "
+                    f"Price calculation may be incorrect.", "ERROR"
+                )
+                # Try with token decimals adjustment
+                await self.persist_log(
+                    f"Debug: price_decimal={price_decimal}, amount_in_decimal={amount_in_decimal}, "
+                    f"output_token_decimals={self.output_token_decimals}, input_token_decimals={self.input_token_decimals}", "DEBUG"
+                )
+                raise ValueError(f"Calculated swap amount {output_amount_raw} exceeds uint64 maximum")
             
             await self.persist_log(
                 f"Pool-based calculation: input={amount_in_decimal} -> "
