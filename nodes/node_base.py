@@ -573,9 +573,15 @@ class NodeBase(abc.ABC):
                     for handle_name, handle_obj in input_handles.items():
                         if handle_name in payload:
                             # 对于通配符情况，更新所有匹配该target_handle的edge_key
+                            # 创建新的Signal对象以保持类型一致性
+                            handle_signal = Signal(
+                                signal_type=signal.type,
+                                payload=payload[handle_name],
+                                timestamp=signal.timestamp
+                            )
                             for edge_key in self._input_signals.keys():
                                 if edge_key.endswith(f"->{handle_name}"):
-                                    self._input_signals[edge_key] = payload[handle_name]
+                                    self._input_signals[edge_key] = handle_signal
 
                             # 执行默认的成员变量更新逻辑
                             await self._handle_default_signal_processing(
