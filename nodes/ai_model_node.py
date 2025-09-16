@@ -1,6 +1,7 @@
 import asyncio
 import json
 # Removed logging import - using persist_log from NodeBase
+import time
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -97,11 +98,15 @@ class AIModelNode(NodeBase):
         )
 
         # Save parameters
-        self.model_name = model_name or "deepseek-r1-250120"
+        self.model_name = model_name or "openai/gpt-3.5-turbo"
         self.system_prompt = system_prompt
         self.prompt = prompt
-        self.api_key = CONFIG["ARK_API_KEY"]
-        self.api_endpoint = CONFIG["AI_MODEL_NODE_ENDPOINT"]
+
+        # OpenRouter configuration
+        self.api_key = CONFIG["OPENROUTER_API_KEY"]
+        self.api_endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        self.site_url = "https://tradingflows.ai"
+        self.site_name = "TradingFlow"
         self.auto_format_output = auto_format_output
 
         # Process model parameters
@@ -469,60 +474,61 @@ class AIModelNode(NodeBase):
             Optional[str]: AI响应文本，失败则返回None
         """
         if not self.api_key:
-            await self.persist_log("API key not provided", "ERROR")
+            self.persist_log("ERROR", "OpenRouter API key not provided")
             return None
-
         try:
-            # 准备请求数据
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            }
+            self.persist_log("INFO", f"Calling OpenRouter API with model: {self.model_name}")
+            self.persist_log("DEBUG", f"Context: {context[:200]}...")
 
-            # 创建消息列表
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": context},
-            ]
+            # Prepare messages in OpenAI chat format
+            messages = []
+            if self.system_prompt:
+                messages.append({"role": "system", "content": self.system_prompt})
+            messages.append({"role": "user", "content": context})
 
             data = {
                 "model": self.model_name,
                 "messages": messages,
-                "temperature": self.temperature,
                 "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "stream": False,
             }
 
-            await self.persist_log(f"Calling AI model: {self.model_name}", "INFO")
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "HTTP-Referer": self.site_url,
+                "X-Title": self.site_name,
+            }
 
-            # 发送请求
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    self.api_endpoint, headers=headers, json=data
-                )
-
-                # 检查响应
+                response = await client.post(self.api_endpoint, headers=headers, json=data)
                 response.raise_for_status()
                 response_data = response.json()
 
-                # 提取响应文本
+                self.persist_log("DEBUG", f"Raw response: {response_data}")
+
+                # Extract content from OpenAI-format response
                 if "choices" in response_data and len(response_data["choices"]) > 0:
-                    ai_text = response_data["choices"][0]["message"]["content"]
-                    await self.persist_log("AI response received successfully", "INFO")
-                    return ai_text
+                    choice = response_data["choices"][0]
+                    message = choice.get("message", {})
+                    content = message.get("content", "").strip()
+                    if content:
+                        self.persist_log("INFO", f"AI response received: {content[:100]}...")
+                        return content
+                    else:
+                        self.persist_log("WARNING", "No content in AI response")
+                        return None
                 else:
-                    await self.persist_log(f"Invalid response format: {response_data}", "ERROR")
+                    self.persist_log("WARNING", f"Unexpected response format: {response_data}")
                     return None
 
         except httpx.HTTPStatusError as e:
-            await self.persist_log(
-                f"HTTP error: {e.response.status_code} - {e.response.text}", "ERROR"
-            )
-            return None
-        except httpx.RequestError as e:
-            await self.persist_log(f"Request error: {str(e)}", "ERROR")
+            self.persist_log("ERROR", f"HTTP error calling OpenRouter API: {e.response.status_code} - {e.response.text}")
             return None
         except Exception as e:
-            await self.persist_log(f"Error calling AI model: {str(e)}", "ERROR")
+            self.persist_log("ERROR", f"Error calling OpenRouter API: {str(e)}")
+            self.persist_log("ERROR", f"Traceback: {traceback.format_exc()}")
             return None
 
     async def execute(self) -> bool:
