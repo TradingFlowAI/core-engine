@@ -28,7 +28,7 @@ node_manager = NodeTaskManager.get_instance()
 node_registry = NodeRegistry.get_instance()
 
 # 导入所有注册的节点类型，确保装饰器被执行
-import tradingflow.station.nodes  # noqa: F401, E402
+import nodes  # noqa: F401, E402
 
 
 async def execute_node_task(

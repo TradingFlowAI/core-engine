@@ -1,0 +1,9 @@
+-r requirements.txt  # 首先导入运行时依赖
+pytest
+pytest-asyncio
+black
+flake8
+coverage
+pre-commit
+isort
+freezegun
