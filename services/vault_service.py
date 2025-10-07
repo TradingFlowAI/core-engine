@@ -3,9 +3,9 @@
 # from pathlib import Path
 # from typing import ClassVar, Dict, Optional
 
-# from tradingflow.station.utils import vault_deployer
-# from tradingflow.depot.python.config import TRADING_FLOW_ROOT
-# from tradingflow.depot.python.constants import (
+# from utils import vault_deployer
+# from weather_depot.config import TRADING_FLOW_ROOT
+# from weather_depot.constants import (
 #     UNISWAP_V3_DEPLOYMENT_MAPPING,
 #     VAULT_CONTRACT_FILE_PATH,
 #     erc20_abi,

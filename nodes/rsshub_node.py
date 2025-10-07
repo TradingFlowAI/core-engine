@@ -7,10 +7,10 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from tradingflow.station.common.edge import Edge
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.edge import Edge
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # Define input/output handle names
 DATA_OUTPUT_HANDLE = "data_output_handle"

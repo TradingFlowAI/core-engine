@@ -4,15 +4,15 @@ import traceback
 from decimal import Decimal, getcontext
 from typing import Dict, Optional
 
-from tradingflow.station.services.aptos_vault_service import AptosVaultService
-from tradingflow.station.utils.token_price_util import (
+from services.aptos_vault_service import AptosVaultService
+from utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd,
 )
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # input handles
 FROM_TOKEN_HANDLE = "from_token"  # Input token symbol

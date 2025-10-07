@@ -6,13 +6,13 @@ import logging
 from sanic import Sanic
 
 
-from tradingflow.depot.python.config import get_station_config
-from tradingflow.depot.python.logging_config import setup_logging  # noqa: F401, E402
-from tradingflow.depot.python.mq.pool_manager import pool_manager
-from tradingflow.station.api import flow_bp, health_bp, node_bp
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.services import setup_services  # noqa: F401, E402
+from weather_depot.config import get_station_config
+from weather_depot.logging_config import setup_logging  # noqa: F401, E402
+from weather_depot.mq.pool_manager import pool_manager
+from api import flow_bp, health_bp, node_bp
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
+from services import setup_services  # noqa: F401, E402
 
 pool_manager.register_shutdown_handler()
 

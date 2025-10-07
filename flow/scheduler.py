@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Set
 import httpx
 import redis.asyncio as aioredis
 
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
+from weather_depot.config import CONFIG
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class FlowScheduler:
         """Initialize flow execution log service lazily"""
         if self._log_service is None:
             try:
-                from tradingflow.depot.python.db.services.flow_execution_log_service import (
+                from weather_depot.db.services.flow_execution_log_service import (
                     FlowExecutionLogService,
                 )
                 self._log_service = FlowExecutionLogService()
@@ -505,8 +505,8 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Use database session context manager
-            from tradingflow.depot.python.db import db_session
-            from tradingflow.depot.python.db.services.flow_execution_log_service import (
+            from weather_depot.db import db_session
+            from weather_depot.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -591,8 +591,8 @@ class FlowScheduler:
         """
         try:
             # Use database session context manager
-            from tradingflow.depot.python.db import db_session
-            from tradingflow.depot.python.db.services.flow_execution_log_service import (
+            from weather_depot.db import db_session
+            from weather_depot.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -746,7 +746,7 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Initialize log service
-            from tradingflow.depot.python.db.services.flow_execution_log_service import (
+            from weather_depot.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
             log_service = FlowExecutionLogService()

@@ -586,7 +586,7 @@ class StateStoreFactory:
             StateStore: 状态存储实例
         """
         # 导入CONFIG
-        from tradingflow.depot.python.config import CONFIG
+        from weather_depot.config import CONFIG
 
         # 如果没有提供store_type，从CONFIG读取
         if store_type is None:

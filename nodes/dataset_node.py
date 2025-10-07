@@ -11,12 +11,12 @@ from urllib.parse import urlparse
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.station.common.edge import Edge
+from weather_depot.config import CONFIG
+from common.edge import Edge
 
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # 定义输入输出处理器名称
 DATA_INPUT_HANDLE = "data_input_handle"
@@ -1194,7 +1194,7 @@ class DatasetInputNode(DatasetNode):
 
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Input特化"""
-        from tradingflow.station.nodes.node_base import InputHandle
+        from nodes.node_base import InputHandle
 
         # 注册doc_link输入句柄
         self._input_handles["doc_link"] = InputHandle(
@@ -1250,7 +1250,7 @@ class DatasetOutputNode(DatasetNode):
 
     def _register_input_handles(self):
         """注册输入句柄 - Dataset Output特化"""
-        from tradingflow.station.nodes.node_base import InputHandle
+        from nodes.node_base import InputHandle
 
         # 注册data输入句柄
         self._input_handles["data"] = InputHandle(

@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from freezegun import freeze_time
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.examples.price_generator import PriceGenerator
-from tradingflow.station.nodes.node_base import NodeStatus
+from common.signal_types import SignalType
+from nodes.examples.price_generator import PriceGenerator
+from nodes.node_base import NodeStatus
 
 
 @pytest.fixture
@@ -301,7 +301,7 @@ async def test_run_example_integration():
         return
 
     # 创建价格变化检测器
-    from tradingflow.station.nodes.examples.price_change_detector import PriceChangeDetector
+    from nodes.examples.price_change_detector import PriceChangeDetector
 
     detector = PriceChangeDetector(
         node_id="btc_change_detector",

@@ -7,12 +7,12 @@ import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
-from tradingflow.station.common.edge import Edge
-from tradingflow.depot.python.config import CONFIG
+from common.edge import Edge
+from weather_depot.config import CONFIG
 
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # 定义输入输出处理器名称
 # 输入句柄

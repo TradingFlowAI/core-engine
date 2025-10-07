@@ -447,7 +447,7 @@ class NodeTaskManager:
         """
         try:
             import json
-            from tradingflow.depot.python.db.services.flow_execution_log_service import FlowExecutionLogService
+            from weather_depot.db.services.flow_execution_log_service import FlowExecutionLogService
 
             # Get task data directly from Redis instead of memory
             flow_tasks = {}

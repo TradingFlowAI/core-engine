@@ -4,9 +4,9 @@ from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
 
 
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.core.system_stats import get_system_stats
+from weather_depot.config import CONFIG
+from common.node_task_manager import NodeTaskManager
+from core.system_stats import get_system_stats
 
 # 获取配置项
 WORKER_ID = CONFIG["WORKER_ID"]

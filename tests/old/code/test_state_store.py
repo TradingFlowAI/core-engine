@@ -1,5 +1,5 @@
 import pytest
-from tradingflow.station.common.state_store import (
+from common.state_store import (
     InMemoryStateStore,
     RedisStateStore,
     StateStoreFactory,

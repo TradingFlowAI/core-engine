@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import redis.asyncio as aioredis
 
-from tradingflow.depot.python.config import CONFIG
+from weather_depot.config import CONFIG
 
 if TYPE_CHECKING:
-    from tradingflow.station.nodes.node_base import NodeBase
+    from nodes.node_base import NodeBase
 
 logger = logging.getLogger(__name__)
 

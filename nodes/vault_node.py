@@ -2,12 +2,12 @@ import asyncio
 import traceback
 from typing import Dict, Optional
 
-from tradingflow.station.services.aptos_vault_service import AptosVaultService
-from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultService
-from tradingflow.station.utils.token_price_util import get_aptos_token_price_usd
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from services.aptos_vault_service import AptosVaultService
+from services.flow_evm_vault_service import FlowEvmVaultService
+from utils.token_price_util import get_aptos_token_price_usd
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # input handles
 CHAIN_HANDLE = "chain"

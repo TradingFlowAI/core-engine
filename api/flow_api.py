@@ -3,7 +3,7 @@
 import logging
 import traceback
 
-from tradingflow.station.flow.scheduler import get_scheduler_instance
+from flow.scheduler import get_scheduler_instance
 
 from sanic import Blueprint
 from sanic.response import json as sanic_json

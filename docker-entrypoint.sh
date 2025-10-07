@@ -11,7 +11,7 @@ echo "==== Starting TradingFlow Python Station ===="
 
 # 启动 station 服务器
 echo "[1/1] Starting Python Station service..."
-python -m tradingflow.station.server > $STATION_LOG 2>&1 &
+python server.py > $STATION_LOG 2>&1 &
 STATION_PID=$!
 echo "✓ Python Station service started, PID: $STATION_PID"
 

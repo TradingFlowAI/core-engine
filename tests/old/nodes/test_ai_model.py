@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from tradingflow.station.nodes.ai_model_node import AIModelNode
+from nodes.ai_model_node import AIModelNode
 
 # 配置日志
 logging.basicConfig(

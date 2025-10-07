@@ -7,8 +7,8 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from tradingflow.depot.python.logging_config import setup_logging  # noqa: F401, E402
-from tradingflow.depot.python.config import CONFIG
+from weather_depot.logging_config import setup_logging  # noqa: F401, E402
+from weather_depot.config import CONFIG
 
 # Setup logging
 setup_logging(CONFIG)
@@ -225,9 +225,9 @@ class AptosVaultService:
         }
         """
         try:
-            from tradingflow.depot.python.db import db_session
-            from tradingflow.depot.python.db.services.vault_operation_history_service import VaultOperationHistoryService
-            from tradingflow.depot.python.db.models.vault_operation_history import OperationType
+            from weather_depot.db import db_session
+            from weather_depot.db.services.vault_operation_history_service import VaultOperationHistoryService
+            from weather_depot.db.models.vault_operation_history import OperationType
 
             # 处理事件类型过滤
             operation_types = None
@@ -602,7 +602,7 @@ class AptosVaultService:
         """
         try:
             from decimal import Decimal
-            from tradingflow.station.utils.token_price_util import (
+            from utils.token_price_util import (
                 get_multiple_aptos_token_prices_usd,
             )
 
@@ -713,11 +713,11 @@ class AptosVaultService:
         try:
             from datetime import datetime
             from decimal import Decimal
-            from tradingflow.station.utils.token_price_util import (
+            from utils.token_price_util import (
                 get_aptos_monitored_token_info,
             )
-            from tradingflow.depot.python.db import db_session
-            from tradingflow.depot.python.db.services.token_price_history_service import (
+            from weather_depot.db import db_session
+            from weather_depot.db.services.token_price_history_service import (
                 TokenPriceHistoryService,
             )
 
@@ -787,10 +787,10 @@ class AptosVaultService:
             tolerance_minutes: 时间容忍度（分钟）
         """
         from decimal import Decimal
-        from tradingflow.station.utils.token_price_util import (
+        from utils.token_price_util import (
             get_aptos_monitored_token_info,
         )
-        from tradingflow.depot.python.db.services.token_price_history_service import (
+        from weather_depot.db.services.token_price_history_service import (
             TokenPriceHistoryService,
         )
 
@@ -869,7 +869,7 @@ if __name__ == "__main__":
     # 添加asyncio导入
     import asyncio
 
-    from tradingflow.station.utils.geckoterminal_util import (
+    from utils.geckoterminal_util import (
         simple_get_multi_token_prices,
     )
 

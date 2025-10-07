@@ -6,18 +6,18 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 
-from tradingflow.station.services.aptos_vault_service import AptosVaultService
-from tradingflow.station.services.flow_evm_vault_service import FlowEvmVaultService
-from tradingflow.station.utils.token_price_util import (
+from services.aptos_vault_service import AptosVaultService
+from services.flow_evm_vault_service import FlowEvmVaultService
+from utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd_async,
     get_flow_evm_token_prices_usd,
 )
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
-from tradingflow.depot.python.config import CONFIG
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
+from weather_depot.config import CONFIG
 
 # input handles
 FROM_TOKEN_HANDLE = "from_token"
@@ -425,7 +425,7 @@ class SwapNode(NodeBase):
             Optional[Dict[str, any]]: 代币元数据，格式与get_aptos_monitored_token_info兼容
         """
         try:
-            from tradingflow.station.services.aptos_vault_service import AptosVaultService
+            from services.aptos_vault_service import AptosVaultService
 
             vault_service = AptosVaultService.get_instance()
             metadata = await vault_service.get_token_metadata(token_address)

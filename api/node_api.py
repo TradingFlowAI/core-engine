@@ -7,10 +7,10 @@ from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
 
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.core.node_executor import execute_node_task
+from weather_depot.config import CONFIG
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
+from core.node_executor import execute_node_task
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ async def stop_node(request: Request, node_task_id: str):
     from datetime import datetime
 
     import httpx
-    from tradingflow.depot.python.config import CONFIG
+    from weather_depot.config import CONFIG
 
     # SERVER_URL = CONFIG["SERVER_URL"]
 

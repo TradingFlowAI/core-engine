@@ -6,10 +6,10 @@
 
 # from web3 import Web3
 
-# from tradingflow.depot.python.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
-# from tradingflow.station.common.node_decorators import register_node_type
-# from tradingflow.station.common.signal_types import SignalType
-# from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+# from weather_depot.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
+# from common.node_decorators import register_node_type
+# from common.signal_types import SignalType
+# from nodes.node_base import NodeBase, NodeStatus
 
 
 # # Unit conversion function

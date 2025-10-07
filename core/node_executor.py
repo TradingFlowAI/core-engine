@@ -4,19 +4,19 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.depot.python.exceptions.tf_exception import (
+from weather_depot.config import CONFIG
+from weather_depot.exceptions.tf_exception import (
     NodeExecutionException,
     NodeResourceException,
     NodeStopExecutionException,
     NodeTimeoutException,
     NodeValidationException,
 )
-from tradingflow.station.common.edge import Edge
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.nodes.node_base import NodeStatus
-from tradingflow.station.utils.result_extractor import extract_node_result
+from common.edge import Edge
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
+from nodes.node_base import NodeStatus
+from utils.result_extractor import extract_node_result
 
 logger = logging.getLogger(__name__)
 

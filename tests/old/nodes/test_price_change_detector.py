@@ -2,9 +2,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from tradingflow.station.common.signal_types import Signal, SignalType
-from tradingflow.station.nodes.examples.price_change_detector import PriceChangeDetector
-from tradingflow.station.nodes.node_base import NodeStatus
+from common.signal_types import Signal, SignalType
+from nodes.examples.price_change_detector import PriceChangeDetector
+from nodes.node_base import NodeStatus
 
 
 @pytest.fixture

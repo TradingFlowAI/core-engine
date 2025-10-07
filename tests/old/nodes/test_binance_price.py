@@ -1,7 +1,7 @@
 import asyncio
 
-from tradingflow.depot.python.config import CONFIG
-from tradingflow.station.nodes.binance_price_node import BinancePriceNode
+from weather_depot.config import CONFIG
+from nodes.binance_price_node import BinancePriceNode
 
 
 def test_integration():
