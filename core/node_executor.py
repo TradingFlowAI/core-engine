@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from weather_depot.config import CONFIG
 from weather_depot.exceptions.tf_exception import (
+    InsufficientCreditsException,
     NodeExecutionException,
     NodeResourceException,
     NodeStopExecutionException,
@@ -135,6 +136,39 @@ async def execute_node_task(
             {"resource_type": e.resource_type, "failed_at": datetime.now().isoformat()},
         )
         logger.error(f"Node {node_id} resource error: {e.message}")
+
+    except InsufficientCreditsException as e:
+        # 处理余额不足异常 - 标记为 TERMINATED 并停止整个 component
+        await _update_node_status(
+            node_task_id,
+            NodeStatus.TERMINATED,
+            f"Insufficient credits: {e.message}",
+            {
+                "user_id": e.user_id,
+                "required_credits": e.required_credits,
+                "current_balance": e.current_balance,
+                "terminated_at": datetime.now().isoformat(),
+            },
+        )
+        logger.error(
+            f"Node {node_id} terminated due to insufficient credits: "
+            f"required={e.required_credits}, balance={e.current_balance}"
+        )
+        
+        # 发送停止信号到整个 component（如果 node_instance 可用）
+        if node_instance:
+            try:
+                await node_instance.send_stop_execution_signal(
+                    reason="insufficient_credits",
+                    metadata={
+                        "user_id": e.user_id,
+                        "required_credits": e.required_credits,
+                        "current_balance": e.current_balance,
+                    }
+                )
+                logger.info(f"Stop signal sent for component due to insufficient credits")
+            except Exception as stop_error:
+                logger.error(f"Failed to send stop signal: {stop_error}")
 
     except NodeExecutionException as e:
         # 处理通用节点执行异常

@@ -13,6 +13,7 @@ from api import flow_bp, health_bp, node_bp
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
 from services import setup_services  # noqa: F401, E402
+from mq.activity_publisher import init_activity_publisher, get_activity_publisher
 
 pool_manager.register_shutdown_handler()
 
@@ -52,7 +53,8 @@ def init_app():
 # Add the following hooks
 @app.listener("before_server_start")
 async def setup_node_registry(app, loop):
-    """Initialize node registry before server starts"""
+    """Initialize node registry and activity publisher before server starts"""
+    # 1. Initialize Node Registry
     registry = NodeRegistry.get_instance()
 
     # Initialize Redis connection
@@ -64,9 +66,35 @@ async def setup_node_registry(app, loop):
         await registry.start_heartbeat()
 
         app.ctx.node_registry = registry
-        logger.info("Node registry initialized and heartbeat started")
+        logger.info("✓ Node registry initialized and heartbeat started")
     else:
         logger.error("Failed to initialize node registry")
+    
+    # 2. Initialize Activity Publisher for Quest System
+    try:
+        import pika
+        from weather_depot.config import CONFIG
+        
+        # Create blocking connection for ActivityPublisher
+        rabbitmq_host = CONFIG.get("RABBITMQ_HOST", "localhost")
+        rabbitmq_port = CONFIG.get("RABBITMQ_PORT", 5672)
+        rabbitmq_user = CONFIG.get("RABBITMQ_USER", "guest")
+        rabbitmq_password = CONFIG.get("RABBITMQ_PASSWORD", "guest")
+        
+        credentials = pika.PlainCredentials(rabbitmq_user, rabbitmq_password)
+        parameters = pika.ConnectionParameters(
+            host=rabbitmq_host,
+            port=rabbitmq_port,
+            credentials=credentials
+        )
+        connection = pika.BlockingConnection(parameters)
+        
+        publisher = init_activity_publisher(connection)
+        app.ctx.activity_publisher = publisher
+        logger.info("✓ Activity Publisher initialized for Quest system")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Activity Publisher: {e}")
+        logger.warning("Quest activity events will not be published from Station")
 
 
 @app.listener("after_server_stop")

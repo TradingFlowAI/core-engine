@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from weather_depot.exceptions.tf_exception import NodeStopExecutionException
+import httpx
+
+from weather_depot.config import CONFIG
+from weather_depot.exceptions.tf_exception import (
+    InsufficientCreditsException,
+    NodeStopExecutionException,
+)
 from weather_depot.mq.node_signal_consumer import NodeSignalConsumer
 from weather_depot.mq.node_signal_publisher import NodeSignalPublisher
 from common.edge import Edge
@@ -104,6 +110,9 @@ class NodeBase(abc.ABC):
         description: str = None,
         author: str = None,
         tags: List[str] = None,
+        # Credits 相关参数
+        user_id: str = None,
+        enable_credits: bool = True,
         **kwargs  # 接收其他参数，保持向后兼容
     ):
         """
@@ -125,6 +134,8 @@ class NodeBase(abc.ABC):
             description: Node description
             author: Node author
             tags: Node tags
+            user_id: User ID for credits tracking
+            enable_credits: Whether to enable credits tracking (default: True)
         """
         # Logger setup
         self.logger = logging.getLogger(f"Node.{node_id}")
@@ -135,6 +146,10 @@ class NodeBase(abc.ABC):
         self.name = name
         self._input_edges = input_edges or []
         self._output_edges = output_edges or []
+        
+        # Credits tracking
+        self.user_id = user_id
+        self.enable_credits = enable_credits
 
         # 初始化元数据
         self._instance_metadata = NodeMetadata(
@@ -233,7 +248,7 @@ class NodeBase(abc.ABC):
         log_metadata: Optional[Dict] = None,
     ):
         """
-        Persist log message to database and also log to console
+        Persist log message to database, Redis, and console
 
         Args:
             message: Log message content
@@ -272,6 +287,31 @@ class NodeBase(abc.ABC):
         except Exception as e:
             # Don't let logging errors break node execution
             self.logger.warning("Failed to persist log to database: %s", str(e))
+
+        # Publish to Redis for real-time streaming (non-blocking)
+        try:
+            from core.redis_log_publisher import publish_log
+            from datetime import datetime
+            
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "node_id": self.node_id,
+                "node_type": self.node_type,
+                "level": log_level_upper,
+                "message": message,
+                "source": log_source,
+            }
+            
+            # Add metadata if provided
+            if log_metadata:
+                log_entry["metadata"] = log_metadata
+            
+            # Publish to Redis (non-blocking, failures won't affect execution)
+            publish_log(self.flow_id, self.cycle, log_entry)
+            
+        except Exception as e:
+            # Don't fail if Redis publish fails - just log the error
+            self.logger.debug("Failed to publish log to Redis: %s", str(e))
 
     async def initialize_state_store(self) -> bool:
         """
@@ -1028,6 +1068,100 @@ class NodeBase(abc.ABC):
         except Exception as e:
             self.logger.error("Failed to send stop execution signal: %s", str(e))
             return False
+    
+    async def _charge_credits_sync(self) -> None:
+        """
+        同步扣费 - 调用 weather_control HTTP API
+        
+        根据节点类型自动判断扣费标准：
+        - code_node: 20 credits
+        - 普通 node: 10 credits
+        
+        Raises:
+            InsufficientCreditsException: 余额不足时抛出
+        """
+        if not self.enable_credits:
+            self.logger.debug("Credits tracking is disabled for node %s", self.node_id)
+            return
+            
+        if not self.user_id:
+            self.logger.warning("No user_id provided, skipping credits charge")
+            return
+        
+        try:
+            # 判断节点类型：code_node 或普通 node
+            node_type = self.__class__.__name__.lower()
+            
+            # 如果类名包含 'code' 或者 type 属性是 'code_node'，则视为 code_node
+            is_code_node = 'code' in node_type or getattr(self, 'type', None) == 'code_node'
+            credits_cost = 20 if is_code_node else 10
+            
+            # 获取 weather_control URL
+            weather_control_url = CONFIG.get(
+                "WEATHER_CONTROL_URL",
+                "http://localhost:8000"
+            )
+            
+            # 调用同步扣费 API
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{weather_control_url}/api/v1/credits/charge",
+                    json={
+                        "userId": self.user_id,
+                        "amount": credits_cost,
+                        "nodeId": self.node_id,
+                        "nodeType": 'code_node' if is_code_node else 'regular_node',
+                        "flowId": self.flow_id,
+                        "cycle": self.cycle,
+                        "metadata": {
+                            "nodeName": self.name,
+                            "nodeType": node_type,
+                            "componentId": self.component_id,
+                        }
+                    }
+                )
+                
+                # 检查余额不足
+                if response.status_code == 402:
+                    data = response.json()
+                    balance = data.get("balance", 0)
+                    
+                    self.logger.error(
+                        f"Insufficient credits: user={self.user_id}, "
+                        f"required={credits_cost}, balance={balance}"
+                    )
+                    
+                    raise InsufficientCreditsException(
+                        message=f"Insufficient credits to execute node {self.node_id}",
+                        node_id=self.node_id,
+                        user_id=self.user_id,
+                        required_credits=credits_cost,
+                        current_balance=balance,
+                    )
+                
+                # 检查其他错误
+                response.raise_for_status()
+                
+                # 扣费成功
+                result = response.json()
+                remaining_balance = result.get("data", {}).get("balance", 0)
+                
+                self.logger.info(
+                    f"Credits charged successfully: user={self.user_id}, "
+                    f"node={self.node_id}, cost={credits_cost}, "
+                    f"remaining={remaining_balance}"
+                )
+                
+        except InsufficientCreditsException:
+            # 重新抛出余额不足异常
+            raise
+        except httpx.TimeoutException as e:
+            self.logger.error(f"Timeout charging credits: {str(e)}")
+            raise Exception(f"Credits service timeout: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Error charging credits: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            raise Exception(f"Failed to charge credits: {str(e)}")
 
     def can_execute(self) -> bool:
         """
@@ -1134,6 +1268,9 @@ class NodeBase(abc.ABC):
                     )
                     await self.node_signal_consumer.close()
 
+                    # Charge credits BEFORE execution
+                    await self._charge_credits_sync()
+                    
                     # Execute node logic
                     success = await self.execute()
                     await self.persist_log(
@@ -1144,7 +1281,8 @@ class NodeBase(abc.ABC):
                     await self.set_status(
                         NodeStatus.COMPLETED if success else NodeStatus.FAILED
                     )
-                    # Auto-forward input signals to output if needed
+                    
+                    # Forward signals if execution was successful
                     if success:
                         await self._auto_forward_input_handles()
                     else:
@@ -1187,6 +1325,9 @@ class NodeBase(abc.ABC):
                     log_level="INFO",
                 )
 
+                # Charge credits BEFORE execution
+                await self._charge_credits_sync()
+                
                 success = await self.execute()
                 await self.persist_log(
                     f"Node {self.node_id} execution completed, success={success}",
@@ -1196,7 +1337,8 @@ class NodeBase(abc.ABC):
                 await self.set_status(
                     NodeStatus.COMPLETED if success else NodeStatus.FAILED
                 )
-                # Auto-forward input signals to output if needed
+                
+                # Forward signals if execution was successful
                 if success:
                     await self._auto_forward_input_handles()
                 else:

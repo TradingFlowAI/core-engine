@@ -29,6 +29,7 @@ async def execute_flow(request):
         flow_id = flow_data["flow_id"]
         cycle_interval = flow_data["cycle_interval"]
         flow_json = flow_data["flow_json"]
+        user_id = flow_data.get("user_id")  # Extract user_id for Quest tracking (optional)
 
         # 检查Flow JSON格式
         if not isinstance(flow_json, dict):
@@ -56,11 +57,11 @@ async def execute_flow(request):
             if flow_exists:
                 # 如果已存在，更新配置
                 await scheduler.stop_flow(flow_id)  # 先停止已有的Flow
-                flow_data = await scheduler.register_flow(flow_id, flow_config)
+                flow_data = await scheduler.register_flow(flow_id, flow_config, user_id=user_id)
                 message = f"Flow {flow_id} updated and registered"
             else:
                 # 如果不存在，新建Flow
-                flow_data = await scheduler.register_flow(flow_id, flow_config)
+                flow_data = await scheduler.register_flow(flow_id, flow_config, user_id=user_id)
                 message = f"Flow {flow_id} registered"
 
         except ValueError as e:

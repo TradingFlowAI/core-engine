@@ -13,6 +13,7 @@ import redis.asyncio as aioredis
 from weather_depot.config import CONFIG
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
+from mq.activity_publisher import publish_activity
 
 logger = logging.getLogger(__name__)
 
@@ -149,13 +150,14 @@ class FlowScheduler:
         except Exception as e:
             logger.warning("Failed to cleanup old logs for flow %s: %s", flow_id, str(e))
 
-    async def register_flow(self, flow_id: str, flow_config: Dict):
+    async def register_flow(self, flow_id: str, flow_config: Dict, user_id: Optional[str] = None):
         """
         Register a new Flow to the scheduling system
 
         Args:
             flow_id: Flow unique identifier
             flow_config: Flow configuration, including interval, nodes, edges, etc.
+            user_id: User ID for Quest activity tracking (optional)
         """
         # Basic parameter checks
         if not flow_config.get("interval"):
@@ -188,6 +190,11 @@ class FlowScheduler:
             "next_execution": 0,  # Timestamp, 0 means execute immediately
             "created_at": existing_flow.get("created_at") if existing_flow else datetime.now().isoformat(),
         }
+        
+        # Add user_id for Quest tracking if provided
+        if user_id:
+            flow_data["user_id"] = user_id
+            logger.info("Flow %s registered with user_id %s for Quest tracking", flow_id, user_id)
 
         await self.redis.hset(f"flow:{flow_id}", mapping=flow_data)
         logger.info("Flow %s has been registered to the scheduling system", flow_id)
@@ -1126,6 +1133,27 @@ class FlowScheduler:
                 log_source="scheduler"
             )
             raise ValueError(error_msg)
+        
+        # Get user_id for Quest activity tracking
+        user_id = flow_data.get("user_id")
+        
+        # Publish RUN_FLOW event for Quest tracking
+        if user_id:
+            try:
+                publish_activity(
+                    user_id=user_id,
+                    event_type='RUN_FLOW',
+                    metadata={
+                        'flowId': flow_id,
+                        'cycle': cycle,
+                        'startTime': datetime.now().isoformat()
+                    }
+                )
+                logger.info(f"Published RUN_FLOW event for user {user_id}, flow {flow_id}, cycle {cycle}")
+            except Exception as e:
+                logger.warning(f"Failed to publish RUN_FLOW activity: {e}")
+        else:
+            logger.debug(f"Flow {flow_id} has no user_id, skipping Quest activity publication")
 
         flow_structure = json.loads(flow_data.get("structure", "{}"))
 
@@ -1258,6 +1286,31 @@ class FlowScheduler:
             log_level="INFO",
             log_source="scheduler"
         )
+        
+        # Publish COMPLETE_FLOW event for Quest tracking
+        if user_id:
+            try:
+                # Check if all nodes completed successfully
+                all_success = all(
+                    result.get("status") != "error" 
+                    for result in completed_results.values()
+                )
+                
+                publish_activity(
+                    user_id=user_id,
+                    event_type='COMPLETE_FLOW',
+                    metadata={
+                        'flowId': flow_id,
+                        'cycle': cycle,
+                        'success': all_success,
+                        'nodesCount': len(node_map),
+                        'nodesCompleted': len(completed_results),
+                        'endTime': datetime.now().isoformat()
+                    }
+                )
+                logger.info(f"Published COMPLETE_FLOW event for user {user_id}, flow {flow_id}, cycle {cycle}, success={all_success}")
+            except Exception as e:
+                logger.warning(f"Failed to publish COMPLETE_FLOW activity: {e}")
 
         return {
             "flow_id": flow_id,
@@ -1348,6 +1401,10 @@ class FlowScheduler:
         selected_worker = random.choice(workers)
         worker_api_url = selected_worker["api_url"]
 
+        # Get user_id from flow data for Quest tracking
+        flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+        user_id = flow_data.get("user_id")
+        
         # Prepare node execution request data
         node_data = {
             "flow_id": flow_id,
@@ -1355,6 +1412,7 @@ class FlowScheduler:
             "cycle": cycle,
             "node_id": node_id,
             "node_type": node_type,
+            "user_id": user_id,  # Pass user_id to worker for Quest tracking
             "input_edges": input_edges,
             "output_edges": output_edges,
             "config": node_config,

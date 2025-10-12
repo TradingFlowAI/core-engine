@@ -18,6 +18,7 @@ from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 from weather_depot.config import CONFIG
+from mq.trading_signal_publisher import publish_trading_signal
 
 # input handles
 FROM_TOKEN_HANDLE = "from_token"
@@ -786,6 +787,49 @@ class SwapNode(NodeBase):
 
         return base_receipt
 
+    async def _publish_trading_signal(self, trade_receipt: Dict):
+        """
+        Publish trading signal to MQ for co-trading system
+        
+        Args:
+            trade_receipt: Transaction receipt with trade details
+        """
+        try:
+            # Only publish if transaction was successful
+            if not trade_receipt.get("success", False):
+                await self.persist_log("Skipping signal publish - transaction failed", "INFO")
+                return
+            
+            # Prepare signal data
+            signal_data = {
+                "fromToken": self.from_token,
+                "toToken": self.to_token,
+                "amountInPercentage": self.amount_in_percentage,
+                "amountInHumanReadable": self.amount_in_human_readable,
+                "slippageTolerance": self.slippery,
+                "chainType": self.chain
+            }
+            
+            # Publish to MQ
+            success = publish_trading_signal(
+                flow_id=self.flow_id,
+                user_id=getattr(self, 'user_id', 'unknown'),
+                vault_address=self.vault_address,
+                signal_type='swap',
+                signal_data=signal_data,
+                node_id=self.node_id,
+                node_type='swap_node'
+            )
+            
+            if success:
+                await self.persist_log(f"Trading signal published to MQ: flow={self.flow_id}", "INFO")
+            else:
+                await self.persist_log("Failed to publish trading signal to MQ", "WARNING")
+                
+        except Exception as e:
+            # Don't fail the node if signal publish fails
+            await self.persist_log(f"Error publishing trading signal: {str(e)}", "WARNING")
+
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
@@ -806,6 +850,9 @@ class SwapNode(NodeBase):
                 await self.persist_log("Failed to send receipt signal", "ERROR")
                 await self.set_status(NodeStatus.FAILED, "Failed to send receipt signal")
                 return False
+
+            # Publish trading signal to MQ for co-trading system
+            await self._publish_trading_signal(trade_receipt)
 
             await self.set_status(NodeStatus.COMPLETED)
             await self.persist_log(f"SwapNode completed: tx_hash={trade_receipt.get('tx_hash')}", "INFO")
