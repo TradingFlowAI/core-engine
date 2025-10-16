@@ -1214,6 +1214,24 @@ class NodeBase(abc.ABC):
 
         if status == NodeStatus.FAILED and error_message:
             self.logger.error("Node %s failed: %s", self.node_id, error_message)
+        
+        # 发布状态变化到 Redis (实时推送到前端)
+        try:
+            from core.redis_status_publisher import publish_node_status
+            
+            publish_node_status(
+                flow_id=self.flow_id,
+                cycle=self.cycle,
+                node_id=self.node_id,
+                status=status.value,
+                error_message=error_message,
+                metadata={
+                    "node_type": self.node_type,
+                }
+            )
+        except Exception as e:
+            # 不让推送失败影响节点执行
+            self.logger.debug("Failed to publish status to Redis: %s", str(e))
 
     async def start(self) -> bool:
         """
