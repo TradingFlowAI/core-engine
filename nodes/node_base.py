@@ -288,26 +288,25 @@ class NodeBase(abc.ABC):
             # Don't let logging errors break node execution
             self.logger.warning("Failed to persist log to database: %s", str(e))
 
-        # Publish to Redis for real-time streaming (non-blocking)
+        # Publish to Redis for real-time streaming (async, with retry)
         try:
-            from core.redis_log_publisher import publish_log
+            from core.redis_log_publisher_async import publish_log_async
             from datetime import datetime
             
             log_entry = {
-                "timestamp": datetime.now().isoformat(),
                 "node_id": self.node_id,
                 "node_type": self.node_type,
-                "level": log_level_upper,
+                "level": log_level_upper.lower(),
                 "message": message,
-                "source": log_source,
+                "log_source": log_source,
             }
             
             # Add metadata if provided
             if log_metadata:
                 log_entry["metadata"] = log_metadata
             
-            # Publish to Redis (non-blocking, failures won't affect execution)
-            publish_log(self.flow_id, self.cycle, log_entry)
+            # Publish to Redis asynchronously (with automatic retry)
+            await publish_log_async(self.flow_id, self.cycle, log_entry, max_retries=3)
             
         except Exception as e:
             # Don't fail if Redis publish fails - just log the error

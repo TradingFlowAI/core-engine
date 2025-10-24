@@ -117,6 +117,28 @@ class FlowScheduler:
         except Exception as e:
             # Don't let logging errors break scheduler execution
             logger.warning("Failed to persist log to database: %s", str(e))
+        
+        # Send log to WebSocket (via Redis Pub/Sub)
+        # Use the async redis_log_publisher for consistency with NodeBase
+        try:
+            from core.redis_log_publisher_async import publish_log_async
+            
+            log_entry = {
+                "node_id": node_id,
+                "level": log_level_upper.lower(),
+                "message": message,
+                "log_source": log_source,
+                "metadata": log_metadata,
+            }
+            
+            # Publish to Redis asynchronously (with automatic retry)
+            await publish_log_async(flow_id, cycle, log_entry, max_retries=3)
+        except Exception as e:
+            # Don't let Redis publish errors break scheduler execution
+            logger.warning(
+                "Failed to publish log to Redis for flow %s cycle %s: %s",
+                flow_id, cycle, str(e)
+            )
 
     async def cleanup_old_logs(self, flow_id: str, current_cycle: int, keep_cycles: int = 5):
         """
@@ -149,6 +171,7 @@ class FlowScheduler:
                     )
         except Exception as e:
             logger.warning("Failed to cleanup old logs for flow %s: %s", flow_id, str(e))
+
 
     async def register_flow(self, flow_id: str, flow_config: Dict, user_id: Optional[str] = None):
         """
