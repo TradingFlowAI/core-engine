@@ -920,6 +920,15 @@ class SwapNode(NodeBase):
             example=1.0,
             auto_update_attr="slippery",
         )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=TX_RECEIPT_HANDLE,
+            data_type=dict,
+            description="Trade Receipt - Transaction receipt from swap operation",
+            example={"tx_hash": "0x123...", "status": "success", "amount_out": "1000000"},
+        )
 
 
 # ============ 实例节点类 ============
@@ -931,8 +940,8 @@ class SwapNode(NodeBase):
         "buy_token": None,
         "base_token": None,
         "vault_address": None,
-        "order_type": "market",
-        "limited_price": None,
+        # "order_type": "market",  # COMMENTED: Not in frontend
+        # "limited_price": None,  # COMMENTED: Not in frontend
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
         "slippery": 1.0,
@@ -947,8 +956,8 @@ class BuyNode(SwapNode):
     - base_token: 用于支付的基础代币符号 (string)
     - chain: 区块链网络 (string)
     - vault_address: Vault合约地址 (string)
-    - order_type: 订单类型 (string) - "market" 或 "limit"
-    - limited_price: 限价 (number) - 仅限价单使用
+    # - order_type: 订单类型 (string) - "market" 或 "limit" [COMMENTED: Not in frontend]
+    # - limited_price: 限价 (number) - 仅限价单使用 [COMMENTED: Not in frontend]
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
     - slippery: 滑点容忍度 (number)
@@ -981,8 +990,8 @@ class BuyNode(SwapNode):
         # 保存买入特定参数
         self.buy_token = buy_token
         self.base_token = base_token
-        self.order_type = kwargs.get('order_type', 'market')
-        self.limited_price = kwargs.get('limited_price')
+        # self.order_type = kwargs.get('order_type', 'market')  # COMMENTED: Not in frontend
+        # self.limited_price = kwargs.get('limited_price')  # COMMENTED: Not in frontend
 
         # 重新设置日志名称
         # Logger removed - using persist_log from NodeBase
@@ -1017,20 +1026,21 @@ class BuyNode(SwapNode):
             example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
             auto_update_attr="vault_address",
         )
-        self.register_input_handle(
-            name="order_type",
-            data_type=str,
-            description="Order Type - Order execution type ('market' or 'limit')",
-            example="market",
-            auto_update_attr="order_type",
-        )
-        self.register_input_handle(
-            name="limited_price",
-            data_type=float,
-            description="Limited Price - Maximum price for limit orders",
-            example=50000.0,
-            auto_update_attr="limited_price",
-        )
+        # COMMENTED: Not in frontend
+        # self.register_input_handle(
+        #     name="order_type",
+        #     data_type=str,
+        #     description="Order Type - Order execution type ('market' or 'limit')",
+        #     example="market",
+        #     auto_update_attr="order_type",
+        # )
+        # self.register_input_handle(
+        #     name="limited_price",
+        #     data_type=float,
+        #     description="Limited Price - Maximum price for limit orders",
+        #     example=50000.0,
+        #     auto_update_attr="limited_price",
+        # )
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE_PERCENTAGE,
             data_type=float,
@@ -1073,8 +1083,8 @@ class BuyNode(SwapNode):
         "sell_token": None,
         "base_token": None,
         "vault_address": None,
-        "order_type": "market",
-        "limited_price": None,
+        # "order_type": "market",  # COMMENTED: Not in frontend
+        # "limited_price": None,  # COMMENTED: Not in frontend
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
         "slippery": 1.0,
@@ -1089,8 +1099,8 @@ class SellNode(SwapNode):
     - base_token: 换取的基础代币符号 (string)
     - chain: 区块链网络 (string)
     - vault_address: Vault合约地址 (string)
-    - order_type: 订单类型 (string) - "market" 或 "limit"
-    - limited_price: 限价 (number) - 仅限价单使用
+    # - order_type: 订单类型 (string) - "market" 或 "limit" [COMMENTED: Not in frontend]
+    # - limited_price: 限价 (number) - 仅限价单使用 [COMMENTED: Not in frontend]
     - amount_in_percentage: 交易金额百分比 (number)
     - amount_in_human_readable: 人类可读金额 (number)
     - slippery: 滑点容忍度 (number)
@@ -1123,8 +1133,8 @@ class SellNode(SwapNode):
         # 保存卖出特定参数
         self.sell_token = sell_token
         self.base_token = base_token
-        self.order_type = kwargs.get('order_type', 'market')
-        self.limited_price = kwargs.get('limited_price')
+        # self.order_type = kwargs.get('order_type', 'market')  # COMMENTED: Not in frontend
+        # self.limited_price = kwargs.get('limited_price')  # COMMENTED: Not in frontend
 
         # Logger removed - using persist_log from NodeBase
 
@@ -1158,20 +1168,21 @@ class SellNode(SwapNode):
             example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
             auto_update_attr="vault_address",
         )
-        self.register_input_handle(
-            name="order_type",
-            data_type=str,
-            description="Order Type - Order execution type ('market' or 'limit')",
-            example="market",
-            auto_update_attr="order_type",
-        )
-        self.register_input_handle(
-            name="limited_price",
-            data_type=float,
-            description="Limited Price - Minimum price for limit orders",
-            example=45000.0,
-            auto_update_attr="limited_price",
-        )
+        # COMMENTED: Not in frontend
+        # self.register_input_handle(
+        #     name="order_type",
+        #     data_type=str,
+        #     description="Order Type - Order execution type ('market' or 'limit')",
+        #     example="market",
+        #     auto_update_attr="order_type",
+        # )
+        # self.register_input_handle(
+        #     name="limited_price",
+        #     data_type=float,
+        #     description="Limited Price - Minimum price for limit orders",
+        #     example=45000.0,
+        #     auto_update_attr="limited_price",
+        # )
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE_PERCENTAGE,
             data_type=float,

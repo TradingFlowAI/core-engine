@@ -231,9 +231,57 @@ class NodeRegistry:
         cls._metadata_cache.clear()
     
     @classmethod
+    def resolve_version(cls, node_type: str, version_spec: str) -> str:
+        """
+        根据版本规范解析实际版本（支持 latest, 范围表达式等）
+        
+        Args:
+            node_type: 节点类型
+            version_spec: 版本规范
+                - "latest": 最新稳定版本
+                - "latest-beta": 最新 beta 版本
+                - "^1.2.0": 兼容 1.x.x
+                - "~1.2.0": 兼容 1.2.x
+                - "1.2.3": 精确版本
+                - "1.2.3-beta.1": 精确预发布版本
+                
+        Returns:
+            解析后的具体版本号
+            
+        Raises:
+            KeyError: 如果节点类型不存在
+            ValueError: 如果无法解析版本或版本不存在
+            
+        Examples:
+            >>> NodeRegistry.resolve_version("code_node", "latest")
+            "1.2.3"
+            >>> NodeRegistry.resolve_version("code_node", "^1.0.0")
+            "1.2.5"
+            >>> NodeRegistry.resolve_version("code_node", "latest-beta")
+            "1.3.0-beta.1"
+        """
+        if node_type not in cls._nodes:
+            raise KeyError(f"Node type '{node_type}' not found")
+        
+        available_versions = cls.get_all_versions(node_type)
+        if not available_versions:
+            raise ValueError(f"No versions available for node type '{node_type}'")
+        
+        # 使用 VersionManager 解析版本规范
+        resolved = VersionManager.resolve_version_spec(version_spec, available_versions)
+        
+        if resolved is None:
+            raise ValueError(
+                f"Cannot resolve version spec '{version_spec}' for node type '{node_type}'. "
+                f"Available versions: {', '.join(available_versions)}"
+            )
+        
+        return resolved
+    
+    @classmethod
     def get_compatible_version(cls, node_type: str, version_range: str) -> Optional[str]:
         """
-        获取兼容的版本
+        获取兼容的版本（已废弃，请使用 resolve_version）
         
         Args:
             node_type: 节点类型
@@ -242,22 +290,10 @@ class NodeRegistry:
         Returns:
             兼容的最新版本，如果没有则返回 None
         """
-        if node_type not in cls._nodes:
+        try:
+            return cls.resolve_version(node_type, version_range)
+        except (KeyError, ValueError):
             return None
-        
-        versions = cls.get_all_versions(node_type)
-        
-        # 找到所有匹配的版本
-        compatible_versions = [
-            v for v in versions 
-            if VersionManager.match_version_range(v, version_range)
-        ]
-        
-        if not compatible_versions:
-            return None
-        
-        # 返回最新的兼容版本
-        return VersionManager.get_latest_version(compatible_versions)
 
 
 def register_node(node_type: str, version: str = '0.0.1', **metadata):

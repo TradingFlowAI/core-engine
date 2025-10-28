@@ -267,7 +267,7 @@ class DatasetNode(NodeBase):
                     return False
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
-        """读取 Google Sheets 数据"""
+        """读取 Google Sheets 数据并转换为完整的 JSON object"""
         if not self.worksheet:
             await self.persist_log("Worksheet not initialized", "ERROR")
             return None
@@ -281,29 +281,45 @@ class DatasetNode(NodeBase):
 
             if not values:
                 await self.persist_log(f"No data found in range {self.range}", "WARNING")
-                return {"data": [], "headers": []}
+                return {}
 
-            # 处理数据
+            # 将 Google Sheets 数据转换为 JSON object
+            # 如果有表头，使用表头作为键；否则使用 col_0, col_1 等
+            result_data = []
+            
             if self.header_row and len(values) > 0:
                 headers = values[0]
-                data = values[1:]
+                data_rows = values[1:]
+                
+                # 将每一行转换为字典
+                for row in data_rows:
+                    row_dict = {}
+                    for i, header in enumerate(headers):
+                        value = row[i] if i < len(row) else ""
+                        row_dict[header] = value
+                    result_data.append(row_dict)
             else:
-                headers = [f"col_{i}" for i in range(len(values[0]))] if values else []
-                data = values
+                # 没有表头，使用列索引作为键
+                for row in values:
+                    row_dict = {}
+                    for i, value in enumerate(row):
+                        row_dict[f"col_{i}"] = value
+                    result_data.append(row_dict)
 
+            # 返回包含所有行的数组
             result = {
-                "spreadsheet_id": self.spreadsheet_id,
-                "spreadsheet_title": self.spreadsheet.title,
-                "worksheet_name": self.worksheet_name,
-                "range": self.range,
-                "headers": headers,
-                "data": data,
-                "row_count": len(data),
-                "column_count": len(headers) if headers else 0,
+                "data": result_data,
+                "_metadata": {
+                    "spreadsheet_id": self.spreadsheet_id,
+                    "spreadsheet_title": self.spreadsheet.title,
+                    "worksheet_name": self.worksheet_name,
+                    "range": self.range,
+                    "row_count": len(result_data)
+                }
             }
 
             await self.persist_log(
-                f"Successfully read {len(data)} rows from Google Sheets: {self.spreadsheet.title} - {self.worksheet_name}", "INFO"
+                f"Successfully read {len(result_data)} rows from Google Sheets: {self.spreadsheet.title} - {self.worksheet_name}", "INFO"
             )
             return result
 
@@ -1102,21 +1118,28 @@ class DatasetNode(NodeBase):
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
 
-                # Write data
+                # 直接将JSON写入到指定的cell
                 success = True
-                for edge_key, raw_data in input_signals_data.items():
-                    transformed_data = await self._transform_input_data(raw_data)
-                    if transformed_data:
-                        if not await self.write_data(transformed_data):
-                            success = False
-                            break
-                    else:
-                        await self.persist_log(f"Failed to transform input data for signal {edge_key}", "ERROR")
+                for edge_key, json_data in input_signals_data.items():
+                    # 序列化为JSON字符串
+                    try:
+                        json_string = json.dumps(json_data, ensure_ascii=False, indent=2)
+                        await self.persist_log(f"Writing JSON data to cell A1: {len(json_string)} characters", "INFO")
+                        
+                        # 写入到单个cell (A1)
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            lambda: self.worksheet.update('A1', [[json_string]])
+                        )
+                        await self.persist_log("Successfully wrote JSON to Google Sheets cell A1", "INFO")
+                    except Exception as e:
+                        await self.persist_log(f"Failed to write JSON for signal {edge_key}: {str(e)}", "ERROR")
                         success = False
                         break
 
                 if success:
-                    await self.persist_log("Successfully wrote data to Google Sheets", "INFO")
+                    await self.persist_log("Successfully wrote all data to Google Sheets", "INFO")
                     await self.set_status(NodeStatus.COMPLETED)
                     return True
                 else:
@@ -1166,13 +1189,23 @@ class DatasetInputNode(DatasetNode):
     """
     Dataset Input Node - 数据输入节点
 
-    专门用于从数据源读取数据的节点实例
+    专门用于从 Google Sheets 读取数据并输出为完整 JSON 对象
 
     输入参数:
     - doc_link: 文档链接 (Google Sheets URL或ID)
 
     输出信号:
-    - data: 读取的数据 (json object)
+    - data: 完整的 JSON object
+      格式: {
+        "data": [{row1_dict}, {row2_dict}, ...],
+        "_metadata": {"spreadsheet_id", "worksheet_name", "row_count", ...}
+      }
+      
+    说明:
+    - 如果 Google Sheet 有表头，每行将转换为字典，使用表头作为键
+    - 如果没有表头，使用 col_0, col_1... 作为键
+    - 所有数据打包在 "data" 数组中
+    - 元数据保存在 "_metadata" 字段
     """
 
     def __init__(self, **kwargs):
@@ -1224,11 +1257,23 @@ class DatasetOutputNode(DatasetNode):
     """
     Dataset Output Node - 数据输出节点
 
-    专门用于向数据源写入数据的节点实例
+    专门用于将任意 JSON 对象写入 Google Sheets
 
     输入参数:
-    - data: 要写入的数据 (json object)
+    - data: 任意 JSON object (将被序列化并写入 cell A1)
     - doc_link: 文档链接 (Google Sheets URL或ID)
+    
+    输出格式:
+    - JSON 对象会被序列化为美化的 JSON 字符串
+    - 整个 JSON 字符串写入到 Sheet 的 A1 单元格
+    - 支持任意嵌套的 JSON 结构
+    
+    示例输入:
+    {
+      "result": "success",
+      "items": [1, 2, 3],
+      "metadata": {"timestamp": "2024-01-01"}
+    }
     """
 
     def __init__(self, **kwargs):
@@ -1256,8 +1301,8 @@ class DatasetOutputNode(DatasetNode):
         self._input_handles["data"] = InputHandle(
             name="data",
             data_type=dict,
-            description="Data to write - JSON object containing the data",
-            example={"headers": ["col1", "col2"], "rows": [["val1", "val2"]]}
+            description="Data to write - Complete JSON object (will be serialized and written to cell A1)",
+            example={"key1": "value1", "key2": [1, 2, 3], "key3": {"nested": "object"}}
         )
 
         # 注册doc_link输入句柄

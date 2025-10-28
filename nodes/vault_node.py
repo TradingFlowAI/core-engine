@@ -451,3 +451,12 @@ class VaultNode(NodeBase):
             example="0x6a1a233...",
             auto_update_attr="vault_address",
         )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=BALANCE_HANDLE,
+            data_type=dict,
+            description="Vault Balance - User holdings and balance information in vault",
+            example={"total_value_usd": 1000.0, "holdings": [{"token": "APT", "amount": "10.5"}]},
+        )

@@ -1437,7 +1437,11 @@ class NodeBase(abc.ABC):
 
     def get_input_handle_data(self, target_handle: str) -> Any:
         """
-        根据注册input handle获取数据
+        根据注册input handle获取数据（连线优先）
+
+        优先级：
+        1. 如果有连接的输入信号（_input_signals），使用信号的值
+        2. 如果没有连接，使用成员变量的值
 
         Args:
             target_handle: 目标句柄名称
@@ -1459,6 +1463,32 @@ class NodeBase(abc.ABC):
             )
             return None
 
+        # 【连线优先逻辑】首先检查是否有连接的输入信号
+        signal_value = None
+        has_signal = False
+        
+        for edge_key, signal in self._input_signals.items():
+            # edge_key 格式: "source_node:source_handle->target_node:target_handle"
+            if edge_key.endswith(f"->{target_handle}") or edge_key.endswith(f"->{self.node_id}:{target_handle}"):
+                if signal is not None:
+                    has_signal = True
+                    signal_value = signal.payload
+                    self.logger.debug(
+                        "Found connected signal for handle '%s' from edge '%s', using signal value (edge priority)",
+                        target_handle,
+                        edge_key
+                    )
+                    break
+
+        # 如果有连接的信号，优先使用信号的值
+        if has_signal:
+            self.logger.info(
+                "Using signal value for handle '%s' (edge connected, priority over member variable)",
+                target_handle
+            )
+            return signal_value
+
+        # 如果没有连接的信号，使用成员变量的值
         # 检查成员变量是否存在
         if not hasattr(self, handle_obj.auto_update_attr):
             self.logger.warning(
@@ -1471,7 +1501,7 @@ class NodeBase(abc.ABC):
         # 返回成员变量的值
         value = getattr(self, handle_obj.auto_update_attr)
         self.logger.debug(
-            "Retrieved data for handle '%s' from attribute '%s': %s",
+            "Retrieved data for handle '%s' from attribute '%s': %s (no edge connected)",
             target_handle,
             handle_obj.auto_update_attr,
             value,

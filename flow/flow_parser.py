@@ -39,6 +39,14 @@ class FlowParser:
         for i, node in enumerate(self.nodes):
             node_id = node.get("id")
             self.node_map[node_id] = i
+            
+            # 解析节点版本信息（如果存在）
+            if "version" in node:
+                node["_parsed_version"] = node["version"]
+            elif "data" in node and isinstance(node["data"], dict) and "version" in node["data"]:
+                node["_parsed_version"] = node["data"]["version"]
+            else:
+                node["_parsed_version"] = "latest"  # 默认使用最新版本
 
         # 构建图的邻接表
         for edge in self.edges:
@@ -46,6 +54,72 @@ class FlowParser:
             target = edge.get("target")
             if source in self.node_map and target in self.node_map:
                 self.graph[source].append(target)
+    
+    def parse_node_with_version(self, node_data: Dict) -> tuple:
+        """
+        解析节点类型和版本
+        
+        Args:
+            node_data: 节点数据字典
+            
+        Returns:
+            (node_type, version_spec) 元组
+            
+        Examples:
+            >>> parser.parse_node_with_version({
+            ...     "type": "code_node",
+            ...     "version": "^1.0.0"
+            ... })
+            ("code_node", "^1.0.0")
+            
+            >>> parser.parse_node_with_version({
+            ...     "type": "code_node",
+            ...     "data": {"version": "latest-beta"}
+            ... })
+            ("code_node", "latest-beta")
+        """
+        node_type = node_data.get("type")
+        
+        # 尝试多个位置获取版本信息
+        version_spec = None
+        
+        # 1. 从顶层 version 字段
+        if "version" in node_data:
+            version_spec = node_data["version"]
+        
+        # 2. 从 data.version 字段
+        elif "data" in node_data and isinstance(node_data["data"], dict):
+            if "version" in node_data["data"]:
+                version_spec = node_data["data"]["version"]
+        
+        # 3. 从预解析的版本字段
+        elif "_parsed_version" in node_data:
+            version_spec = node_data["_parsed_version"]
+        
+        # 4. 默认使用 latest
+        if version_spec is None:
+            version_spec = "latest"
+        
+        return (node_type, version_spec)
+    
+    def get_node_version(self, node_id: str) -> str:
+        """
+        获取指定节点的版本规范
+        
+        Args:
+            node_id: 节点ID
+            
+        Returns:
+            版本规范字符串，如果节点不存在则返回 "latest"
+        """
+        if node_id not in self.node_map:
+            return "latest"
+        
+        node_index = self.node_map[node_id]
+        node_data = self.nodes[node_index]
+        
+        _, version_spec = self.parse_node_with_version(node_data)
+        return version_spec
 
     def find_dags(self) -> List[Dict[str, Any]]:
         """

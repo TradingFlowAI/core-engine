@@ -117,8 +117,143 @@ class AIModelNode(NodeBase):
         # Results
         self.ai_response = None
 
+        # Credits pricing for AI models (5-30 credits per execution)
+        self.ai_model_credits = self._calculate_model_credits()
+
         # Logging will be handled by persist_log method
 
+    def _calculate_model_credits(self) -> int:
+        """
+        根据模型类型计算 Credits 消耗
+        
+        定价策略：
+        - GPT-3.5 / Claude Haiku: 5 credits (最便宜)
+        - GPT-4 / Claude Sonnet: 10 credits (标准)
+        - GPT-4 Turbo: 15 credits (增强)
+        - GPT-4o / o1-preview: 20 credits (高级)
+        - Claude Opus / o1: 30 credits (旗舰)
+        - 默认: 10 credits (标准)
+        
+        Returns:
+            int: Credits 消耗数量
+        """
+        model_lower = self.model_name.lower()
+        
+        # GPT-3.5 系列 (最便宜)
+        if 'gpt-3.5' in model_lower or '3.5' in model_lower:
+            return 5
+        
+        # Claude Haiku (最快最便宜)
+        if 'haiku' in model_lower:
+            return 5
+        
+        # Claude Opus 或 o1 (旗舰模型)
+        if 'opus' in model_lower or model_lower == 'o1' or 'o1-mini' not in model_lower and 'o1' in model_lower:
+            return 30
+        
+        # GPT-4o / o1-preview (高级)
+        if 'gpt-4o' in model_lower or 'o1-preview' in model_lower:
+            return 20
+        
+        # GPT-4 Turbo (增强)
+        if 'gpt-4-turbo' in model_lower or 'turbo' in model_lower:
+            return 15
+        
+        # GPT-4 标准版或 Claude Sonnet
+        if 'gpt-4' in model_lower or 'sonnet' in model_lower:
+            return 10
+        
+        # 默认标准定价
+        return 10
+    
+    async def _charge_credits_sync(self) -> None:
+        """
+        覆盖基类的 Credits 扣除方法，使用 AI 模型特殊定价
+        
+        Raises:
+            InsufficientCreditsException: 余额不足时抛出
+        """
+        if not self.enable_credits:
+            await self.persist_log(f"Credits tracking is disabled for node {self.node_id}", "DEBUG")
+            return
+            
+        if not self.user_id:
+            await self.persist_log("No user_id provided, skipping credits charge", "WARNING")
+            return
+        
+        try:
+            from weather_depot.exceptions.tf_exception import InsufficientCreditsException
+            
+            credits_cost = self.ai_model_credits
+            await self.persist_log(
+                f"Charging {credits_cost} credits for AI model: {self.model_name}", "INFO"
+            )
+            
+            # 获取 weather_control URL
+            weather_control_url = CONFIG.get(
+                "WEATHER_CONTROL_URL", 
+                "http://weather-control:3050"
+            )
+            
+            # 调用同步扣费 API
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{weather_control_url}/api/v1/credits/charge",
+                    json={
+                        "userId": self.user_id,
+                        "amount": credits_cost,
+                        "nodeId": self.node_id,
+                        "nodeType": 'ai_model_node',
+                        "flowId": self.flow_id,
+                        "metadata": {
+                            "model_name": self.model_name,
+                            "credits_amount": credits_cost
+                        }
+                    }
+                )
+                
+                # 检查是否余额不足
+                if response.status_code == 402:  # Payment Required
+                    data = response.json()
+                    balance = data.get("balance", 0)
+                    
+                    await self.persist_log(
+                        f"Insufficient credits: user={self.user_id}, "
+                        f"required={credits_cost}, balance={balance}", "ERROR"
+                    )
+                    
+                    raise InsufficientCreditsException(
+                        message=f"Insufficient credits to execute AI model node {self.node_id}",
+                        node_id=self.node_id,
+                        user_id=self.user_id,
+                        required_credits=credits_cost,
+                        current_balance=balance,
+                    )
+                
+                # 其他错误
+                response.raise_for_status()
+                
+                # 成功
+                result = response.json()
+                remaining_balance = result.get("data", {}).get("balance", 0)
+                
+                await self.persist_log(
+                    f"Credits charged successfully: user={self.user_id}, "
+                    f"node={self.node_id}, model={self.model_name}, cost={credits_cost}, "
+                    f"remaining={remaining_balance}", "INFO"
+                )
+                
+        except InsufficientCreditsException:
+            # 重新抛出余额不足异常
+            raise
+        except httpx.TimeoutException as e:
+            await self.persist_log(f"Timeout charging credits: {str(e)}", "ERROR")
+            raise Exception(f"Credits service timeout: {str(e)}")
+        except Exception as e:
+            await self.persist_log(f"Error charging credits: {str(e)}", "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
+            raise Exception(f"Failed to charge credits: {str(e)}")
+    
     def _register_input_handles(self) -> None:
         """Register input handles"""
         self.register_input_handle(
@@ -141,6 +276,15 @@ class AIModelNode(NodeBase):
             description="Parameters - 模型参数，如 temperature, max_tokens 等",
             example={"temperature": 0.7, "max_tokens": 1000},
             auto_update_attr="parameters",
+        )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=AI_RESPONSE_OUTPUT_HANDLE,
+            data_type=dict,
+            description="AI Response - AI模型的响应数据，包含分析结果和结构化数据",
+            example={"response": "Analysis result...", "action": "buy", "confidence": 0.85},
         )
 
     async def _analyze_output_format_requirements(self) -> Dict[str, Any]:
@@ -166,6 +310,9 @@ class AIModelNode(NodeBase):
                 f"Edge {i}: source={edge.get('source_node')} -> target={edge.get('target_node')}, "
                 f"source_handle={edge.get('source_handle')}, target_handle={edge.get('target_handle')}", "DEBUG"
             )
+
+            # Add target_handle to required fields
+            required_fields.add(target_handle)
 
             # Add descriptions and examples based on common handle names
             if "chain" in target_handle.lower():
@@ -338,12 +485,31 @@ class AIModelNode(NodeBase):
     async def _prepare_context(self) -> str:
         """
         准备发送给AI模型的完整上下文
+        支持 {param_name} 占位符，从 parameters 字段中提取值并替换
 
         Returns:
             str: 完整上下文文本
         """
-        # 先添加主提示词
-        context = self.prompt + "\n\n"
+        # 先进行参数替换
+        context = self.prompt
+        
+        # 从 parameters 字典中提取参数并替换占位符
+        if self.parameters and isinstance(self.parameters, dict):
+            await self.persist_log(f"Replacing parameters in prompt: {list(self.parameters.keys())}", "DEBUG")
+            for param_name, param_value in self.parameters.items():
+                # 支持 {param_name} 格式的占位符
+                placeholder = f"{{{param_name}}}"
+                if placeholder in context:
+                    # 如果参数值是字典或列表，转为 JSON 字符串
+                    if isinstance(param_value, (dict, list)):
+                        param_str = json.dumps(param_value, ensure_ascii=False, indent=2)
+                    else:
+                        param_str = str(param_value)
+                    
+                    context = context.replace(placeholder, param_str)
+                    await self.persist_log(f"Replaced {placeholder} with value (length: {len(param_str)})", "DEBUG")
+        
+        context += "\n\n"
 
         # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
         if self.auto_format_output and self._output_edges:
@@ -370,16 +536,24 @@ class AIModelNode(NodeBase):
 
                 context += "\n请在你的分析后，提供一个符合上述格式的JSON对象。\n\n"
 
-        # 如果有输入信号，添加信号内容
+        # 处理输入信号：将信号数据填充到 parameters 中（用于动态数据）
         if self._input_signals:
-            for i, (handle, signal) in enumerate(self._input_signals.items(), 1):
-                if signal is not None:
-                    signal_text = await self._signal_to_text(signal)
-                    context += (
-                        f"\n--- Input {i} (Handle: {handle}) ---\n{signal_text}\n"
-                    )
+            await self.persist_log(f"Processing {len(self._input_signals)} input signals", "DEBUG")
+            for handle, signal in self._input_signals.items():
+                if signal is not None and handle != 'model' and handle != 'prompt':
+                    # 如果信号的 handle 对应一个参数占位符，用信号数据填充
+                    placeholder = f"{{{handle}}}"
+                    if placeholder in context and signal.payload:
+                        # 将信号 payload 转为文本
+                        signal_text = await self._signal_to_text(signal)
+                        context = context.replace(placeholder, signal_text)
+                        await self.persist_log(f"Replaced {placeholder} with signal data from {signal.source_node_id}", "INFO")
+                    else:
+                        # 否则将信号内容作为额外上下文添加
+                        signal_text = await self._signal_to_text(signal)
+                        context += f"\n--- Input Signal (Handle: {handle}) ---\n{signal_text}\n"
         else:
-            context += "(No input signals received)"
+            context += "(No input signals received)\n"
 
         return context
 
@@ -474,11 +648,11 @@ class AIModelNode(NodeBase):
             Optional[str]: AI响应文本，失败则返回None
         """
         if not self.api_key:
-            self.persist_log("ERROR", "OpenRouter API key not provided")
+            await self.persist_log("OpenRouter API key not provided", "ERROR")
             return None
         try:
-            self.persist_log("INFO", f"Calling OpenRouter API with model: {self.model_name}")
-            self.persist_log("DEBUG", f"Context: {context[:200]}...")
+            await self.persist_log(f"Calling OpenRouter API with model: {self.model_name}", "INFO")
+            await self.persist_log(f"Context: {context[:200]}...", "DEBUG")
 
             # Prepare messages in OpenAI chat format
             messages = []
@@ -506,7 +680,7 @@ class AIModelNode(NodeBase):
                 response.raise_for_status()
                 response_data = response.json()
 
-                self.persist_log("DEBUG", f"Raw response: {response_data}")
+                await self.persist_log(f"Raw response: {response_data}", "DEBUG")
 
                 # Extract content from OpenAI-format response
                 if "choices" in response_data and len(response_data["choices"]) > 0:
@@ -514,21 +688,21 @@ class AIModelNode(NodeBase):
                     message = choice.get("message", {})
                     content = message.get("content", "").strip()
                     if content:
-                        self.persist_log("INFO", f"AI response received: {content[:100]}...")
+                        await self.persist_log(f"AI response received: {content[:100]}...", "INFO")
                         return content
                     else:
-                        self.persist_log("WARNING", "No content in AI response")
+                        await self.persist_log("No content in AI response", "WARNING")
                         return None
                 else:
-                    self.persist_log("WARNING", f"Unexpected response format: {response_data}")
+                    await self.persist_log(f"Unexpected response format: {response_data}", "WARNING")
                     return None
 
         except httpx.HTTPStatusError as e:
-            self.persist_log("ERROR", f"HTTP error calling OpenRouter API: {e.response.status_code} - {e.response.text}")
+            await self.persist_log(f"HTTP error calling OpenRouter API: {e.response.status_code} - {e.response.text}", "ERROR")
             return None
         except Exception as e:
-            self.persist_log("ERROR", f"Error calling OpenRouter API: {str(e)}")
-            self.persist_log("ERROR", f"Traceback: {traceback.format_exc()}")
+            await self.persist_log(f"Error calling OpenRouter API: {str(e)}", "ERROR")
+            await self.persist_log(f"Traceback: {traceback.format_exc()}", "ERROR")
             return None
 
     async def execute(self) -> bool:
@@ -588,36 +762,25 @@ class AIModelNode(NodeBase):
                 except Exception as e:
                     await self.persist_log(f"Error extracting structured data: {str(e)}", "WARNING")
 
-            # 发送AI响应信号 - 使用默认输出handle
-            # output_handle = next(
-            #     (
-            #         edge["source_handle"]
-            #         for edge in self._output_edges
-            #         if edge.source_node == self.node_id
-            #     ),
-            #     "default",
-            # )
-
-            # if await self.send_signal(
-            #     output_handle, self.output_signal_type, payload=payload
-            # ):
-            # FIXME: mock
-            output_handle = "signal"
-            # if await self.send_signal(
-            #     output_handle,
-            #     "dex_trade",
-            #     payload={"amount_in_handle": 0.5},
-            # ):
-            if await self.send_stop_execution_signal(
-                reason=f"AI model node {self.node_id} decided not to trade",
-            ):
+            # 发送AI响应信号
+            output_handle = AI_RESPONSE_OUTPUT_HANDLE
+            
+            # 创建信号并发送
+            signal = Signal(
+                type=SignalType.JSON_DATA,
+                payload=payload,
+                source_node_id=self.node_id,
+                source_node_handle=output_handle,
+            )
+            
+            if await self.send_signal_to_outputs(signal, output_handle):
                 await self.persist_log(
-                    f"Successfully sent {self.output_signal_type} signal via handle {output_handle}", "INFO"
+                    f"Successfully sent AI response signal via handle {output_handle}", "INFO"
                 )
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
-                error_message = f"Failed to send {self.output_signal_type} signal"
+                error_message = "Failed to send AI response signal"
                 await self.persist_log(error_message, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_message)
                 return False

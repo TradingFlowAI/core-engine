@@ -16,7 +16,8 @@ from nodes.node_base import NodeBase, NodeStatus
 
 # 定义输入输出处理器名称
 # 输入句柄
-ACCOUNT_INPUT_HANDLE = "account"  # X账号输入
+# 🔥 修复：改为 accounts (复数)，匹配前端和 Linter
+ACCOUNT_INPUT_HANDLE = "accounts"  # X账号输入
 KEYWORDS_INPUT_HANDLE = "keywords"  # 关键词输入
 
 # 输出句柄
@@ -125,7 +126,7 @@ class XListenerNode(NodeBase):
             data_type=str,
             description="Accounts - X 的用户名或id，支持userId和userName",
             example="elonmusk",
-            auto_update_attr="account",
+            auto_update_attr="accounts",  # 🔥 修复：改为 accounts (复数)
         )
         self.register_input_handle(
             name=KEYWORDS_INPUT_HANDLE,
@@ -133,6 +134,15 @@ class XListenerNode(NodeBase):
             description="Keywords - 关键词过滤，多个关键词用逗号分隔",
             example="AI, Tesla, SpaceX",
             auto_update_attr="keywords",
+        )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=LATEST_TWEETS_OUTPUT_HANDLE,
+            data_type=list,
+            description="Latest Tweets - Twitter/X tweets data",
+            example=[{"text": "Tweet content", "author": "@username", "timestamp": "2024-01-01"}],
         )
 
     async def _build_search_query(self) -> str:
@@ -451,7 +461,7 @@ class XListenerNode(NodeBase):
             # 检查API密钥
             if not self.api_key:
                 error_msg = "Twitter API key not provided"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
@@ -480,7 +490,7 @@ class XListenerNode(NodeBase):
             # 检查是否有错误
             if "error" in result:
                 error_msg = result["error"]
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 

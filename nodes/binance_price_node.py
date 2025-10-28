@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +11,8 @@ from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 
+# 🔥 添加 current_price 输出句柄
+CURRENT_PRICE_HANDLE = "current_price"
 PRICE_DATA_HANDLE = "kline_data"
 
 
@@ -87,9 +88,6 @@ class BinancePriceNode(NodeBase):
 
         # Binance client
         self.client = None
-
-        # Logger setup
-        self.logger = logging.getLogger(f"BinancePrice.{node_id}")
 
     async def initialize_client(self) -> bool:
         """Initialize Binance API client with retry mechanism"""
@@ -240,6 +238,14 @@ class BinancePriceNode(NodeBase):
                 # Process data
                 processed_data = self.process_klines(klines, ticker)
 
+                # 🔥 发送 current_price 信号
+                current_price = float(processed_data.get("current_price", 0))
+                await self.send_signal(
+                    CURRENT_PRICE_HANDLE, 
+                    SignalType.PRICE_DATA, 
+                    payload=current_price
+                )
+
                 # Send data signal
                 if await self.send_signal(
                     PRICE_DATA_HANDLE, SignalType.PRICE_DATA, payload=processed_data
@@ -276,3 +282,29 @@ class BinancePriceNode(NodeBase):
             if self.client:
                 # Binance client doesn't have explicit close method, but can be set to None
                 self.client = None
+    
+    def _register_input_handles(self) -> None:
+        """Register input handles"""
+        # Binance Price Node 没有动态输入句柄，所有参数通过构造函数传入
+        pass
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        # 🔥 添加 current_price 输出
+        self.register_output_handle(
+            name=CURRENT_PRICE_HANDLE,
+            data_type=float,
+            description="Current Price - Latest price of the trading pair",
+            example=50000.00,
+        )
+        self.register_output_handle(
+            name=PRICE_DATA_HANDLE,
+            data_type=dict,
+            description="K-line Data - Binance K-line data with price information",
+            example={
+                "symbol": "BTCUSDT",
+                "interval": "1h",
+                "kline_data": [[...]],
+                "current_price": "50000.00"
+            },
+        )

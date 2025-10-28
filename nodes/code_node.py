@@ -136,9 +136,6 @@ class CodeNode(NodeBase):
         # Initialize input data for aggregation (required for auto_update_attr)
         self.input_data = {}
 
-        # Save main thread's event loop for communication in worker threads
-        self.loop = asyncio.get_event_loop()
-
     async def analyze_security(self, code: str) -> Dict[str, Any]:
         """
         Analyze code security, detect potential malicious code
@@ -937,4 +934,31 @@ class CodeNode(NodeBase):
             description="Python code to execute",
             example="# Your Python code here",
             auto_update_attr="python_code",
+        )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=CODE_OUTPUT_HANDLE,
+            data_type=dict,
+            description="Output Data - Code execution result",
+            example={"result": "value", "processed_data": []},
+        )
+        self.register_output_handle(
+            name=STDOUT_HANDLE,
+            data_type=str,
+            description="Standard Output - Console output from code execution",
+            example="Processing complete\n",
+        )
+        self.register_output_handle(
+            name=STDERR_HANDLE,
+            data_type=str,
+            description="Standard Error - Error messages from code execution",
+            example="",
+        )
+        self.register_output_handle(
+            name=DEBUG_HANDLE,
+            data_type=str,
+            description="Debug Output - Debug information and execution logs",
+            example="Gas used: 1000, Execution time: 0.5s",
         )

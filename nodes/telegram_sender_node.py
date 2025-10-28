@@ -15,7 +15,9 @@ from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 
 # Define input and output handle names
-MESSAGE_INPUT_HANDLE = "message_input_handle"
+# 🔥 修复：匹配前端和 Linter 的字段定义
+ACCOUNT_INPUT_HANDLE = "account_to_send"
+MESSAGE_INPUT_HANDLE = "messages"
 STATUS_OUTPUT_HANDLE = "status_output_handle"
 ERROR_HANDLE = "error_handle"
 
@@ -120,6 +122,39 @@ class TelegramSenderNode(NodeBase):
         self.retry_count = max(0, min(10, retry_count))  # 限制在0-10次之间
 
         # Logging will be handled by persist_log method
+    
+    def _register_input_handles(self) -> None:
+        """Register input handles"""
+        # 🔥 新增：注册 account_to_send 输入句柄
+        self.register_input_handle(
+            name=ACCOUNT_INPUT_HANDLE,
+            data_type=str,
+            description="Telegram Account - Username with chat ID metadata",
+            example="@username",
+            auto_update_attr="chat_id",  # 自动更新到 self.chat_id
+        )
+        
+        self.register_input_handle(
+            name=MESSAGE_INPUT_HANDLE,
+            data_type=str,
+            description="Message Input - Message content to send to Telegram",
+            example="Hello from TradingFlow!",
+        )
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=STATUS_OUTPUT_HANDLE,
+            data_type=dict,
+            description="Status Output - Telegram message send status",
+            example={"success": True, "message_id": 123, "timestamp": "2024-01-01"},
+        )
+        self.register_output_handle(
+            name=ERROR_HANDLE,
+            data_type=str,
+            description="Error Handle - Error message if send fails",
+            example="Failed to send message: Invalid bot token",
+        )
 
     async def send_telegram_message(self, message: str) -> Dict[str, Any]:
         """
@@ -289,6 +324,29 @@ class TelegramSenderNode(NodeBase):
         try:
             await self.persist_log(f"Executing TelegramSenderNode", "INFO")
 
+            # 🔥 修复：优先使用连线传入的 account_to_send
+            account_data = self.get_input_handle_data(ACCOUNT_INPUT_HANDLE)
+            if account_data:
+                await self.persist_log(f"Using connected account input: {account_data}", "INFO")
+                
+                # 解析 account_data
+                if isinstance(account_data, dict):
+                    # 从 metadata 中提取 chat_id
+                    metadata = account_data.get('_metadata', {})
+                    extracted_chat_id = metadata.get('chat_id') or account_data.get('chat_id')
+                    if extracted_chat_id:
+                        self.chat_id = extracted_chat_id
+                        await self.persist_log(f"Extracted chat_id from metadata: {self.chat_id}", "INFO")
+                elif isinstance(account_data, str):
+                    # 如果是字符串，尝试作为 chat_id 使用
+                    if account_data.startswith('@'):
+                        await self.persist_log(f"Username format detected: {account_data}, using configured chat_id", "INFO")
+                    else:
+                        self.chat_id = account_data
+                        await self.persist_log(f"Using chat_id from input: {self.chat_id}", "INFO")
+            else:
+                await self.persist_log("No connected account input, using configured chat_id", "INFO")
+
             # Validate required parameters
             if not self.bot_token:
                 error_msg = "Bot token is required"
@@ -298,7 +356,7 @@ class TelegramSenderNode(NodeBase):
                 return False
 
             if not self.chat_id:
-                error_msg = "Chat ID is required"
+                error_msg = "Chat ID is required (either from input or configuration)"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
@@ -306,8 +364,10 @@ class TelegramSenderNode(NodeBase):
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # Get input message
-            input_data = await self.get_input_signal(MESSAGE_INPUT_HANDLE)
+            # 🔥 修复：获取消息输入（支持连线和信号两种方式）
+            input_data = self.get_input_handle_data(MESSAGE_INPUT_HANDLE)
+            if input_data is None:
+                input_data = await self.get_input_signal(MESSAGE_INPUT_HANDLE)
 
             if input_data is None:
                 error_msg = "No input message received"

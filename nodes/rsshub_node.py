@@ -13,7 +13,8 @@ from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 
 # Define input/output handle names
-DATA_OUTPUT_HANDLE = "data_output_handle"
+# 🔥 修复：改为 feeds，匹配前端和 Linter
+FEEDS_OUTPUT_HANDLE = "feeds"
 ERROR_HANDLE = "error_handle"
 
 
@@ -44,7 +45,7 @@ class RSSHubNode(NodeBase):
     - include_content: Whether to include content details
 
     Output signals:
-    - DATA_OUTPUT_HANDLE: Retrieved RSS data
+    - FEEDS_OUTPUT_HANDLE: Retrieved RSS data (feeds)
     - ERROR_HANDLE: Error information
     """
 
@@ -263,7 +264,7 @@ class RSSHubNode(NodeBase):
             processed_data = rss_data
 
             # Send data signal
-            if await self.send_signal(DATA_OUTPUT_HANDLE, SignalType.DATASET, payload=processed_data):
+            if await self.send_signal(FEEDS_OUTPUT_HANDLE, SignalType.DATASET, payload=processed_data):
                 await self.persist_log(f"Successfully sent RSS data with {len(processed_data.get('items', []))} items", "INFO")
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
