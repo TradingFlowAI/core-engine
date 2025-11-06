@@ -255,7 +255,15 @@ class AIModelNode(NodeBase):
             raise Exception(f"Failed to charge credits: {str(e)}")
     
     def _register_input_handles(self) -> None:
-        """Register input handles"""
+        """
+        Register input handles
+        
+        🔧 Dynamic Parameters Handle Support:
+        - model and prompt are static handles
+        - Other handles (like tweet_content, market_data) are dynamically registered as parameter handles
+        - Each parameter handle accepts data that will be included in the AI prompt
+        """
+        # Register static handles
         self.register_input_handle(
             name=MODEL_INPUT_HANDLE,
             data_type=str,
@@ -270,13 +278,34 @@ class AIModelNode(NodeBase):
             example="Please analyze the trading data and provide recommendations:",
             auto_update_attr="prompt",
         )
-        self.register_input_handle(
-            name=PARAMETERS_INPUT_HANDLE,
-            data_type=dict,
-            description="Parameters - 模型参数，如 temperature, max_tokens 等",
-            example={"temperature": 0.7, "max_tokens": 1000},
-            auto_update_attr="parameters",
-        )
+        
+        # 🔧 Register dynamic parameter handles based on input_edges
+        # Each edge targeting a handle other than 'model' or 'prompt' is treated as a parameter
+        if hasattr(self, '_input_edges') and self._input_edges:
+            registered_params = set()
+            for edge in self._input_edges:
+                target_handle = edge.target_node_handle
+                # Skip static handles
+                if target_handle in [MODEL_INPUT_HANDLE, PROMPT_INPUT_HANDLE]:
+                    continue
+                # Skip already registered
+                if target_handle in registered_params:
+                    continue
+                    
+                # Register as dynamic parameter handle
+                self.register_input_handle(
+                    name=target_handle,
+                    data_type=str,  # Accept any string data
+                    description=f"Parameter: {target_handle} - Dynamic parameter input",
+                    example=f"Value for {target_handle}",
+                    auto_update_attr=None,  # Don't auto-update, will be collected in parameters dict
+                )
+                registered_params.add(target_handle)
+                self.logger.info(f"Registered dynamic parameter handle: {target_handle}")
+        
+        # Log if no dynamic parameters were registered
+        if not (hasattr(self, '_input_edges') and self._input_edges):
+            self.logger.debug("No input_edges provided, skipping dynamic parameter handle registration")
     
     def _register_output_handles(self) -> None:
         """Register output handles"""
