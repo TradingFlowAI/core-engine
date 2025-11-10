@@ -1,0 +1,57 @@
+### Aptos Vault Node 集成测试
+### 基于用户提供的 vault_node 配置进行执行测试
+
+@baseUrl = http://localhost:7002
+@flowId = 68ac78b31cef77f483119bc0
+@userId = 684c36ce23a411dff96ff68a
+@componentId = 0
+@cycle = 10
+@vaultNodeId = vault_node_1756276848002
+@vaultAddress = 0x7599be665e45e840808d41ffb25ea77d7a5651b1
+@createdAt = 2025-08-28T15:55:00.000Z
+
+### 1. 测试 [ vault_node 单独执行 ]
+# @name execute_vault_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "component_id": {{componentId}},
+  "cycle": {{cycle}},
+  "node_id": "{{vaultNodeId}}",
+  "node_type": "vault_node",
+  "input_edges": [],
+  "output_edges": [],
+  "config": {
+    "node_class_type": "vault_node",
+    "chain": "aptos",
+    "vault_address": "{{vaultAddress}}"
+  }
+}
+
+### 2. 测试 [ 完整 Flow 执行 ]
+# @name execute_complete_flow
+POST {{baseUrl}}/flows/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "cycle_interval": "0",
+  "flow_json": {
+    "nodes": [
+      {
+        "id": "{{vaultNodeId}}",
+        "type": "vault_node",
+        "config": {
+          "node_class_type": "vault_node",
+          "chain": "aptos",
+          "vault_address": "{{vaultAddress}}"
+        }
+      }
+    ],
+    "edges": []
+  },
+  "user_id": "{{userId}}",
+  "created_at": "{{createdAt}}"
+}

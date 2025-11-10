@@ -4,19 +4,20 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from tradingflow.depot.config import CONFIG
-from tradingflow.depot.exceptions.tf_exception import (
+from weather_depot.config import CONFIG
+from weather_depot.exceptions.tf_exception import (
+    InsufficientCreditsException,
     NodeExecutionException,
     NodeResourceException,
     NodeStopExecutionException,
     NodeTimeoutException,
     NodeValidationException,
 )
-from tradingflow.station.common.edge import Edge
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.nodes.node_base import NodeStatus
-from tradingflow.station.utils.result_extractor import extract_node_result
+from common.edge import Edge
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
+from nodes.node_base import NodeStatus
+from utils.result_extractor import extract_node_result
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ node_manager = NodeTaskManager.get_instance()
 node_registry = NodeRegistry.get_instance()
 
 # 导入所有注册的节点类型，确保装饰器被执行
-import tradingflow.station.nodes  # noqa: F401, E402
+import nodes  # noqa: F401, E402
 
 
 async def execute_node_task(
@@ -136,6 +137,39 @@ async def execute_node_task(
         )
         logger.error(f"Node {node_id} resource error: {e.message}")
 
+    except InsufficientCreditsException as e:
+        # 处理余额不足异常 - 标记为 TERMINATED 并停止整个 component
+        await _update_node_status(
+            node_task_id,
+            NodeStatus.TERMINATED,
+            f"Insufficient credits: {e.message}",
+            {
+                "user_id": e.user_id,
+                "required_credits": e.required_credits,
+                "current_balance": e.current_balance,
+                "terminated_at": datetime.now().isoformat(),
+            },
+        )
+        logger.error(
+            f"Node {node_id} terminated due to insufficient credits: "
+            f"required={e.required_credits}, balance={e.current_balance}"
+        )
+        
+        # 发送停止信号到整个 component（如果 node_instance 可用）
+        if node_instance:
+            try:
+                await node_instance.send_stop_execution_signal(
+                    reason="insufficient_credits",
+                    metadata={
+                        "user_id": e.user_id,
+                        "required_credits": e.required_credits,
+                        "current_balance": e.current_balance,
+                    }
+                )
+                logger.info(f"Stop signal sent for component due to insufficient credits")
+            except Exception as stop_error:
+                logger.error(f"Failed to send stop signal: {stop_error}")
+
     except NodeExecutionException as e:
         # 处理通用节点执行异常
         status = (
@@ -179,7 +213,7 @@ async def _create_node_instance(
     cycle: int,
     node_id: str,
 ):
-    """创建节点实例"""
+    """创建节点实例（支持版本管理）"""
     try:
         if node_type == "python":
             node_class_type = node_data.get("config", {}).get("node_class_type")
@@ -193,7 +227,32 @@ async def _create_node_instance(
             node_class_type = node_type
 
         config = node_data.get("config", {})
-        logger.info("Creating node instance with config: %s", config)
+        
+        # 提取版本信息（支持多个位置）
+        version_spec = None
+        if "version" in node_data:
+            version_spec = node_data["version"]
+        elif "version" in config:
+            version_spec = config["version"]
+        else:
+            version_spec = "latest"  # 默认使用最新版本
+        
+        logger.info(
+            "Creating node instance: type=%s, version=%s, config=%s", 
+            node_class_type, version_spec, config
+        )
+        
+        # 注意：当前实现使用本地 Worker Registry (common.node_registry)
+        # 它不支持版本解析，因为装饰器已经注册了节点类到本地 Registry
+        # 版本信息被记录但不影响实例化（所有版本使用同一个类）
+        #
+        # TODO: 完整的版本支持需要以下改进：
+        # 1. 在 Flow 调度时使用 core.node_registry.NodeRegistry.resolve_version()
+        # 2. 将解析后的具体版本号传递到这里
+        # 3. 动态加载对应版本的节点类文件
+        # 4. 或者实现多版本文件加载机制（nodes/{node_type}/v{X}_{Y}_{Z}.py）
+        #
+        # 当前行为：记录版本信息用于日志和调试，实际使用最新注册的类
 
         input_edges = [
             Edge.from_dict(edge) for edge in node_data.get("input_edges") or []
@@ -213,6 +272,7 @@ async def _create_node_instance(
             config={
                 **config,
                 "state_store": node_manager.state_store,
+                "_version_spec": version_spec,  # 保存版本信息到配置中
             },
         )
 

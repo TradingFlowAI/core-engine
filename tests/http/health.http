@@ -1,0 +1,15 @@
+### 健康检查接口测试
+@baseUrl = http://localhost:7002
+
+# @name health_check
+GET {{baseUrl}}/health
+Content-Type:application/json
+Accept: application/json
+
+### 响应验证
+# 验证响应状态码为200
+# 验证status字段为"healthy"
+# 验证worker_id字段存在
+# 验证uptime字段存在
+# 验证running_nodes字段是一个数字
+# 验证system_stats字段存在

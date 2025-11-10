@@ -1,20 +1,27 @@
 import asyncio
 import json
-import logging
+# Removed logging import - using persist_log from NodeBase
+import time
 import traceback
 from typing import Any, Dict, List, Optional
 
 import httpx
-from tradingflow.depot.config import CONFIG
-from tradingflow.station.common.edge import Edge
+from weather_depot.config import CONFIG
+from common.edge import Edge
 
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_formats import SignalFormats
-from tradingflow.station.common.signal_types import Signal, SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.node_decorators import register_node_type
+from common.signal_formats import SignalFormats
+from common.signal_types import Signal, SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
-SYSTEM_PROMPT_HANDLE = "system_prompt_handle"
-PROMPT_HANDLE = "prompt_handle"
+# Define input and output handle names
+# Input handles
+MODEL_INPUT_HANDLE = "model"  # Model input
+PROMPT_INPUT_HANDLE = "prompt"  # Prompt input
+PARAMETERS_INPUT_HANDLE = "parameters"  # Parameters input
+
+# Output handles
+AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI response output
 
 
 @register_node_type(
@@ -25,27 +32,21 @@ PROMPT_HANDLE = "prompt_handle"
         "system_prompt": "You are a helpful assistant.",
         "prompt": "Please analyze the following information:",
         "max_tokens": 1000,
-        "output_signal_type": SignalType.AI_RESPONSE.value,  # 输出信号类型
-        "output_format_prompt": True,  # 是否在提示词中添加输出格式要求
-    },
-)
+        "auto_format_output": True,  # Whether to automatically generate JSON format requirements based on output connections
+    },)
 class AIModelNode(NodeBase):
     """
-    AI大模型节点 - 接收各类信号作为上下文，调用大模型获取响应
+    AI Large Model Node - Receives various signals as context, calls large model to get response
+    Automatically generates JSON format requirements based on output connection status
 
-    输入参数:
-    - model_name: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
-    - temperature: 温度参数，控制随机性，0.0-2.0
-    - system_prompt: 系统提示词，设置AI的角色和行为
-    - prompt: 主提示词，在上下文前添加的指导语
-    - max_tokens: 最大返回token数
-    - output_signal_type: 输出信号类型
+    Input parameters:
+    - model: Large model name, such as "gpt-3.5-turbo", "gpt-4", etc.
+    - prompt: Main prompt, guiding AI on how to process input data
+    - parameters: Model parameters, such as temperature, max_tokens, etc.
+    - auto_format_output: Whether to automatically generate JSON format requirements based on output connections
 
-    输入信号:
-    - 任意信号类型：所有接收到的信号将被转换为文本上下文
-
-    输出信号:
-    - AI_RESPONSE：包含AI响应的信号
+    Output signals:
+    - ai_response: AI response data, automatically adjusted format based on output connections
     """
 
     def __init__(
@@ -55,35 +56,35 @@ class AIModelNode(NodeBase):
         cycle: int,
         node_id: str,
         name: str,
-        model_name: str,
+        model_name: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         system_prompt: str = "You are a helpful assistant.",
         prompt: str = "Please analyze the following information:",
         max_tokens: int = 1000,
-        output_signal_type: str = "AI_RESPONSE",
-        output_format_prompt: bool = True,
+        parameters: Dict[str, Any] = None,
+        auto_format_output: bool = True,
         input_edges: List[Edge] = None,
         output_edges: List[Edge] = None,
         state_store=None,
         **kwargs,
     ):
         """
-        初始化AI大模型节点
+        Initialize AI Large Model Node
 
         Args:
-            node_id: 节点唯一标识符
-            name: 节点名称
-            model_name: 大模型名称，如 "gpt-3.5-turbo", "gpt-4" 等
-            temperature: 温度参数，控制随机性（0.0-2.0）
-            system_prompt: 系统提示词，设置AI的角色和行为
-            prompt: 主提示词，在上下文前添加的指导语
-            api_key: API密钥
-            api_endpoint: API端点URL
-            max_tokens: 最大返回token数
-            output_signal_type: 输出信号类型
-            input_edges: 输入边缘
-            output_edges: 输出边缘
-            **kwargs: 传递给基类的其他参数
+            node_id: Node unique identifier
+            name: Node name
+            model_name: Large model name, such as "gpt-3.5-turbo", "gpt-4", etc.
+            temperature: Temperature parameter, controls randomness (0.0-2.0)
+            system_prompt: System prompt, sets AI's role and behavior
+            prompt: Main prompt, guidance added before context
+            api_key: API key
+            api_endpoint: API endpoint URL
+            max_tokens: Maximum return token count
+            output_signal_type: Output signal type
+            input_edges: Input edges
+            output_edges: Output edges
+            **kwargs: Other parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -96,24 +97,361 @@ class AIModelNode(NodeBase):
             state_store=state_store,
         )
 
-        # 保存参数
-        self.model_name = "deepseek-r1-250120"
-        self.temperature = max(0.0, min(2.0, temperature))
+        # Save parameters
+        self.model_name = model_name or "openai/gpt-3.5-turbo"
         self.system_prompt = system_prompt
         self.prompt = prompt
-        self.api_key = CONFIG["ARK_API_KEY"]
-        self.api_endpoint = CONFIG["AI_MODEL_NODE_ENDPOINT"]
-        self.max_tokens = max(1, min(max_tokens, 4000))
-        self.output_signal_type = output_signal_type
-        self.output_format_prompt = output_format_prompt
 
-        # 结果
+        # OpenRouter configuration
+        self.api_key = CONFIG["OPENROUTER_API_KEY"]
+        self.api_endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        self.site_url = "https://tradingflows.ai"
+        self.site_name = "TradingFlow"
+        self.auto_format_output = auto_format_output
+
+        # Process model parameters
+        self.parameters = parameters or {}
+        self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
+        self.max_tokens = self.parameters.get("max_tokens", max(1, min(max_tokens, 4000)))
+
+        # Results
         self.ai_response = None
 
-        # 日志设置
-        self.logger = logging.getLogger(f"AIModel.{node_id}")
+        # Credits pricing for AI models (5-30 credits per execution)
+        self.ai_model_credits = self._calculate_model_credits()
 
-    def _signal_to_text(self, signal: Signal) -> str:
+        # Logging will be handled by persist_log method
+
+    def _calculate_model_credits(self) -> int:
+        """
+        根据模型类型计算 Credits 消耗
+        
+        定价策略：
+        - GPT-3.5 / Claude Haiku: 5 credits (最便宜)
+        - GPT-4 / Claude Sonnet: 10 credits (标准)
+        - GPT-4 Turbo: 15 credits (增强)
+        - GPT-4o / o1-preview: 20 credits (高级)
+        - Claude Opus / o1: 30 credits (旗舰)
+        - 默认: 10 credits (标准)
+        
+        Returns:
+            int: Credits 消耗数量
+        """
+        model_lower = self.model_name.lower()
+        
+        # GPT-3.5 系列 (最便宜)
+        if 'gpt-3.5' in model_lower or '3.5' in model_lower:
+            return 5
+        
+        # Claude Haiku (最快最便宜)
+        if 'haiku' in model_lower:
+            return 5
+        
+        # Claude Opus 或 o1 (旗舰模型)
+        if 'opus' in model_lower or model_lower == 'o1' or 'o1-mini' not in model_lower and 'o1' in model_lower:
+            return 30
+        
+        # GPT-4o / o1-preview (高级)
+        if 'gpt-4o' in model_lower or 'o1-preview' in model_lower:
+            return 20
+        
+        # GPT-4 Turbo (增强)
+        if 'gpt-4-turbo' in model_lower or 'turbo' in model_lower:
+            return 15
+        
+        # GPT-4 标准版或 Claude Sonnet
+        if 'gpt-4' in model_lower or 'sonnet' in model_lower:
+            return 10
+        
+        # 默认标准定价
+        return 10
+    
+    async def _charge_credits_sync(self) -> None:
+        """
+        覆盖基类的 Credits 扣除方法，使用 AI 模型特殊定价
+        
+        Raises:
+            InsufficientCreditsException: 余额不足时抛出
+        """
+        if not self.enable_credits:
+            await self.persist_log(f"Credits tracking is disabled for node {self.node_id}", "DEBUG")
+            return
+            
+        if not self.user_id:
+            await self.persist_log("No user_id provided, skipping credits charge", "WARNING")
+            return
+        
+        try:
+            from weather_depot.exceptions.tf_exception import InsufficientCreditsException
+            
+            credits_cost = self.ai_model_credits
+            await self.persist_log(
+                f"Charging {credits_cost} credits for AI model: {self.model_name}", "INFO"
+            )
+            
+            # 获取 weather_control URL
+            weather_control_url = CONFIG.get(
+                "WEATHER_CONTROL_URL", 
+                "http://weather-control:3050"
+            )
+            
+            # 调用同步扣费 API
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"{weather_control_url}/api/v1/credits/charge",
+                    json={
+                        "userId": self.user_id,
+                        "amount": credits_cost,
+                        "nodeId": self.node_id,
+                        "nodeType": 'ai_model_node',
+                        "flowId": self.flow_id,
+                        "metadata": {
+                            "model_name": self.model_name,
+                            "credits_amount": credits_cost
+                        }
+                    }
+                )
+                
+                # 检查是否余额不足
+                if response.status_code == 402:  # Payment Required
+                    data = response.json()
+                    balance = data.get("balance", 0)
+                    
+                    await self.persist_log(
+                        f"Insufficient credits: user={self.user_id}, "
+                        f"required={credits_cost}, balance={balance}", "ERROR"
+                    )
+                    
+                    raise InsufficientCreditsException(
+                        message=f"Insufficient credits to execute AI model node {self.node_id}",
+                        node_id=self.node_id,
+                        user_id=self.user_id,
+                        required_credits=credits_cost,
+                        current_balance=balance,
+                    )
+                
+                # 其他错误
+                response.raise_for_status()
+                
+                # 成功
+                result = response.json()
+                remaining_balance = result.get("data", {}).get("balance", 0)
+                
+                await self.persist_log(
+                    f"Credits charged successfully: user={self.user_id}, "
+                    f"node={self.node_id}, model={self.model_name}, cost={credits_cost}, "
+                    f"remaining={remaining_balance}", "INFO"
+                )
+                
+        except InsufficientCreditsException:
+            # 重新抛出余额不足异常
+            raise
+        except httpx.TimeoutException as e:
+            await self.persist_log(f"Timeout charging credits: {str(e)}", "ERROR")
+            raise Exception(f"Credits service timeout: {str(e)}")
+        except Exception as e:
+            await self.persist_log(f"Error charging credits: {str(e)}", "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
+            raise Exception(f"Failed to charge credits: {str(e)}")
+    
+    def _register_input_handles(self) -> None:
+        """
+        Register input handles
+        
+        🔧 Dynamic Parameters Handle Support:
+        - model and prompt are static handles
+        - Other handles (like tweet_content, market_data) are dynamically registered as parameter handles
+        - Each parameter handle accepts data that will be included in the AI prompt
+        """
+        # Register static handles
+        self.register_input_handle(
+            name=MODEL_INPUT_HANDLE,
+            data_type=str,
+            description="Model - 大模型名称，如 'gpt-3.5-turbo', 'gpt-4' 等",
+            example="gpt-3.5-turbo",
+            auto_update_attr="model_name",
+        )
+        self.register_input_handle(
+            name=PROMPT_INPUT_HANDLE,
+            data_type=str,
+            description="Prompt - 主提示词，指导 AI 如何处理输入数据",
+            example="Please analyze the trading data and provide recommendations:",
+            auto_update_attr="prompt",
+        )
+        
+        # 🔧 Register dynamic parameter handles based on input_edges
+        # Each edge targeting a handle other than 'model' or 'prompt' is treated as a parameter
+        if hasattr(self, '_input_edges') and self._input_edges:
+            registered_params = set()
+            for edge in self._input_edges:
+                target_handle = edge.target_node_handle
+                # Skip static handles
+                if target_handle in [MODEL_INPUT_HANDLE, PROMPT_INPUT_HANDLE]:
+                    continue
+                # Skip already registered
+                if target_handle in registered_params:
+                    continue
+                    
+                # Register as dynamic parameter handle
+                self.register_input_handle(
+                    name=target_handle,
+                    data_type=str,  # Accept any string data
+                    description=f"Parameter: {target_handle} - Dynamic parameter input",
+                    example=f"Value for {target_handle}",
+                    auto_update_attr=None,  # Don't auto-update, will be collected in parameters dict
+                )
+                registered_params.add(target_handle)
+                self.logger.info(f"Registered dynamic parameter handle: {target_handle}")
+        
+        # Log if no dynamic parameters were registered
+        if not (hasattr(self, '_input_edges') and self._input_edges):
+            self.logger.debug("No input_edges provided, skipping dynamic parameter handle registration")
+    
+    def _register_output_handles(self) -> None:
+        """Register output handles"""
+        self.register_output_handle(
+            name=AI_RESPONSE_OUTPUT_HANDLE,
+            data_type=dict,
+            description="AI Response - AI模型的响应数据，包含分析结果和结构化数据",
+            example={"response": "Analysis result...", "action": "buy", "confidence": 0.85},
+        )
+
+    async def _analyze_output_format_requirements(self) -> Dict[str, Any]:
+        """
+        分析输出句柄的连接情况，确定需要输出的JSON格式
+
+        Returns:
+            Dict[str, Any]: 包含输出格式要求的字典
+        """
+        required_fields = set()
+        field_descriptions = {}
+        field_examples = {}
+
+        await self.persist_log(f"Analyzing {len(self._output_edges)} output edges for format requirements", "DEBUG")
+
+        # Iterate over all output edges to analyze target node input formats
+        for i, edge in enumerate(self._output_edges):
+            target_handle = edge.target_node_handle
+            target_node = edge.target_node
+            source_handle = edge.source_node_handle
+
+            await self.persist_log(
+                f"Edge {i}: source={edge.get('source_node')} -> target={edge.get('target_node')}, "
+                f"source_handle={edge.get('source_handle')}, target_handle={edge.get('target_handle')}", "DEBUG"
+            )
+
+            # Add target_handle to required fields
+            required_fields.add(target_handle)
+
+            # Add descriptions and examples based on common handle names
+            if "chain" in target_handle.lower():
+                field_descriptions[target_handle] = "Blockchain network identifier"
+                field_examples[target_handle] = "aptos"
+            elif "amount" in target_handle.lower():
+                field_descriptions[target_handle] = "Transaction amount, numeric type"
+                field_examples[target_handle] = 100.0
+            elif "token" in target_handle.lower():
+                if "from" in target_handle.lower():
+                    field_descriptions[target_handle] = "源代币符号"
+                    field_examples[target_handle] = "USDT"
+                elif "to" in target_handle.lower():
+                    field_descriptions[target_handle] = "目标代币符号"
+                    field_examples[target_handle] = "BTC"
+                else:
+                    field_descriptions[target_handle] = "代币符号"
+                    field_examples[target_handle] = "ETH"
+            elif "price" in target_handle.lower():
+                field_descriptions[target_handle] = "价格，数值类型"
+                field_examples[target_handle] = 50000.0
+            elif "action" in target_handle.lower():
+                field_descriptions[target_handle] = "操作类型"
+                field_examples[target_handle] = "buy"
+            elif "vault" in target_handle.lower():
+                field_descriptions[target_handle] = "Vault地址"
+                field_examples[target_handle] = "0x123..."
+            elif "slippage" in target_handle.lower() or "tolerance" in target_handle.lower():
+                field_descriptions[target_handle] = "滑点容忍度，百分比"
+                field_examples[target_handle] = 1.0
+            else:
+                field_descriptions[target_handle] = f"必需字段: {target_handle}"
+                field_examples[target_handle] = "value"
+
+        return {
+            "required_fields": list(required_fields),
+            "field_descriptions": field_descriptions,
+            "field_examples": field_examples
+        }
+
+    async def _extract_structured_data_from_response(self, ai_response: str) -> Optional[Dict[str, Any]]:
+        """
+        从AI响应中提取结构化数据
+
+        Args:
+            ai_response: AI模型的响应文本
+
+        Returns:
+            Optional[Dict[str, Any]]: 提取的结构化数据，如果提取失败则返回None
+        """
+        try:
+            # 尝试从响应中提取JSON块
+            import re
+
+            # 查找JSON代码块
+            json_pattern = r'```(?:json)?\s*({[^}]*}[^`]*)```'
+            json_matches = re.findall(json_pattern, ai_response, re.DOTALL | re.IGNORECASE)
+
+            if json_matches:
+                # 尝试解析第一个JSON块
+                json_str = json_matches[0].strip()
+                try:
+                    structured_data = json.loads(json_str)
+                    await self.persist_log(f"Extracted JSON from code block: {json_str[:100]}...", "INFO")
+                    return structured_data
+                except json.JSONDecodeError as e:
+                    await self.persist_log(f"Failed to parse JSON from code block: {e}", "WARNING")
+
+            # 如果没有找到代码块，尝试直接查找JSON对象
+            json_object_pattern = r'{[^{}]*(?:{[^{}]*}[^{}]*)*}'
+            json_objects = re.findall(json_object_pattern, ai_response)
+
+            for json_obj in json_objects:
+                try:
+                    structured_data = json.loads(json_obj)
+                    await self.persist_log(f"Extracted JSON object: {json_obj[:100]}...", "INFO")
+                    return structured_data
+                except json.JSONDecodeError:
+                    continue
+
+            # 如果都没有找到，尝试基于输出连接的字段名从文本中提取信息
+            if self._output_edges:
+                format_requirements = self._analyze_output_format_requirements()
+                extracted_data = {}
+
+                for field in format_requirements["required_fields"]:
+                    # 简单的文本匹配提取
+                    field_pattern = field + r'["\']?\s*[:=]\s*["\']?([^,\n\r"\'}]+)["\']?'
+                    match = re.search(field_pattern, ai_response, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip()
+                        # 尝试转换数据类型
+                        if value.lower() in ['true', 'false']:
+                            extracted_data[field] = value.lower() == 'true'
+                        elif value.replace('.', '', 1).isdigit():
+                            extracted_data[field] = float(value) if '.' in value else int(value)
+                        else:
+                            extracted_data[field] = value
+
+                if extracted_data:
+                    await self.persist_log(f"Extracted data from text patterns: {extracted_data}", "INFO")
+                    return extracted_data
+
+            return None
+
+        except Exception as e:
+            await self.persist_log(f"Error in _extract_structured_data_from_response: {str(e)}", "ERROR")
+            return None
+
+    async def _signal_to_text(self, signal: Signal) -> str:
         """
         将信号转换为文本上下文
 
@@ -170,53 +508,81 @@ class AIModelNode(NodeBase):
 
             return text
         except Exception as e:
-            self.logger.error(f"Error converting signal to text: {str(e)}")
+            await self.persist_log(f"Error converting signal to text: {str(e)}", "ERROR")
             return f"[Error parsing signal: {str(e)}]"
 
-    def _prepare_context(self) -> str:
+    async def _prepare_context(self) -> str:
         """
         准备发送给AI模型的完整上下文
+        支持 {param_name} 占位符，从 parameters 字段中提取值并替换
 
         Returns:
             str: 完整上下文文本
         """
-        # 先添加主提示词
-        context = self.prompt + "\n\n"
+        # 先进行参数替换
+        context = self.prompt
+        
+        # 从 parameters 字典中提取参数并替换占位符
+        if self.parameters and isinstance(self.parameters, dict):
+            await self.persist_log(f"Replacing parameters in prompt: {list(self.parameters.keys())}", "DEBUG")
+            for param_name, param_value in self.parameters.items():
+                # 支持 {param_name} 格式的占位符
+                placeholder = f"{{{param_name}}}"
+                if placeholder in context:
+                    # 如果参数值是字典或列表，转为 JSON 字符串
+                    if isinstance(param_value, (dict, list)):
+                        param_str = json.dumps(param_value, ensure_ascii=False, indent=2)
+                    else:
+                        param_str = str(param_value)
+                    
+                    context = context.replace(placeholder, param_str)
+                    await self.persist_log(f"Replaced {placeholder} with value (length: {len(param_str)})", "DEBUG")
+        
+        context += "\n\n"
 
-        # 如果启用了输出格式提示，添加格式要求
-        if self.output_format_prompt:
-            # 获取输出信号类型的格式描述
-            format_desc = SignalFormats.get_format_description(self.output_signal_type)
-            if format_desc:
-                context += (
-                    f"\n输出要求: 请确保你的回复遵循以下格式规范:\n{format_desc}\n"
-                )
+        # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
+        if self.auto_format_output and self._output_edges:
+            format_requirements = self._analyze_output_format_requirements()
 
-                # 如果是DEX_TRADE这样的特殊信号，添加具体的结构指导
-                if self.output_signal_type == SignalType.DEX_TRADE.value:
-                    context += (
-                        "\n请在你的回复中明确包含一个格式化的交易信号部分，如下所示:\n"
-                        "```json\n"
-                        "{\n"
-                        '  "trading_pair": "ETH/USDT",\n'
-                        '  "action": "buy",\n'
-                        '  "amount": 0.5,\n'
-                        '  "price": 3000.0,\n'
-                        '  "reason": "突破阻力位后的追涨信号"\n'
-                        "}\n"
-                        "```\n"
-                    )
+            if format_requirements["required_fields"]:
+                context += "\n输出格式要求:\n"
+                context += "请确保你的回复包含一个符合以下格式的JSON对象：\n\n"
 
-        # 如果有输入信号，添加信号内容
+                # 生成JSON示例
+                json_example = {}
+                for field in format_requirements["required_fields"]:
+                    json_example[field] = format_requirements["field_examples"].get(field, "value")
+
+                context += "```json\n"
+                context += json.dumps(json_example, indent=2, ensure_ascii=False)
+                context += "\n```\n\n"
+
+                # 添加字段说明
+                context += "字段说明：\n"
+                for field in format_requirements["required_fields"]:
+                    desc = format_requirements["field_descriptions"].get(field, f"必需字段: {field}")
+                    context += f"- {field}: {desc}\n"
+
+                context += "\n请在你的分析后，提供一个符合上述格式的JSON对象。\n\n"
+
+        # 处理输入信号：将信号数据填充到 parameters 中（用于动态数据）
         if self._input_signals:
-            for i, (handle, signal) in enumerate(self._input_signals.items(), 1):
-                if signal is not None:
-                    signal_text = self._signal_to_text(signal)
-                    context += (
-                        f"\n--- Input {i} (Handle: {handle}) ---\n{signal_text}\n"
-                    )
+            await self.persist_log(f"Processing {len(self._input_signals)} input signals", "DEBUG")
+            for handle, signal in self._input_signals.items():
+                if signal is not None and handle != 'model' and handle != 'prompt':
+                    # 如果信号的 handle 对应一个参数占位符，用信号数据填充
+                    placeholder = f"{{{handle}}}"
+                    if placeholder in context and signal.payload:
+                        # 将信号 payload 转为文本
+                        signal_text = await self._signal_to_text(signal)
+                        context = context.replace(placeholder, signal_text)
+                        await self.persist_log(f"Replaced {placeholder} with signal data from {signal.source_node_id}", "INFO")
+                    else:
+                        # 否则将信号内容作为额外上下文添加
+                        signal_text = await self._signal_to_text(signal)
+                        context += f"\n--- Input Signal (Handle: {handle}) ---\n{signal_text}\n"
         else:
-            context += "(No input signals received)"
+            context += "(No input signals received)\n"
 
         return context
 
@@ -297,7 +663,7 @@ class AIModelNode(NodeBase):
             }
 
         except Exception as e:
-            self.logger.error(f"Error extracting structured data: {str(e)}")
+            await self.persist_log(f"Error extracting structured data: {str(e)}", "ERROR")
             return {"response": ai_response, "error": str(e)}
 
     async def call_ai_model(self, context: str) -> Optional[str]:
@@ -311,60 +677,61 @@ class AIModelNode(NodeBase):
             Optional[str]: AI响应文本，失败则返回None
         """
         if not self.api_key:
-            self.logger.error("API key not provided")
+            await self.persist_log("OpenRouter API key not provided", "ERROR")
             return None
-
         try:
-            # 准备请求数据
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            }
+            await self.persist_log(f"Calling OpenRouter API with model: {self.model_name}", "INFO")
+            await self.persist_log(f"Context: {context[:200]}...", "DEBUG")
 
-            # 创建消息列表
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": context},
-            ]
+            # Prepare messages in OpenAI chat format
+            messages = []
+            if self.system_prompt:
+                messages.append({"role": "system", "content": self.system_prompt})
+            messages.append({"role": "user", "content": context})
 
             data = {
                 "model": self.model_name,
                 "messages": messages,
-                "temperature": self.temperature,
                 "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "stream": False,
             }
 
-            self.logger.info(f"Calling AI model: {self.model_name}")
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+                "HTTP-Referer": self.site_url,
+                "X-Title": self.site_name,
+            }
 
-            # 发送请求
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    self.api_endpoint, headers=headers, json=data
-                )
-
-                # 检查响应
+                response = await client.post(self.api_endpoint, headers=headers, json=data)
                 response.raise_for_status()
                 response_data = response.json()
 
-                # 提取响应文本
+                await self.persist_log(f"Raw response: {response_data}", "DEBUG")
+
+                # Extract content from OpenAI-format response
                 if "choices" in response_data and len(response_data["choices"]) > 0:
-                    ai_text = response_data["choices"][0]["message"]["content"]
-                    self.logger.info("AI response received successfully")
-                    return ai_text
+                    choice = response_data["choices"][0]
+                    message = choice.get("message", {})
+                    content = message.get("content", "").strip()
+                    if content:
+                        await self.persist_log(f"AI response received: {content[:100]}...", "INFO")
+                        return content
+                    else:
+                        await self.persist_log("No content in AI response", "WARNING")
+                        return None
                 else:
-                    self.logger.error(f"Invalid response format: {response_data}")
+                    await self.persist_log(f"Unexpected response format: {response_data}", "WARNING")
                     return None
 
         except httpx.HTTPStatusError as e:
-            self.logger.error(
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
-            )
-            return None
-        except httpx.RequestError as e:
-            self.logger.error(f"Request error: {str(e)}")
+            await self.persist_log(f"HTTP error calling OpenRouter API: {e.response.status_code} - {e.response.text}", "ERROR")
             return None
         except Exception as e:
-            self.logger.error(f"Error calling AI model: {str(e)}")
+            await self.persist_log(f"Error calling OpenRouter API: {str(e)}", "ERROR")
+            await self.persist_log(f"Traceback: {traceback.format_exc()}", "ERROR")
             return None
 
     async def execute(self) -> bool:
@@ -375,18 +742,18 @@ class AIModelNode(NodeBase):
             bool: 执行是否成功
         """
         try:
-            self.logger.info("Starting AI model node execution")
+            await self.persist_log("Starting AI model node execution", "INFO")
             await self.set_status(NodeStatus.RUNNING)
 
             # 准备上下文
-            context = self._prepare_context()
+            context = await self._prepare_context()
             input_signals_count = sum(
                 1 for signal in self._input_signals.values() if signal is not None
             )
-            self.logger.info(f"Prepared context with {input_signals_count} signals")
+            await self.persist_log(f"Prepared context with {input_signals_count} signals", "INFO")
 
             # 调用AI模型
-            self.logger.info(f"Calling AI model: {self.model_name}")
+            await self.persist_log(f"Calling AI model: {self.model_name}", "INFO")
             ai_response = await self.call_ai_model(context)
 
             if not ai_response:
@@ -396,10 +763,10 @@ class AIModelNode(NodeBase):
                 return False
 
             self.ai_response = ai_response
-            self.logger.info(f"Got AI response (length: {len(ai_response)})")
+            await self.persist_log(f"Got AI response (length: {len(ai_response)})", "INFO")
 
-            # 构建基本响应payload
-            base_payload = {
+            # 构建 AI 响应 payload
+            payload = {
                 "model_name": self.model_name,
                 "response": ai_response,
                 "input_signals_count": input_signals_count,
@@ -408,79 +775,54 @@ class AIModelNode(NodeBase):
                     for signal in self._input_signals.values()
                     if signal is not None
                 ],
+                "timestamp": time.time()
             }
 
-            # 处理特殊信号类型
-            if self.output_signal_type != SignalType.AI_RESPONSE:
-                # 从AI响应中提取结构化数据
-                structured_data = await self._extract_structured_data(ai_response)
+            # 如果启用了自动输出格式且有输出连接，尝试提取结构化数据
+            if self.auto_format_output and self._output_edges:
+                try:
+                    structured_data = await self._extract_structured_data_from_response(ai_response)
+                    if structured_data:
+                        # 将结构化数据添加到 payload 中
+                        payload.update(structured_data)
+                        await self.persist_log(f"Successfully extracted structured data: {list(structured_data.keys())}", "INFO")
+                    else:
+                        await self.persist_log("Failed to extract structured data from AI response", "WARNING")
+                except Exception as e:
+                    await self.persist_log(f"Error extracting structured data: {str(e)}", "WARNING")
 
-                # 验证数据是否符合格式要求
-                valid, error_msg = SignalFormats.validate(
-                    self.output_signal_type, structured_data
-                )
-
-                if valid:
-                    # 合并数据
-                    payload = {**structured_data, **base_payload}
-                else:
-                    # 数据不符合要求，记录警告并回退到基本响应
-                    self.logger.warning(
-                        f"Extracted data does not meet {self.output_signal_type} format requirements: {error_msg}"
-                    )
-                    # 添加原始提取数据和警告信息
-                    payload = {
-                        **base_payload,
-                        "structured_data": structured_data,
-                        "format_error": error_msg,
-                    }
-            else:
-                # 对于AI_RESPONSE类型，使用基本payload
-                payload = base_payload
-
-            # 发送AI响应信号 - 使用默认输出handle
-            # output_handle = next(
-            #     (
-            #         edge["source_handle"]
-            #         for edge in self._output_edges
-            #         if edge.source_node == self.node_id
-            #     ),
-            #     "default",
-            # )
-
-            # if await self.send_signal(
-            #     output_handle, self.output_signal_type, payload=payload
-            # ):
-            # FIXME: mock
-            output_handle = "signal"
-            # if await self.send_signal(
-            #     output_handle,
-            #     "dex_trade",
-            #     payload={"amount_in_handle": 0.5},
-            # ):
-            if await self.send_stop_execution_signal(
-                reason=f"AI model node {self.node_id} decided not to trade",
-            ):
-                self.logger.info(
-                    f"Successfully sent {self.output_signal_type} signal via handle {output_handle}"
+            # 发送AI响应信号
+            output_handle = AI_RESPONSE_OUTPUT_HANDLE
+            
+            # 创建信号并发送
+            signal = Signal(
+                type=SignalType.JSON_DATA,
+                payload=payload,
+                source_node_id=self.node_id,
+                source_node_handle=output_handle,
+            )
+            
+            if await self.send_signal_to_outputs(signal, output_handle):
+                await self.persist_log(
+                    f"Successfully sent AI response signal via handle {output_handle}", "INFO"
                 )
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
-                error_message = f"Failed to send {self.output_signal_type} signal"
-                self.logger.error(error_message)
+                error_message = "Failed to send AI response signal"
+                await self.persist_log(error_message, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_message)
                 return False
 
         except asyncio.CancelledError:
             # 任务被取消
-            self.logger.info("AI model node execution cancelled")
+            await self.persist_log("AI model node execution cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
             error_message = f"Error executing AIModelNode: {str(e)}"
-            self.logger.error(error_message)
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(error_message, "ERROR")
+            await self.persist_log(traceback.format_exc(), "ERROR")
             await self.set_status(NodeStatus.FAILED, error_message)
             return False
 
@@ -496,7 +838,7 @@ class AIModelNode(NodeBase):
         """
         # 更新系统提示词
         self.system_prompt = signal.payload.get("system_prompt", self.system_prompt)
-        self.logger.info("Updated system prompt: %s", self.system_prompt)
+        await self.persist_log(f"Updated system prompt: {self.system_prompt}", "INFO")
         return True
 
     async def _on_signal_received_prompt_handle(self, signal: Signal) -> bool:
@@ -511,7 +853,7 @@ class AIModelNode(NodeBase):
         """
         # 更新主提示词
         self.prompt = signal.payload.get("prompt", self.prompt)
-        self.logger.info("Updated prompt: %s", self.prompt)
+        await self.persist_log(f"Updated prompt: {self.prompt}", "INFO")
         return True
 
     async def _get_vault_portfolio(self) -> Dict[str, Any]:

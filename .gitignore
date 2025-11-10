@@ -78,7 +78,7 @@ override.tf.json
 kms_config.json
 
 # Special for TradingFlow Python worker
-python/py_worker/config/
+tradingflow/station/config/
 cloud_ops/
 *.db
 
@@ -94,3 +94,7 @@ celerybeat-schedule.db
 
 # myenv
 myenv/
+
+
+# Google Credentials
+config/google_credentials.json

@@ -1,0 +1,144 @@
+### Vault Dataset Flow集成测试
+### 基于Vault节点和Dataset输出节点的Flow数据格式
+
+@baseUrl = http://localhost:7002
+@flowId = 689041637ff776371f18cda6
+@userId = 684c36ce23a411dff96ff68a
+@componentId = 0
+@cycle = 0
+@vaultNodeId = vault_node_1754569470796
+@datasetNodeId = dataset_output_node_1754569475693
+@docLink = https://docs.google.com/spreadsheets/d/1uQvzsNIkaan67wFijnDiixusw9qNZnedW4Q3dWJASBM/edit?gid=0#gid=0
+@createdAt = 2025-08-08T12:18:16.000Z
+
+### 0. 输出所有 Nodes 的执行情况
+GET {{baseUrl}}/nodes
+
+### 1. 测试 [ vault_node 执行 ]
+# @name execute_vault_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "component_id": {{componentId}},
+  "cycle": {{cycle}},
+  "node_id": "{{vaultNodeId}}",
+  "node_type": "vault_node",
+  "input_edges": [],
+  "output_edges": [
+    {
+      "source": "{{vaultNodeId}}",
+      "source_handle": "vault_balance",
+      "target": "{{datasetNodeId}}",
+      "target_handle": "data"
+    }
+  ],
+  "config": {
+    "node_class_type": "vault_node",
+    "chain": "aptos",
+    "vault_address": "0xb2c2a894f5de4a7a0799e9872c71929ac608dd522f69ea1f36b8ac915257f182"
+  }
+}
+
+### 2. 检查 Vault Node 状态
+# @name get_vault_node_status
+GET {{baseUrl}}/nodes/{{vaultNodeId}}/status
+
+### 3. 测试 [ dataset_output_node 执行 ]
+# @name execute_dataset_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "component_id": {{componentId}},
+  "cycle": {{cycle}},
+  "node_id": "{{datasetNodeId}}",
+  "node_type": "dataset_output_node",
+  "input_edges": [
+    {
+      "source": "{{vaultNodeId}}",
+      "source_handle": "vault_balance",
+      "target": "{{datasetNodeId}}",
+      "target_handle": "data"
+    }
+  ],
+  "output_edges": [],
+  "config": {
+    "node_class_type": "dataset_output_node",
+    "data": "",
+    "doc_link": "{{docLink}}"
+  }
+}
+
+### 4. 检查 Dataset Node 状态
+# @name get_dataset_node_status
+GET {{baseUrl}}/nodes/{{datasetNodeId}}/status
+
+### 5. 测试 [ 完整 Flow 执行 ] - 主要测试命令
+# @name execute_complete_flow
+POST {{baseUrl}}/flows/execute
+Content-Type: application/json
+
+{
+  "flow_id": "{{flowId}}",
+  "cycle_interval": "0",
+  "flow_json": {
+    "nodes": [
+      {
+        "id": "{{vaultNodeId}}",
+        "type": "vault_node",
+        "config": {
+          "node_class_type": "vault_node",
+          "chain": "aptos",
+          "vault_address": "0xb2c2a894f5de4a7a0799e9872c71929ac608dd522f69ea1f36b8ac915257f182"
+        }
+      },
+      {
+        "id": "{{datasetNodeId}}",
+        "type": "dataset_output_node",
+        "config": {
+          "node_class_type": "dataset_output_node",
+          "data": "",
+          "doc_link": "{{docLink}}"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "{{vaultNodeId}}",
+        "source_handle": "vault_balance",
+        "target": "{{datasetNodeId}}",
+        "target_handle": "data"
+      }
+    ]
+  },
+  "user_id": "{{userId}}",
+  "created_at": "{{createdAt}}"
+}
+
+### 6. 检查 Flow 状态
+# @name get_flow_status
+GET {{baseUrl}}/flows/{{flowId}}/status
+
+### 7. 获取 Flow 执行日志
+# @name get_flow_logs
+GET {{baseUrl}}/flows/{{flowId}}/logs?limit=100&order_by=created_at&order_direction=desc
+
+### 8. 手动触发一个 Flow 周期
+# @name execute_flow_cycle
+POST {{baseUrl}}/flows/{{flowId}}/cycles
+Content-Type: application/json
+
+{
+  "cycle": 1
+}
+
+### 9. 获取特定周期状态
+# @name get_cycle_status
+GET {{baseUrl}}/flows/{{flowId}}/cycles/1
+
+### 10. 停止 Flow
+# @name stop_flow
+POST {{baseUrl}}/flows/{{flowId}}/stop

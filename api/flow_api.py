@@ -3,7 +3,7 @@
 import logging
 import traceback
 
-from tradingflow.station.flow.scheduler import get_scheduler_instance
+from flow.scheduler import get_scheduler_instance
 
 from sanic import Blueprint
 from sanic.response import json as sanic_json
@@ -29,6 +29,7 @@ async def execute_flow(request):
         flow_id = flow_data["flow_id"]
         cycle_interval = flow_data["cycle_interval"]
         flow_json = flow_data["flow_json"]
+        user_id = flow_data.get("user_id")  # Extract user_id for Quest tracking (optional)
 
         # 检查Flow JSON格式
         if not isinstance(flow_json, dict):
@@ -56,11 +57,11 @@ async def execute_flow(request):
             if flow_exists:
                 # 如果已存在，更新配置
                 await scheduler.stop_flow(flow_id)  # 先停止已有的Flow
-                flow_data = await scheduler.register_flow(flow_id, flow_config)
+                flow_data = await scheduler.register_flow(flow_id, flow_config, user_id=user_id)
                 message = f"Flow {flow_id} updated and registered"
             else:
                 # 如果不存在，新建Flow
-                flow_data = await scheduler.register_flow(flow_id, flow_config)
+                flow_data = await scheduler.register_flow(flow_id, flow_config, user_id=user_id)
                 message = f"Flow {flow_id} registered"
 
         except ValueError as e:
@@ -100,6 +101,32 @@ async def get_flow_status(request, flow_id):
     except Exception as e:
         return sanic_json({"error": str(e)}, status=500)
 
+
+@flow_bp.get("/flows/<flow_id>/comprehensive-status")
+async def get_comprehensive_flow_status(request, flow_id):
+    """获取Flow综合状态的接口，包含所有节点状态、日志和信号"""
+    try:
+        scheduler = get_scheduler_instance()
+
+        # 确保调度器已初始化
+        if not scheduler.redis:
+            await scheduler.initialize()
+
+        # 获取可选的cycle参数
+        cycle = request.args.get("cycle")
+        if cycle is not None:
+            try:
+                cycle = int(cycle)
+            except ValueError:
+                return sanic_json({"error": "Invalid cycle parameter"}, status=400)
+
+        status = await scheduler.get_comprehensive_flow_status(flow_id, cycle)
+        return sanic_json(status)
+    except ValueError as e:
+        return sanic_json({"error": str(e)}, status=404)
+    except Exception as e:
+        logger.error("Error getting comprehensive flow status: %s", str(e))
+        return sanic_json({"error": str(e)}, status=500)
 
 @flow_bp.post("/flows/<flow_id>/stop")
 async def stop_flow(request, flow_id):

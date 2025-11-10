@@ -4,19 +4,19 @@ import traceback
 from decimal import Decimal, getcontext
 from typing import Dict, Optional
 
-from tradingflow.bank.services.aptos_vault_service import AptosVaultService
-from tradingflow.bank.utils.token_price_util import (
+from services.aptos_vault_service import AptosVaultService
+from utils.token_price_util import (
     get_aptos_monitored_token_info,
     get_aptos_token_address_by_symbol,
     get_aptos_token_price_usd,
 )
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
 # input handles
-FROM_TOKEN_HANDLE = "from_token"  # 输入代币符号
-TO_TOKEN_HANDLE = "to_token"  # 输出代币符号
+FROM_TOKEN_HANDLE = "from_token"  # Input token symbol
+TO_TOKEN_HANDLE = "to_token"  # Output token symbol
 AMOUNT_IN_HANDLE = "amount_in"
 AMOUNT_IN_HANDLE_HUMAN_READABLE = "amount_in_human_readable"
 AMOUNT_IN_HANDLE_PERCENTAGE = "amount_in_percentage"
@@ -37,37 +37,37 @@ def calculate_sqrt_price_limit_q64_64(
     input_price: float, output_price: float, slippage_tolerance: float
 ) -> str:
     """
-    计算 exact_in 场景下的 sqrt_price_limit (Q64.64 格式)
+    Calculate sqrt_price_limit for exact_in scenario (Q64.64 format)
 
     Args:
-        input_price: 输入代币的USD价格
-        output_price: 输出代币的USD价格
-        slippage_tolerance: 滑点容忍度（百分比，如 0.5 表示 0.5%）
+        input_price: USD price of input token
+        output_price: USD price of output token
+        slippage_tolerance: Slippage tolerance (percentage, e.g., 0.5 means 0.5%)
 
     Returns:
-        str: Q64.64 格式的 sqrt_price_limit 字符串表示
+        str: String representation of sqrt_price_limit in Q64.64 format
     """
     try:
-        # 计算当前价格比率 (output_price / input_price)
+        # Calculate current price ratio (output_price / input_price)
         price_ratio = Decimal(str(output_price)) / Decimal(str(input_price))
 
-        # 对于 exact_in，我们希望得到至少指定数量的输出代币
-        # 所以价格限制应该比当前价格更有利（更低的price_ratio）
+        # For exact_in, we want to get at least the specified amount of output tokens
+        # So the price limit should be more favorable than current price (lower price_ratio)
         slippage_factor = Decimal(str(slippage_tolerance)) / Decimal("100")
         adjusted_price_ratio = price_ratio * (Decimal("1") - slippage_factor)
 
-        # 计算 sqrt(price_ratio)
+        # Calculate sqrt(price_ratio)
         sqrt_price_ratio = adjusted_price_ratio.sqrt()
 
-        # 转换为 Q64.64 定点数
-        # Q64.64 表示需要乘以 2^64
+        # Convert to Q64.64 fixed point number
+        # Q64.64 means multiply by 2^64
         q64_64_multiplier = Decimal(2) ** 64
         sqrt_price_limit_q64_64 = int(sqrt_price_ratio * q64_64_multiplier)
 
         return str(sqrt_price_limit_q64_64)
 
     except Exception as e:
-        raise ValueError(f"计算 sqrt_price_limit 失败: {str(e)}")
+        raise ValueError(f"Failed to calculate sqrt_price_limit: {str(e)}")
 
 
 @register_node_type(
@@ -253,7 +253,7 @@ class HyperionDEXTradeNode(NodeBase):
 
         return input_token_address, output_token_address
 
-    def _is_amount_in_valid(self, amount_in: Optional[str]) -> bool:
+    async def _is_amount_in_valid(self, amount_in: Optional[str]) -> bool:
         """Check if amount_in is valid (not None, not empty, and > 0)"""
         if amount_in is None or amount_in == "":
             return False
@@ -262,7 +262,7 @@ class HyperionDEXTradeNode(NodeBase):
             amount = int(amount_in)
             return amount > 0
         except (ValueError, TypeError):
-            self.logger.error("Invalid amount_in value: %s", amount_in)
+            await self.persist_log(f"Invalid amount_in value: {amount_in}", log_level="ERROR")
             return False
 
     async def get_token_amount_from_holdings(
@@ -280,14 +280,12 @@ class HyperionDEXTradeNode(NodeBase):
         for holding in holdings:
             if holding.get("token_address", "").lower() == token_address.lower():
                 amount_raw_str = holding.get("amount", "0")
-                self.logger.info(
-                    "Found token balance: token=%s, raw_amount=%s, ",
-                    token_address,
-                    amount_raw_str,
+                await self.persist_log(
+                    f"Token {token_address} balance: {amount_raw_str} (decimals: {self.input_token_decimals})"
                 )
                 return Decimal(amount_raw_str)
 
-        self.logger.warning("Token not found in holdings: %s", token_address)
+        await self.persist_log(f"Token not found in holdings: {token_address}", log_level="WARNING")
         raise ValueError(
             f"Token {token_address} not found in holdings for investor {investor_address}"
         )
@@ -311,12 +309,8 @@ class HyperionDEXTradeNode(NodeBase):
             int(amount_raw * Decimal(self.amount_in_percentage) / Decimal(100))
         )
 
-        self.logger.info(
-            "Calculated amount from percentage: token=%s, balance=%s, percentage=%s%%, amount=%s",
-            self.input_token_address,
-            str(amount_raw),
-            self.amount_in_percentage,
-            calculated_amount_in_str,
+        await self.persist_log(
+            f"Calculated amount_in from percentage: {calculated_amount_in_str} (percentage: {self.amount_in_percentage}%, balance: {amount_raw})"
         )
         return calculated_amount_in_str
 
@@ -324,8 +318,8 @@ class HyperionDEXTradeNode(NodeBase):
         """Get final amount_in, considering direct amount, human readable amount, and percentage"""
         # Priority 1: Check if direct amount_in is valid (already in Wei format)
         if self._is_amount_in_valid(self.amount_in):
-            self.logger.info(
-                "Using valid direct amount (Wei format): %s", self.amount_in
+            await self.persist_log(
+                f"Using valid direct amount (Wei format): {self.amount_in}"
             )
             return self.amount_in
 
@@ -342,6 +336,9 @@ class HyperionDEXTradeNode(NodeBase):
             amount_decimal = Decimal(str(self.amount_in_human_readable))
             amount_wei = int(amount_decimal * Decimal(10**input_decimals))
             amount_wei_str = str(amount_wei)
+            await self.persist_log(
+                f"Using amount_in_human_readable: {self.amount_in_human_readable}, converted to: {amount_wei_str}"
+            )
             return amount_wei_str
 
         # Priority 3: If percentage is provided, calculate from balance
@@ -381,7 +378,7 @@ class HyperionDEXTradeNode(NodeBase):
             # Check transaction result
             if not tx_result.get("success", False):
                 error_msg = tx_result.get("message", "Unknown error")
-                self.logger.error("Transaction execution failed: %s", error_msg)
+                await self.persist_log(f"Transaction execution failed: {error_msg}", log_level="ERROR")
                 await self.set_status(
                     NodeStatus.FAILED, f"Transaction execution failed: {error_msg}"
                 )
@@ -389,8 +386,8 @@ class HyperionDEXTradeNode(NodeBase):
             return True
 
         except Exception as e:
-            self.logger.error("Error sending trading signal: %s", str(e))
-            self.logger.error(traceback.format_exc())
+            await self.persist_log(f"Error sending trading signal: {str(e)}", log_level="ERROR")
+            await self.persist_log(f"Traceback: {traceback.format_exc()}", log_level="ERROR")
             await self.set_status(
                 NodeStatus.FAILED, f"Error sending trading signal: {str(e)}"
             )
@@ -457,12 +454,8 @@ class HyperionDEXTradeNode(NodeBase):
         Returns:
             tuple: (估算的输出金额, sqrt_price_limit字符串)，失败时返回(None, None)
         """
-        self.logger.info(
-            "Estimating output for Hyperion exact_in swap: input=%s, output=%s, amount_in=%s, slippage=%s%%",
-            input_token_address,
-            output_token_address,
-            amount_in,
-            slippage,
+        await self.persist_log(
+            f"Estimating output for Hyperion exact_in swap: input={input_token_address}, output={output_token_address}, amount_in={amount_in}, slippage={slippage}%"
         )
 
         # 获取输入代币和输出代币的价格
@@ -485,12 +478,8 @@ class HyperionDEXTradeNode(NodeBase):
         input_decimals = self.input_token_decimals
         output_decimals = self.output_token_decimals
 
-        self.logger.info(
-            "Token info: input_decimals=%s, output_decimals=%s, input_price=$%s, output_price=$%s",
-            input_decimals,
-            output_decimals,
-            input_price,
-            output_price,
+        await self.persist_log(
+            f"Token info: input_decimals={input_decimals}, output_decimals={output_decimals}, input_price=$input_price, output_price=$output_price"
         )
 
         # 将输入金额从最小单位转换为实际金额
@@ -518,16 +507,10 @@ class HyperionDEXTradeNode(NodeBase):
             slippage_tolerance=slippage,
         )
 
-        self.logger.info(
-            "Exact_in estimation result: input_amount=%s, input_value_usd=$%s, "
-            "output_amount=%s, output_amount_raw=%s, slippage_applied=%s%%, "
-            "sqrt_price_limit=%s",
-            amount_in_decimal,
-            input_value_usd,
-            output_amount_with_slippage,
-            output_amount_raw,
-            slippage,
-            sqrt_price_limit,
+        await self.persist_log(
+            f"Exact_in estimation result: input_amount={amount_in_decimal}, input_value_usd=$input_value_usd, "
+            f"output_amount={output_amount_with_slippage}, output_amount_raw={output_amount_raw}, slippage_applied={slippage}%, "
+            f"sqrt_price_limit={sqrt_price_limit}"
         )
 
         return str(output_amount_raw), sqrt_price_limit
@@ -535,11 +518,8 @@ class HyperionDEXTradeNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
-            self.logger.info(
-                "Starting DEX trading node execution: input_token=%s, ouptut_token=%s, vault_address=%s",
-                self.output_token_address,
-                self.input_token_address,
-                self.vault_address,
+            await self.persist_log(
+                f"Preparing trade receipt with input_token: {self.input_token_address}, output_token: {self.output_token_address}, amount_in: {self.amount_in}"
             )
             await self.set_status(NodeStatus.RUNNING)
 
@@ -549,13 +529,13 @@ class HyperionDEXTradeNode(NodeBase):
             await self.send_trade_signal()
             # Prepare transaction receipt data
             trade_receipt = self.prepare_trade_receipt()
-            self.logger.info("Transaction receipt data: %s", trade_receipt)
+            await self.persist_log(f"Transaction receipt data: {trade_receipt}")
 
             # Send transaction receipt signal to downstream nodes
             if not await self.send_signal(
                 TX_RECEIPT_HANDLE, SignalType.DEX_TRADE_RECEIPT, payload=trade_receipt
             ):
-                self.logger.error("Failed to send transaction receipt signal")
+                await self.persist_log("Failed to send transaction receipt signal", log_level="ERROR")
                 await self.set_status(
                     NodeStatus.FAILED, "Failed to send transaction receipt signal"
                 )
@@ -563,68 +543,66 @@ class HyperionDEXTradeNode(NodeBase):
 
             # Complete node execution
             await self.set_status(NodeStatus.COMPLETED)
-            self.logger.info(
-                "DEX trading node execution completed, transaction hash: %s",
-                trade_receipt.get("tx_hash"),
+            await self.persist_log(
+                f"DEX trading node execution completed successfully: {self.input_token_address} -> {self.output_token_address}"
             )
             return True
 
         except asyncio.CancelledError:
-            self.logger.info("DEX trading node execution cancelled")
+            await self.persist_log("DEX trading node execution cancelled")
             await self.set_status(NodeStatus.TERMINATED, "Execution cancelled")
             return False
 
         except Exception as e:
-            error_message = f"DEX trading node execution error: {str(e)}"
-            self.logger.error("DEX trading node execution error: %s", str(e))
-            self.logger.error(traceback.format_exc())
-            await self.set_status(NodeStatus.FAILED, error_message)
+            await self.persist_log(f"DEX trading node execution error: {str(e)}", log_level="ERROR")
+            await self.persist_log(f"Traceback: {traceback.format_exc()}", log_level="ERROR")
+            await self.set_status(NodeStatus.FAILED, f"Error sending trading signal: {str(e)}")
             return False
 
     def _register_input_handles(self) -> None:
-        """注册输入句柄"""
+        """Register input handles"""
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE,
             data_type=int,
-            description="交易金额(以Wei为单位的整数)",
+            description="Transaction amount (in Wei)",
             example=100,
             auto_update_attr="amount_in",
         )
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE_HUMAN_READABLE,
             data_type=float,
-            description="交易金额（人类可读格式，浮点数）",
+            description="Transaction amount (human-readable format)",
             example=10.5,
             auto_update_attr="amount_in_human_readable",
         )
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE_PERCENTAGE,
             data_type=float,
-            description="交易金额（作为当前余额的百分比）",
+            description="Transaction amount (as a percentage of current balance)",
             example=25.0,
             auto_update_attr="amount_in_percentage",
         )
-        # 注册Vault地址输入句柄
+        # Register Vault address input handle
         self.register_input_handle(
             name=VAULT_ADDRESS_HANDLE,
             data_type=str,
-            description="交易Vault地址（用户地址）",
+            description="Transaction Vault address (user address)",
             example="0x6a1a233...",
             auto_update_attr="vault_address",
         )
-        # 注册滑点容忍度输入句柄
+        # Register slippage tolerance input handle
         self.register_input_handle(
             name=SLIPPAGE_TOLERANCE_HANDLE,
             data_type=float,
-            description="滑点容忍度（百分比）",
+            description="Slippage tolerance (percentage)",
             example=0.5,
             auto_update_attr="slippage_tolerance",
         )
-        # 注册输入代币地址句柄
+        # Register input token address handle
         self.register_input_handle(
             name=INPUT_TOKEN_ADDRESS_HANDLE,
             data_type=str,
-            description="输入代币地址（交易的源代币）",
+            description="Input token address (source token for trading)",
             example="0xa",
             auto_update_attr="input_token_address",
         )
@@ -646,33 +624,33 @@ class HyperionDEXTradeNode(NodeBase):
         self.register_input_handle(
             name=SYMBOL_HANDLE,
             data_type=str,
-            description="交易对符号，如 'USDT->xBTC'",
+            description="Trading pair symbol, e.g., 'USDT->xBTC'",
             example="USDT->xBTC",
             auto_update_attr="swap_pair_symbol",
         )
         self.register_input_handle(
             name=FROM_TOKEN_HANDLE,
             data_type=str,
-            description="输入代币符号（用于解析符号）",
+            description="Input token symbol (for symbol parsing)",
             example="USDT",
             auto_update_attr="from_token",
         )
         self.register_input_handle(
             name=TO_TOKEN_HANDLE,
             data_type=str,
-            description="输出代币符号（用于解析符号）",
+            description="Output token symbol (for symbol parsing)",
             example="xBTC",
             auto_update_attr="to_token",
         )
 
     async def _on_symbol_received(self, symbol: str) -> None:
-        self.logger.info("Received symbol update: %s", symbol)
+        await self.persist_log(f"Received symbol update: {symbol}")
         self.swap_pair_symbol = symbol
-        # 解析符号并更新代币地址
+        # Parse symbol and update token addresses
         self.input_token_address, self.output_token_address = (
             self._parse_symbol_to_token_addresses(symbol)
         )
-        # 更新输入和输出代币信息
+        # Update input and output token information
         self.input_token_info = get_aptos_monitored_token_info(self.input_token_address)
         self.output_token_info = get_aptos_monitored_token_info(
             self.output_token_address
@@ -683,9 +661,9 @@ class HyperionDEXTradeNode(NodeBase):
         self.output_token_decimals = self.output_token_info.get("decimals")
 
     async def _on_input_token_address_received(self, amount_in: str) -> None:
-        self.logger.info("Received input token address: %s", amount_in)
+        await self.persist_log(f"Received input token address: {amount_in}")
         self.input_token_address = amount_in
-        # 更新输入代币信息
+        # Update input token information
         self.input_token_info = get_aptos_monitored_token_info(self.input_token_address)
         if not self.input_token_info or not self.input_token_address:
             raise ValueError(
@@ -694,9 +672,9 @@ class HyperionDEXTradeNode(NodeBase):
         self.input_token_decimals = self.input_token_info.get("decimals")
 
     async def _on_output_token_address_received(self, amount_in: str) -> None:
-        self.logger.info("Received output token address: %s", amount_in)
+        await self.persist_log(f"Received output token address: {amount_in}")
         self.output_token_address = amount_in
-        # 更新输出代币信息
+        # Update output token information
         self.output_token_info = get_aptos_monitored_token_info(
             self.output_token_address
         )
@@ -707,9 +685,9 @@ class HyperionDEXTradeNode(NodeBase):
             )
 
     async def _on_from_token_received(self, from_token: str) -> None:
-        self.logger.info("Received from token: %s", from_token)
+        await self.persist_log(f"Received from token: {from_token}")
         self.from_token = from_token
-        # 更新输入代币地址
+        # Update input token address
         self.input_token_address = get_aptos_token_address_by_symbol(from_token)
         self.input_token_info = get_aptos_monitored_token_info(self.input_token_address)
         self.input_token_decimals = self.input_token_info.get("decimals")
@@ -719,9 +697,9 @@ class HyperionDEXTradeNode(NodeBase):
             )
 
     async def _on_to_token_received(self, to_token: str) -> None:
-        self.logger.info("Received to token: %s", to_token)
+        await self.persist_log(f"Received to token: {to_token}")
         self.to_token = to_token
-        # 更新输出代币地址
+        # Update output token address
         self.output_token_address = get_aptos_token_address_by_symbol(to_token)
         self.output_token_info = get_aptos_monitored_token_info(
             self.output_token_address

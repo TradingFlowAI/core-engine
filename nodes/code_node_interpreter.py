@@ -68,6 +68,33 @@ ALLOWED_MODULES = {
     'numpy': 'numpy',
     'pd': 'pandas',  # 别名
     'np': 'numpy',   # 别名
+    # 网络和数据采集库
+    'requests': 'requests',
+    'urllib': 'urllib',
+    'urllib3': 'urllib3',
+    # HTML/XML解析库
+    'bs4': 'bs4',
+    'beautifulsoup4': 'bs4',  # 别名
+    'lxml': 'lxml',
+    'html5lib': 'html5lib',
+    # 数据处理相关
+    'csv': 'csv',
+    'time': 'time',
+    'calendar': 'calendar',
+    'decimal': 'decimal',
+    'fractions': 'fractions',
+    'statistics': 'statistics',
+    # 文本处理
+    'string': 'string',
+    'textwrap': 'textwrap',
+    'unicodedata': 'unicodedata',
+    # 数据格式
+    'xml': 'xml',
+    'html': 'html',
+    'base64': 'base64',
+    'binascii': 'binascii',
+    'zlib': 'zlib',
+    'gzip': 'gzip',
 }
 
 class RestrictedImporter:
@@ -125,7 +152,7 @@ class RestrictedInterpreter(InteractiveInterpreter):
 
     def runcode(self, code, debug_capture=None):
         """在安全环境中运行代码
-        
+
         Args:
             code: 要执行的代码
             debug_capture: 可选的调试输出捕获器，用于捕获调试信息
@@ -133,14 +160,14 @@ class RestrictedInterpreter(InteractiveInterpreter):
         # 保存原始的内置函数和递归限制
         original_builtins = dict(builtins.__dict__)
         original_recursion_limit = sys.getrecursionlimit()
-        
+
         # 定义调试打印函数
         def debug_print(message):
             if debug_capture is not None:
                 debug_capture.write(f"[DEBUG] {message}\n")
             else:
                 print(f"[DEBUG] {message}")
-        
+
         # 记录开始执行
         debug_print("RestrictedInterpreter.runcode: Starting code execution")
 

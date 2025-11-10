@@ -7,13 +7,14 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from tradingflow.station.common.edge import Edge
-from tradingflow.station.common.node_decorators import register_node_type
-from tradingflow.station.common.signal_types import SignalType
-from tradingflow.station.nodes.node_base import NodeBase, NodeStatus
+from common.edge import Edge
+from common.node_decorators import register_node_type
+from common.signal_types import SignalType
+from nodes.node_base import NodeBase, NodeStatus
 
-# 定义输入输出处理器名称
-DATA_OUTPUT_HANDLE = "data_output_handle"
+# Define input/output handle names
+# 🔥 修复：改为 feeds，匹配前端和 Linter
+FEEDS_OUTPUT_HANDLE = "feeds"
 ERROR_HANDLE = "error_handle"
 
 
@@ -32,20 +33,20 @@ ERROR_HANDLE = "error_handle"
 )
 class RSSHubNode(NodeBase):
     """
-    RSSHub 节点 - 用于获取 RSSHub 提供的 RSS 内容
+    RSSHub Node - Used to fetch RSS content provided by RSSHub
 
-    输入参数:
-    - rsshub_url: RSSHub 实例的 URL，默认为 'https://rsshub.app'
-    - route: RSSHub 路由，例如 '/telegram/channel/awesomeRSSHub'
-    - parameters: 有些路由的自定义参数
-    - keywords: 过滤标题和描述
-    - timeout: 请求超时时间（秒）
-    - max_items: 最大返回条目数
-    - include_content: 是否包含内容详情
+    Input parameters:
+    - rsshub_url: RSSHub instance URL, defaults to 'https://rsshub.app'
+    - route: RSSHub route, e.g., '/telegram/channel/awesomeRSSHub'
+    - parameters: Custom parameters for some routes
+    - keywords: Filter titles and descriptions
+    - timeout: Request timeout in seconds
+    - max_items: Maximum number of items to return
+    - include_content: Whether to include content details
 
-    输出信号:
-    - DATA_OUTPUT_HANDLE: 获取的 RSS 数据
-    - ERROR_HANDLE: 错误信息
+    Output signals:
+    - FEEDS_OUTPUT_HANDLE: Retrieved RSS data (feeds)
+    - ERROR_HANDLE: Error information
     """
 
     def __init__(
@@ -69,23 +70,23 @@ class RSSHubNode(NodeBase):
             **kwargs,
     ):
         """
-        初始化 RSSHub 节点
+        Initialize RSSHub node
 
         Args:
-            flow_id: 流程ID
-            component_id: 组件ID
-            cycle: 节点执行周期
-            node_id: 节点唯一标识符
-            name: 节点名称
-            rsshub_url: RSSHub 实例的 URL
-            route: RSSHub 路由
-            timeout: 请求超时时间（秒）
-            max_items: 最大返回条目数
-            include_content: 是否包含内容详情
-            input_edges: 输入边列表
-            output_edges: 输出边列表
-            state_store: 状态存储
-            **kwargs: 传递给基类的其他参数
+            flow_id: Flow ID
+            component_id: Component ID
+            cycle: Node execution cycle
+            node_id: Node unique identifier
+            name: Node name
+            rsshub_url: RSSHub instance URL
+            route: RSSHub route
+            timeout: Request timeout in seconds
+            max_items: Maximum number of items to return
+            include_content: Whether to include content details
+            input_edges: Input edge list
+            output_edges: Output edge list
+            state_store: State storage
+            **kwargs: Other parameters passed to base class
         """
         super().__init__(
             flow_id=flow_id,
@@ -99,103 +100,100 @@ class RSSHubNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
-        self.rsshub_url = rsshub_url.rstrip("/")  # 移除尾部斜杠
-        self.route = route.strip("/")  # 移除开头和结尾斜杠
-        self.timeout = max(1, min(300, timeout))  # 限制在1-300秒之间
-        self.max_items = max(1, min(100, max_items))  # 限制在1-100之间
+        # Save parameters
+        self.rsshub_url = rsshub_url.rstrip("/")  # Remove trailing slash
+        self.route = route.strip("/")  # Remove leading and trailing slashes
+        self.timeout = max(1, min(300, timeout))  # Limit to 1-300 seconds
+        self.max_items = max(1, min(100, max_items))  # Limit to 1-100 items
         self.include_content = include_content
         self.parameters = parameters
         self.keywords = keywords
         self.token = token
 
-        # 日志设置
-        self.logger = logging.getLogger(f"RSSHubNode.{node_id}")
-
     async def fetch_rss(self) -> Dict[str, Any]:
         """
-        从 RSSHub 获取 RSS 数据
+        Fetch RSS data from RSSHub
 
         Returns:
-            Dict[str, Any]: 包含 RSS 数据的字典
+            Dict[str, Any]: Dictionary containing RSS data
         """
-        # 构建完整的 URL
+        # Build complete URL
         url = f"{self.rsshub_url}/{self.route}"
 
-        # 添加自定义参数
+        # Add custom parameters
         if self.parameters:
             url += '/' + '&'.join(f'{k}={v}' for k, v in self.parameters.items())
 
-        # 添加查询参数
+        # Add query parameters
         if "?" not in url:
             url += "?"
         else:
             url += "&"
 
-        # 添加限制条目数参数
+        # Add limit parameter for number of items
         url += f"limit={self.max_items}"
-        # 限制为 json 对象
+        # Set format to JSON
         url += "&format=json"
 
-        # 过滤标题和描述，支持正则
+        # Filter titles and descriptions, supports regex
         if self.keywords:
             url += f"&filter={self.keywords}"
 
-        # 添加全文输出参数（如果需要）
+        # Add full content output parameter if needed
         if self.include_content:
-            url += "&format=json"  # 使用 JSON 格式以获取完整内容
+            url += "&format=json"  # Use JSON format to get complete content
 
-        self.logger.info(f"Fetching RSS from: {url}")
+        await self.persist_log(f"Fetching RSS from: {url}", "INFO")
 
         try:
-            # 创建异步 HTTP 会话
+            # Create async HTTP session
             async with aiohttp.ClientSession() as session:
-                # 配置aiohttp代理
-                # 发送 GET 请求
+                # Configure aiohttp proxy
+                # Send GET request
                 async with session.get(url, timeout=self.timeout) as response:
-                    # 检查响应状态
+                    # Check response status
                     if response.status != 200:
                         error_msg = f"Failed to fetch RSS: HTTP {response.status}"
-                        self.logger.error(error_msg)
+                        await self.persist_log(error_msg, "ERROR")
                         return {"error": error_msg, "status_code": response.status}
 
-                    # 尝试解析 JSON 响应
+                    # Try to parse JSON response
                     try:
                         data = await response.json()
-                        self.logger.info(f"Successfully fetched RSS data with {len(data.get('items', []))} items")
+                        await self.persist_log(f"Successfully fetched RSS data with {len(data.get('items', []))} items", "INFO")
                         return data
                     except json.JSONDecodeError:
-                        # 如果不是 JSON 格式，尝试解析为 XML/RSS
+                        # If not JSON format, try to parse as XML/RSS
                         content = await response.text()
-                        self.logger.info("Response is not JSON, parsing as XML/RSS using feedparser")
+                        await self.persist_log("Response is not JSON, parsing as XML/RSS using feedparser", "INFO")
 
-                        # 使用 feedparser 解析 RSS 内容
-                        # 注意：需要先安装 feedparser：pip install feedparser
+                        # Use feedparser to parse RSS content
+                        # Note: Need to install feedparser first: pip install feedparser
                         try:
                             import feedparser
                             import io
                             from datetime import datetime
 
-                            # 使用 feedparser 解析内容
+                            # Use feedparser to parse content
                             feed = feedparser.parse(io.BytesIO(content.encode('utf-8')))
 
-                            # 提取频道信息
+                            # Extract channel information
                             title = feed.feed.get('title', '')
                             description = feed.feed.get('description', '')
                             link = feed.feed.get('link', '')
 
-                            # 提取条目
+                            # Extract items
                             items = []
                             for entry in feed.entries[:self.max_items]:
-                                # 处理日期格式
+                                # Handle date format
                                 published = ''
                                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                                     try:
                                         published = datetime(*entry.published_parsed[:6]).isoformat()
                                     except Exception as e:
-                                        self.logger.warning(f"Failed to parse date: {e}")
+                                        await self.persist_log(f"Failed to parse date: {e}", "WARNING")
 
-                                # 构建条目字典
+                                # Build item dictionary
                                 item = {
                                     "title": entry.get('title', ''),
                                     "description": entry.get('description', ''),
@@ -209,7 +207,7 @@ class RSSHubNode(NodeBase):
                                 }
                                 items.append(item)
 
-                            self.logger.info(f"Successfully parsed RSS feed with {len(items)} items")
+                            await self.persist_log(f"Successfully parsed RSS feed with {len(items)} items", "INFO")
                             return {
                                 "title": title,
                                 "description": description,
@@ -218,73 +216,73 @@ class RSSHubNode(NodeBase):
                             }
                         except Exception as e:
                             error_msg = f"Failed to parse RSS content: {str(e)}"
-                            self.logger.error(error_msg)
-                            return {"error": error_msg, "raw_content": content[:1000]}  # 只返回部分内容以避免过大
+                            await self.persist_log(error_msg, "ERROR")
+                            return {"error": error_msg, "raw_content": content[:1000]}  # Only return partial content to avoid being too large
 
         except aiohttp.ClientError as e:
             error_msg = f"HTTP request error: {str(e)}"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             return {"error": error_msg}
         except asyncio.TimeoutError:
             error_msg = f"Request timed out after {self.timeout} seconds"
-            self.logger.error(error_msg)
+            await self.persist_log(error_msg, "ERROR")
             return {"error": error_msg}
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             return {"error": error_msg}
 
     async def execute(self) -> bool:
-        """执行节点逻辑，获取 RSS 数据"""
+        """Execute node logic to fetch RSS data"""
         start_time = time.time()
         try:
-            self.logger.info(f"Executing RSSHubNode for route: {self.route}")
+            await self.persist_log(f"Executing RSSHubNode for route: {self.route}", "INFO")
 
-            # 验证必要参数
+            # Validate required parameters
             if not self.route:
                 error_msg = "Route parameter is required"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 获取 RSS 数据
+            # Fetch RSS data
             rss_data = await self.fetch_rss()
 
-            # 检查是否有错误
+            # Check for errors
             if "error" in rss_data:
                 error_msg = f"Failed to fetch RSS data: {rss_data['error']}"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
-            # 处理获取的数据
+            # Process retrieved data
             processed_data = rss_data
 
-            # 发送数据信号
-            if await self.send_signal(DATA_OUTPUT_HANDLE, SignalType.DATASET, payload=processed_data):
-                self.logger.info(f"Successfully sent RSS data with {processed_data['item_count']} items")
+            # Send data signal
+            if await self.send_signal(FEEDS_OUTPUT_HANDLE, SignalType.DATASET, payload=processed_data):
+                await self.persist_log(f"Successfully sent RSS data with {len(processed_data.get('items', []))} items", "INFO")
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
                 error_msg = "Failed to send RSS data signal"
-                self.logger.error(error_msg)
+                await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
                 return False
 
         except asyncio.CancelledError:
-            # 任务被取消
+            # Task was cancelled
             await self.set_status(NodeStatus.TERMINATED, "Task cancelled")
             return True
         except Exception as e:
             error_msg = f"Error executing RSSHubNode: {str(e)}"
-            self.logger.error(error_msg)
-            self.logger.debug(traceback.format_exc())
+            await self.persist_log(error_msg, "ERROR")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
             await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
             return False

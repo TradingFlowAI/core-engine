@@ -1,0 +1,27 @@
+### Binance价格节点测试
+@baseUrl = http://localhost:7002
+
+# @name execute_binance_pricer_node
+POST {{baseUrl}}/nodes/execute
+Content-Type: application/json
+
+{
+  "flow_id": "test_flow",
+  "component_id": 0,
+  "cycle": 0,
+  "node_id": "binance_pricer_node_3",
+  "node_type": "binance_price_node",
+  "name": "Binance Price Node",
+  "edges": [
+    {
+      "source": "binance_pricer_node_3",
+      "target": "data_processor"
+    }
+  ],
+  "config": {
+    "node_class_type": "binance_price_node",
+    "symbol": "BTCUSDT",
+    "interval": "1h",
+    "limit": 10
+  }
+}

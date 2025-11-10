@@ -6,12 +6,12 @@ TradingFlow Python Worker 是一个高性能、可扩展的任务处理框架，
 
 ## 主要功能
 
--   **节点系统**: 提供灵活的节点抽象，每个节点可以执行特定的逻辑
--   **信号机制**: 节点间通过信号通信，实现数据和事件的传递
--   **消息队列**: 支持多种消息队列后端，包括内存队列和 RabbitMQ
--   **异步处理**: 基于异步 IO 设计，保证高性能和低延迟
--   **REST API**: 提供 HTTP 接口用于节点管理和监控
--   **资源监控**: 实时跟踪系统资源和节点状态
+- **节点系统**: 提供灵活的节点抽象，每个节点可以执行特定的逻辑
+- **信号机制**: 节点间通过信号通信，实现数据和事件的传递
+- **消息队列**: 支持多种消息队列后端，包括内存队列和 RabbitMQ
+- **异步处理**: 基于异步 IO 设计，保证高性能和低延迟
+- **REST API**: 提供 HTTP 接口用于节点管理和监控
+- **资源监控**: 实时跟踪系统资源和节点状态
 
 ## 系统架构
 
@@ -29,10 +29,10 @@ TradingFlow Python Worker 是一个高性能、可扩展的任务处理框架，
 
 ### 核心组件
 
--   **NodeBase**: 节点基类，提供节点生命周期管理和信号处理
--   **MessageQueue**: 消息队列抽象
--   **Signal**: 节点间传递的信号，包含类型和有效负载
--   **Worker API**: 提供 HTTP 接口用于管理和监控节点
+- **NodeBase**: 节点基类，提供节点生命周期管理和信号处理
+- **MessageQueue**: 消息队列抽象
+- **Signal**: 节点间传递的信号，包含类型和有效负载
+- **Worker API**: 提供 HTTP 接口用于管理和监控节点
 
 ## API 接口
 
@@ -50,7 +50,7 @@ TradingFlow Python Worker 是一个高性能、可扩展的任务处理框架，
 
 ```bash
 # 执行一个价格数据节点
-curl -X POST http://localhost:7000/nodes/execute \
+curl -X POST http://localhost:7002/nodes/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "example_flow",
@@ -76,7 +76,7 @@ curl -X POST http://localhost:7000/nodes/execute \
     }
   }'
 # 执行一个价格trade节点
-curl -X POST http://localhost:7000/nodes/execute \
+curl -X POST http://localhost:7002/nodes/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "trading_flow",
@@ -117,7 +117,7 @@ curl -X POST http://localhost:7000/nodes/execute \
 这个示例调用 `/flows/execute` 接口来注册并执行一个新的 Flow：
 
 ```bash
-curl -X POST http://localhost:7000/flows/execute \
+curl -X POST http://localhost:7002/flows/execute \
   -H "Content-Type: application/json" \
   -d '{
     "flow_id": "example_flow",
@@ -262,7 +262,7 @@ pip install -r requirements.txt
 
 ```bash
 # 使用默认配置运行
-python py_worker/server.py
+python station/server.py
 ```
 
 ## 测试
@@ -270,13 +270,13 @@ python py_worker/server.py
 运行单元测试：
 
 ```bash
-pytest py_worker/tests/
+pytest station/tests/
 ```
 
 运行快速功能测试：
 
 ```bash
-python -m py_worker.quick_test
+python -m station.quick_test
 ```
 
 ## 扩展
@@ -294,7 +294,15 @@ python -m py_worker.quick_test
 
 ## 注意事项
 
--   当使用内存队列时，通信仅限于单进程内
--   复杂工作流程建议使用 RabbitMQ 或其他持久化消息队列
--   节点的 `execute()` 方法应当是异步的，避免阻塞主线程
--   信号处理应考虑幂等性，确保多次处理相同信号不会产生副作用
+- 当使用内存队列时，通信仅限于单进程内
+- 复杂工作流程建议使用 RabbitMQ 或其他持久化消息队列
+- 节点的 `execute()` 方法应当是异步的，避免阻塞主线程
+- 信号处理应考虑幂等性，确保多次处理相同信号不会产生副作用
+
+如有问题或需要支持，请联系 TradingFlow 开发团队。
+
+---
+
+## 版权声明
+
+代码归 TradingFlow Company，未经 TradingFlow Company 和 TradingFlow DAO 授权，不得私自传播给第三方，违者要追究法律责任。

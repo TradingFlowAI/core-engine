@@ -7,10 +7,10 @@ from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
 
-from tradingflow.depot.config import CONFIG
-from tradingflow.station.common.node_registry import NodeRegistry
-from tradingflow.station.common.node_task_manager import NodeTaskManager
-from tradingflow.station.core.node_executor import execute_node_task
+from weather_depot.config import CONFIG
+from common.node_registry import NodeRegistry
+from common.node_task_manager import NodeTaskManager
+from core.node_executor import execute_node_task
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,68 @@ async def execute_node(request: Request):
         return sanic_json({"error": str(e)}, status=500)
 
 
+@node_bp.get("/nodes/types")
+async def get_node_types(request: Request):
+    """获取所有节点类型信息，包括基类和实例的关系"""
+    try:
+        registry = NodeRegistry.get_instance()
+
+        types_info = {}
+        for node_type, node_class in registry._node_classes.items():
+            # 获取默认参数
+            default_params = registry.get_default_params(node_type)
+
+            # 优先从默认参数中获取元数据（向后兼容）
+            node_category = default_params.get('node_category', 'base')
+            display_name = default_params.get('display_name', node_type)
+            base_node_type = default_params.get('base_node_type', None)
+            version = default_params.get('version', '0.0.1')
+            description = default_params.get('description', node_class.__doc__ or "")
+            author = default_params.get('author', "")
+            tags = default_params.get('tags', [])
+
+            # 尝试从类级别元数据获取（如果存在）
+            class_metadata = getattr(node_class, '_metadata', None)
+            if class_metadata:
+                node_category = class_metadata.node_category
+                display_name = class_metadata.display_name or display_name
+                base_node_type = class_metadata.base_node_type or base_node_type
+                version = class_metadata.version
+                description = class_metadata.description or description
+                author = class_metadata.author or author
+                tags = class_metadata.tags or tags
+
+            # 获取输入句柄信息
+            input_handles = {}
+            if hasattr(node_class, '_input_handles'):
+                for handle_name, handle in node_class._input_handles.items():
+                    input_handles[handle_name] = handle.to_dict()
+
+            # 构建节点类型信息
+            types_info[node_type] = {
+                "class_name": node_class.__name__,
+                "category": node_category,
+                "display_name": display_name,
+                "base_type": base_node_type,
+                "version": version,
+                "description": description,
+                "author": author,
+                "tags": tags,
+                "default_params": default_params,
+                "input_handles": input_handles,
+                "docstring": node_class.__doc__ or ""
+            }
+
+        return sanic_json({
+            "status": "success",
+            "data": types_info,
+            "count": len(types_info)
+        })
+    except Exception as e:
+        logger.error(f"Error getting node types: {str(e)}")
+        return sanic_json({"status": "error", "message": str(e)}, status=500)
+
+
 @node_bp.get("/nodes/<node_task_id>/status")
 async def get_node_status(request: Request, node_task_id: str):
     """查询节点执行状态"""
@@ -169,9 +231,9 @@ async def stop_node(request: Request, node_task_id: str):
     from datetime import datetime
 
     import httpx
-    from tradingflow.depot.config import CONFIG
+    from weather_depot.config import CONFIG
 
-    SERVER_URL = CONFIG["SERVER_URL"]
+    # SERVER_URL = CONFIG["SERVER_URL"]
 
     node_info = await node_manager.get_task(node_task_id)
     if not node_info:
@@ -188,25 +250,25 @@ async def stop_node(request: Request, node_task_id: str):
 
     try:
         # 通过NodeManager设置终止标志
-        stop_success = await node_manager.stop_node(node_task_id)
+        stop_success = await node_manager.stop_task(node_task_id)
         if not stop_success:
             return sanic_json({"error": "Failed to stop node"}, status=500)
 
         # 通知server节点被停止
-        try:
-            stop_data = {
-                "node_task_id": node_task_id,
-                "worker_id": WORKER_ID,
-                "status": "stopping",
-                "stop_requested_at": datetime.now().isoformat(),
-            }
+        # try:
+        #     stop_data = {
+        #         "node_task_id": node_task_id,
+        #         "worker_id": WORKER_ID,
+        #         "status": "stopping",
+        #         "stop_requested_at": datetime.now().isoformat(),
+        #     }
 
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"{SERVER_URL}/api/nodes/{node_task_id}/callback", json=stop_data
-                )
-        except Exception as e:
-            logger.error(f"Failed to notify server about node stopping: {str(e)}")
+        #     async with httpx.AsyncClient() as client:
+        #         await client.post(
+        #             f"{SERVER_URL}/api/nodes/{node_task_id}/callback", json=stop_data
+        #         )
+        # except Exception as e:
+        #     logger.error(f"Failed to notify server about node stopping: {str(e)}")
 
         return sanic_json(
             {
