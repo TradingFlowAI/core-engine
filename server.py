@@ -144,22 +144,41 @@ def init_app():
 async def setup_node_registry(app, loop):
     """Initialize node registry and activity publisher before server starts"""
     # 0. 输出配置信息用于调试
+    print("\n" + "🚀" * 40)
+    print("🔧 Starting Station Server Initialization...")
+    print("🚀" * 40 + "\n")
     log_config_debug()
     
     # 1. Initialize Node Registry
+    print("\n📝 Step 1: Initializing Node Registry...")
+    print(f"  Worker ID: {CONFIG.get('WORKER_ID')}")
+    print(f"  Redis URL: {CONFIG.get('REDIS_URL', '')[:60]}...")
+    
     registry = NodeRegistry.get_instance()
+    print(f"  Registry instance created: {registry}")
+    print(f"  Supported node types count: {len(registry._node_classes)}")
 
     # Initialize Redis connection
-    if await registry.initialize():
+    print("\n🔌 Step 2: Connecting to Redis...")
+    redis_init_success = await registry.initialize()
+    print(f"  Redis initialization result: {redis_init_success}")
+    
+    if redis_init_success:
         # Register worker and supported node types
-        await registry.register_worker()
+        print("\n📋 Step 3: Registering Worker...")
+        register_result = await registry.register_worker()
+        print(f"  Worker registration result: {register_result}")
 
         # Start heartbeat task
+        print("\n💓 Step 4: Starting Heartbeat...")
         await registry.start_heartbeat()
+        print("  Heartbeat task started")
 
         app.ctx.node_registry = registry
+        print("\n✅ Node registry initialization complete!")
         logger.info("✓ Node registry initialized and heartbeat started")
     else:
+        print("\n❌ Redis initialization failed!")
         logger.error("Failed to initialize node registry")
     
     # 2. Initialize Activity Publisher for Quest System
