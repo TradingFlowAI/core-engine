@@ -195,10 +195,17 @@ class NodeRegistry:
         try:
             # Connect to Redis
             redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
+            print(f"🔍 [initialize] Redis URL from CONFIG: {redis_url[:60]}...")
+            print(f"🔍 [initialize] Attempting to connect...")
             self.redis = await aioredis.from_url(redis_url, decode_responses=True)
+            print(f"🔍 [initialize] Connection object created: {self.redis}")
+            print(f"🔍 [initialize] Testing connection with PING...")
+            pong = await self.redis.ping()
+            print(f"🔍 [initialize] PING result: {pong}")
             logger.info("Node registry connected to Redis: %s", redis_url)
             return True
         except Exception as e:
+            print(f"🔍 [initialize] Connection failed: {e}")
             logger.error("Node registry initialization failed: %s", str(e))
             return False
 
@@ -222,6 +229,9 @@ class NodeRegistry:
         Returns:
             bool: Whether registration was successful
         """
+        print(f"🔍 [register_worker] Redis connection: {self.redis}")
+        print(f"🔍 [register_worker] Worker ID: {self.worker_id}")
+        
         if not self.redis:
             logger.error("Cannot register worker: Redis not connected")
             return False
@@ -229,6 +239,7 @@ class NodeRegistry:
         try:
             # Use provided node types or locally registered types
             supported_types = node_types or list(self.supported_node_types)
+            print(f"🔍 [register_worker] Supported types: {len(supported_types)} types")
 
             # Check if there are supported node types
             if not supported_types:
@@ -248,8 +259,11 @@ class NodeRegistry:
             }
 
             # Save worker information, set expiration time
+            print(f"🔍 [register_worker] Attempting hset to key: {worker_key}")
             await self.redis.hset(worker_key, mapping=worker_data)
+            print(f"🔍 [register_worker] hset successful, setting expire...")
             await self.redis.expire(worker_key, self.node_ttl)
+            print(f"🔍 [register_worker] expire successful")
 
             # For each node type, add mapping between this worker and node type
             for node_type in supported_types:
