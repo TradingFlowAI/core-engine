@@ -3,9 +3,12 @@ Node Registry
 Manages node registration and version tracking
 """
 
-from typing import Dict, List, Optional, Type, Any
+from __future__ import annotations
+from typing import Dict, List, Optional, Type, Any, TYPE_CHECKING
 from .version_manager import VersionManager
-from .node_base import NodeBase
+
+if TYPE_CHECKING:
+    from nodes.node_base import NodeBase
 
 
 class NodeRegistry:

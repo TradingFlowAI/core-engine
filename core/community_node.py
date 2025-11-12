@@ -4,7 +4,7 @@ Generic node class for community-defined nodes
 """
 
 from typing import Dict, Any, Optional, List
-from .node_base import NodeBase
+from nodes.node_base import NodeBase
 from .community_node_executor import CommunityNodeExecutor
 
 
