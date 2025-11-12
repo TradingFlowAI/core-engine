@@ -24,6 +24,70 @@ logger = logging.getLogger(__name__)
 # 降低 pika 和 asyncio 的日志级别，减少 DEBUG 日志
 logging.getLogger('pika').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
+
+
+def log_config_debug():
+    """输出关键配置信息用于调试（密码部分遮挡）"""
+    def mask_password(url: str) -> str:
+        """遮挡 URL 中的密码部分，只显示前后各2个字符"""
+        if not url or '://' not in url:
+            return url
+        try:
+            scheme_end = url.index('://') + 3
+            after_scheme = url[scheme_end:]
+            if '@' not in after_scheme:
+                return url
+            last_at = after_scheme.rfind('@')
+            auth_part = after_scheme[:last_at]
+            host_part = after_scheme[last_at:]
+            
+            if ':' not in auth_part:
+                return url
+            
+            last_colon = auth_part.rfind(':')
+            user_part = auth_part[:last_colon]
+            password = auth_part[last_colon + 1:]
+            
+            # 遮挡密码：只显示前后各2个字符
+            if len(password) <= 4:
+                masked_pwd = '****'
+            else:
+                masked_pwd = f"{password[:2]}...{password[-2:]}"
+            
+            scheme = url[:scheme_end]
+            if user_part:
+                return f"{scheme}{user_part}:{masked_pwd}{host_part}"
+            else:
+                return f"{scheme}:{masked_pwd}{host_part}"
+        except Exception:
+            return "[解析失败]"
+    
+    logger.info("=" * 80)
+    logger.info("📋 CONFIG Debug Information:")
+    logger.info("=" * 80)
+    logger.info("🔧 Worker Configuration:")
+    logger.info(f"  WORKER_ID: {CONFIG.get('WORKER_ID')}")
+    logger.info(f"  WORKER_HOST: {CONFIG.get('WORKER_HOST')}")
+    logger.info(f"  WORKER_PORT: {CONFIG.get('WORKER_PORT')}")
+    logger.info(f"  STATE_STORE_TYPE: {CONFIG.get('STATE_STORE_TYPE')}")
+    logger.info("")
+    logger.info("🗄️  Redis Configuration:")
+    logger.info(f"  REDIS_URL: {mask_password(CONFIG.get('REDIS_URL', ''))}")
+    logger.info(f"  REDIS_HOST: {CONFIG.get('REDIS_HOST')}")
+    logger.info(f"  REDIS_PORT: {CONFIG.get('REDIS_PORT')}")
+    logger.info("")
+    logger.info("🐰 RabbitMQ Configuration:")
+    logger.info(f"  RABBITMQ_URL: {mask_password(CONFIG.get('RABBITMQ_URL', ''))}")
+    logger.info(f"  RABBITMQ_HOST: {CONFIG.get('RABBITMQ_HOST')}")
+    logger.info(f"  RABBITMQ_PORT: {CONFIG.get('RABBITMQ_PORT')}")
+    logger.info(f"  RABBITMQ_USER: {CONFIG.get('RABBITMQ_USER')}")
+    logger.info("")
+    logger.info("🐘 PostgreSQL Configuration:")
+    logger.info(f"  POSTGRES_URL: {mask_password(CONFIG.get('POSTGRES_URL', ''))}")
+    logger.info(f"  POSTGRES_HOST: {CONFIG.get('POSTGRES_HOST')}")
+    logger.info(f"  POSTGRES_PORT: {CONFIG.get('POSTGRES_PORT')}")
+    logger.info(f"  POSTGRES_DB: {CONFIG.get('POSTGRES_DB')}")
+    logger.info("=" * 80)
 # Read configuration from config file
 WORKER_HOST = CONFIG["WORKER_HOST"]
 WORKER_PORT = CONFIG["WORKER_PORT"]
@@ -58,6 +122,9 @@ def init_app():
 @app.listener("before_server_start")
 async def setup_node_registry(app, loop):
     """Initialize node registry and activity publisher before server starts"""
+    # 0. 输出配置信息用于调试
+    log_config_debug()
+    
     # 1. Initialize Node Registry
     registry = NodeRegistry.get_instance()
 
