@@ -23,7 +23,7 @@ MESSAGE_QUEUE_CONFIG = {
     "config": {
         "host": CONFIG["RABBITMQ_HOST"],
         "port": CONFIG["RABBITMQ_PORT"],
-        "username": CONFIG["RABBITMQ_USERNAME"],
+        "username": CONFIG["RABBITMQ_USER"],  # 修正：使用 RABBITMQ_USER 而不是 RABBITMQ_USERNAME
         "password": CONFIG["RABBITMQ_PASSWORD"],
         "virtual_host": CONFIG["RABBITMQ_VHOST"],
         "exchange": CONFIG["RABBITMQ_EXCHANGE"],

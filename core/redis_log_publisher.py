@@ -12,6 +12,7 @@ import json
 import os
 from typing import Dict, Any
 from datetime import datetime
+from weather_depot.config import CONFIG
 
 
 class RedisLogPublisher:
@@ -19,10 +20,10 @@ class RedisLogPublisher:
     
     def __init__(self):
         """初始化 Redis 连接"""
-        self.redis_client = redis.Redis(
-            host=os.getenv('REDIS_HOST', 'localhost'),
-            port=int(os.getenv('REDIS_PORT', 6379)),
-            db=0,
+        # 使用 CONFIG 中自动编码密码的 URL
+        redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
+        self.redis_client = redis.from_url(
+            redis_url,
             decode_responses=True,
             socket_timeout=5,
             socket_connect_timeout=5,

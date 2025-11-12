@@ -14,6 +14,7 @@ import logging
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime
+from weather_depot.config import CONFIG
 
 try:
     import redis.asyncio as aioredis
@@ -58,11 +59,11 @@ class AsyncRedisLogPublisher:
                 return
             
             try:
-                redis_host = os.getenv('REDIS_HOST', 'localhost')
-                redis_port = int(os.getenv('REDIS_PORT', 6379))
+                # 使用 CONFIG 中自动编码密码的 URL
+                redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
                 
                 self.redis_client = await aioredis.from_url(
-                    f"redis://{redis_host}:{redis_port}",
+                    redis_url,
                     encoding="utf-8",
                     decode_responses=True,
                     socket_connect_timeout=5,

@@ -79,18 +79,9 @@ async def setup_node_registry(app, loop):
         import pika
         from weather_depot.config import CONFIG
         
-        # Create blocking connection for ActivityPublisher
-        rabbitmq_host = CONFIG.get("RABBITMQ_HOST", "localhost")
-        rabbitmq_port = CONFIG.get("RABBITMQ_PORT", 5672)
-        rabbitmq_user = CONFIG.get("RABBITMQ_USER", "guest")
-        rabbitmq_password = CONFIG.get("RABBITMQ_PASSWORD", "guest")
-        
-        credentials = pika.PlainCredentials(rabbitmq_user, rabbitmq_password)
-        parameters = pika.ConnectionParameters(
-            host=rabbitmq_host,
-            port=rabbitmq_port,
-            credentials=credentials
-        )
+        # 使用 CONFIG 中自动编码密码的 URL
+        rabbitmq_url = CONFIG.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+        parameters = pika.URLParameters(rabbitmq_url)
         connection = pika.BlockingConnection(parameters)
         
         publisher = init_activity_publisher(connection)
