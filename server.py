@@ -182,21 +182,28 @@ async def setup_node_registry(app, loop):
         logger.error("Failed to initialize node registry")
     
     # 2. Initialize Activity Publisher for Quest System
+    print("\n🐰 Step 5: Initializing Activity Publisher...")
     try:
         import pika
-        from weather_depot.config import CONFIG
         
-        # 使用 CONFIG 中自动编码密码的 URL
+        # 使用全局 CONFIG（已在文件顶部导入）
         rabbitmq_url = CONFIG.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+        print(f"  RabbitMQ URL: {rabbitmq_url[:50]}...")
         parameters = pika.URLParameters(rabbitmq_url)
         connection = pika.BlockingConnection(parameters)
         
         publisher = init_activity_publisher(connection)
         app.ctx.activity_publisher = publisher
+        print("  ✅ Activity Publisher initialized successfully!")
         logger.info("✓ Activity Publisher initialized for Quest system")
     except Exception as e:
+        print(f"  ⚠️  Activity Publisher initialization failed: {e}")
         logger.warning(f"Failed to initialize Activity Publisher: {e}")
         logger.warning("Quest activity events will not be published from Station")
+    
+    print("\n" + "🎉" * 40)
+    print("✅ All initialization steps completed!")
+    print("🎉" * 40 + "\n")
 
 
 @app.listener("after_server_start")
