@@ -20,6 +20,10 @@ pool_manager.register_shutdown_handler()
 CONFIG = get_station_config()
 setup_logging(CONFIG, "station")
 logger = logging.getLogger(__name__)
+
+# 降低 pika 和 asyncio 的日志级别，减少 DEBUG 日志
+logging.getLogger('pika').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
 # Read configuration from config file
 WORKER_HOST = CONFIG["WORKER_HOST"]
 WORKER_PORT = CONFIG["WORKER_PORT"]
@@ -95,6 +99,14 @@ async def setup_node_registry(app, loop):
     except Exception as e:
         logger.warning(f"Failed to initialize Activity Publisher: {e}")
         logger.warning("Quest activity events will not be published from Station")
+
+
+@app.listener("after_server_start")
+async def server_ready(app, loop):
+    """Log when server is ready to accept requests"""
+    logger.info(f"🚀 Station Server is ready at http://{WORKER_HOST}:{WORKER_PORT}")
+    logger.info(f"Worker ID: {WORKER_ID}")
+    logger.info("Server is running and accepting requests...")
 
 
 @app.listener("after_server_stop")
