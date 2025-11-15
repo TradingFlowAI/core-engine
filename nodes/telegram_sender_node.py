@@ -15,11 +15,10 @@ from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 
 # Define input and output handle names
-# 🔥 修复：匹配前端和 Linter 的字段定义
+# 🔥 修复：统一为单一输出 result
 ACCOUNT_INPUT_HANDLE = "account_to_send"
 MESSAGE_INPUT_HANDLE = "messages"
-STATUS_OUTPUT_HANDLE = "status_output_handle"
-ERROR_HANDLE = "error_handle"
+RESULT_OUTPUT_HANDLE = "result"
 
 
 @register_node_type(
@@ -53,8 +52,7 @@ class TelegramSenderNode(NodeBase):
     - MESSAGE_INPUT_HANDLE: Message content to send
 
     Output signals:
-    - STATUS_OUTPUT_HANDLE: Send status
-    - ERROR_HANDLE: Error information
+    - RESULT_OUTPUT_HANDLE: Send result including success status, message_id, timestamp, and error info
     """
 
     def __init__(
@@ -122,7 +120,7 @@ class TelegramSenderNode(NodeBase):
         self.retry_count = max(0, min(10, retry_count))  # 限制在0-10次之间
 
         # Logging will be handled by persist_log method
-    
+
     def _register_input_handles(self) -> None:
         """Register input handles"""
         # 🔥 新增：注册 account_to_send 输入句柄
@@ -133,27 +131,27 @@ class TelegramSenderNode(NodeBase):
             example="@username",
             auto_update_attr="chat_id",  # 自动更新到 self.chat_id
         )
-        
+
         self.register_input_handle(
             name=MESSAGE_INPUT_HANDLE,
             data_type=str,
             description="Message Input - Message content to send to Telegram",
             example="Hello from TradingFlow!",
         )
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         self.register_output_handle(
-            name=STATUS_OUTPUT_HANDLE,
+            name=RESULT_OUTPUT_HANDLE,
             data_type=dict,
-            description="Status Output - Telegram message send status",
-            example={"success": True, "message_id": 123, "timestamp": "2024-01-01"},
-        )
-        self.register_output_handle(
-            name=ERROR_HANDLE,
-            data_type=str,
-            description="Error Handle - Error message if send fails",
-            example="Failed to send message: Invalid bot token",
+            description="Result - Complete send result including success status, message info, and error details",
+            example={
+                "success": True,
+                "message_id": 123,
+                "chat_id": "123456789",
+                "timestamp": 1234567890.0,
+                "error": None
+            },
         )
 
     async def send_telegram_message(self, message: str) -> Dict[str, Any]:
@@ -328,7 +326,7 @@ class TelegramSenderNode(NodeBase):
             account_data = self.get_input_handle_data(ACCOUNT_INPUT_HANDLE)
             if account_data:
                 await self.persist_log(f"Using connected account input: {account_data}", "INFO")
-                
+
                 # 解析 account_data
                 if isinstance(account_data, dict):
                     # 从 metadata 中提取 chat_id
@@ -352,14 +350,22 @@ class TelegramSenderNode(NodeBase):
                 error_msg = "Bot token is required"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
+                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
+                    "success": False,
+                    "error": error_msg,
+                    "timestamp": time.time()
+                })
                 return False
 
             if not self.chat_id:
                 error_msg = "Chat ID is required (either from input or configuration)"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
+                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
+                    "success": False,
+                    "error": error_msg,
+                    "timestamp": time.time()
+                })
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
@@ -373,7 +379,11 @@ class TelegramSenderNode(NodeBase):
                 error_msg = "No input message received"
                 await self.persist_log(error_msg, "WARNING")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
+                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
+                    "success": False,
+                    "error": error_msg,
+                    "timestamp": time.time()
+                })
                 return False
 
             # Format message
@@ -382,27 +392,38 @@ class TelegramSenderNode(NodeBase):
             # Send message
             result = await self.send_telegram_message(formatted_message)
 
-            # Check send result
+            # Check send result and send unified result output
             if result.get("success"):
                 await self.persist_log(f"Successfully sent Telegram message to chat {self.chat_id}", "INFO")
 
-                # Send status signal
-                status_data = {
+                # Send unified result signal
+                result_data = {
                     "success": True,
                     "message_id": result.get("message_id"),
                     "chat_id": self.chat_id,
                     "timestamp": time.time(),
-                    "execution_time": time.time() - start_time
+                    "execution_time": time.time() - start_time,
+                    "error": None
                 }
 
-                await self.send_signal(STATUS_OUTPUT_HANDLE, SignalType.DATASET, payload=status_data)
+                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload=result_data)
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
                 error_msg = f"Failed to send Telegram message: {result.get('error', 'Unknown error')}"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
+
+                # Send unified result signal with error
+                result_data = {
+                    "success": False,
+                    "error": error_msg,
+                    "timestamp": time.time(),
+                    "execution_time": time.time() - start_time,
+                    "message_id": None,
+                    "chat_id": self.chat_id
+                }
+                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload=result_data)
                 return False
 
         except asyncio.CancelledError:
@@ -414,5 +435,9 @@ class TelegramSenderNode(NodeBase):
             await self.persist_log(error_msg, "ERROR")
             await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
-            await self.send_signal(ERROR_HANDLE, SignalType.TEXT, payload=error_msg)
+            await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
+                "success": False,
+                "error": error_msg,
+                "timestamp": time.time()
+            })
             return False
