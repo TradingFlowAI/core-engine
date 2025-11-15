@@ -26,9 +26,6 @@ from .code_node_interpreter import ALLOWED_MODULES, RestrictedInterpreter
 INPUT_DATA_HANDLE = "input_data"  # Input data handler
 PYTHON_CODE_HANDLE = "python_code"  # Python code handler
 CODE_OUTPUT_HANDLE = "output_data"  # Code execution result output
-STDOUT_HANDLE = "stdout_output"  # Standard output
-STDERR_HANDLE = "stderr_output"  # Standard error
-DEBUG_HANDLE = "debug_output"  # Debug output
 
 # Define default maximum Gas
 DEFAULT_MAX_GAS = 1000000000 # 10_0000_0000
@@ -815,26 +812,17 @@ class CodeNode(NodeBase):
             )
             debug_output += gas_info
 
-            # 发送标准输出、标准错误和调试输出
-            await self.send_signal(
-                STDOUT_HANDLE, SignalType.TEXT, payload=stdout_output
-            )
-            if stderr_output:
-                await self.send_signal(
-                    STDERR_HANDLE, SignalType.TEXT, payload=stderr_output
-                )
-                if not success:
-                    error_msg = f"Code execution failed: {stderr_output}"
-                    await self.persist_log(error_msg, "ERROR")
-                    await self.set_status(NodeStatus.FAILED, error_msg)
-                    return False
+            # Standard output and error are logged but not sent as signal outputs
+            # (logs are accessible via node execution logs)
+            if stderr_output and not success:
+                error_msg = f"Code execution failed: {stderr_output}"
+                await self.persist_log(error_msg, "ERROR")
+                await self.set_status(NodeStatus.FAILED, error_msg)
+                return False
 
-            # 发送调试输出（如果有）
+            # Debug output is logged but not sent as a signal output
             if debug_output:
-                await self.send_signal(
-                    DEBUG_HANDLE, SignalType.TEXT, payload=debug_output
-                )
-                await self.persist_log(f"Sent debug output: {len(debug_output)} characters", "DEBUG")
+                await self.persist_log(f"Debug output captured: {len(debug_output)} characters", "DEBUG")
 
             # 获取代码执行结果
             await self.persist_log("Getting execution result from local variables", "INFO")
@@ -935,30 +923,13 @@ class CodeNode(NodeBase):
             example="# Your Python code here",
             auto_update_attr="python_code",
         )
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
+        # Single output handle for code execution result
         self.register_output_handle(
             name=CODE_OUTPUT_HANDLE,
             data_type=dict,
-            description="Output Data - Code execution result",
+            description="Output Data - Code execution result (stdout/stderr/debug info available in node logs)",
             example={"result": "value", "processed_data": []},
-        )
-        self.register_output_handle(
-            name=STDOUT_HANDLE,
-            data_type=str,
-            description="Standard Output - Console output from code execution",
-            example="Processing complete\n",
-        )
-        self.register_output_handle(
-            name=STDERR_HANDLE,
-            data_type=str,
-            description="Standard Error - Error messages from code execution",
-            example="",
-        )
-        self.register_output_handle(
-            name=DEBUG_HANDLE,
-            data_type=str,
-            description="Debug Output - Debug information and execution logs",
-            example="Gas used: 1000, Execution time: 0.5s",
         )

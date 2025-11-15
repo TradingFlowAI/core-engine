@@ -1,6 +1,9 @@
 import asyncio
 import traceback
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+from datetime import datetime
+
+import httpx
 
 from services.aptos_vault_service import AptosVaultService
 from services.flow_evm_vault_service import FlowEvmVaultService
@@ -8,13 +11,17 @@ from utils.token_price_util import get_aptos_token_price_usd
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
+from weather_depot.config import CONFIG
 
 # input handles
 CHAIN_HANDLE = "chain"
 CHAIN_ID_HANDLE = "chain_id"
 VAULT_ADDRESS_HANDLE = "vault_address"
 # output handles
-BALANCE_HANDLE = "vault_balance"
+VAULT_OUTPUT_HANDLE = "vault"
+
+# Monitor service URL
+MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
 
 
 @register_node_type(
@@ -144,6 +151,9 @@ class VaultNode(NodeBase):
         else:
             raise ValueError(f"Unsupported chain: {self.chain}")
 
+        # HTTP client for monitor API calls
+        self._http_client = httpx.AsyncClient(timeout=30.0)
+
     async def query_user_holdings(self, vault_address: str) -> Dict:
         """
         Query user holdings information
@@ -210,6 +220,77 @@ class VaultNode(NodeBase):
             #     "message": f"Error querying {self.chain} vault holdings: {str(e)}",
             #     "error": str(e),
             # }
+
+    async def get_recent_transactions(self, vault_address: str, limit: int = 10) -> List[Dict]:
+        """
+        获取最近的交易历史
+
+        Args:
+            vault_address: Vault地址
+            limit: 返回的最大交易数量
+
+        Returns:
+            List[Dict]: 交易历史列表
+        """
+        try:
+            if self.chain == "aptos":
+                # Aptos: /aptos/vault/:address/operations
+                url = f"{MONITOR_URL}/aptos/vault/{vault_address}/operations"
+                params = {"limit": limit}
+            elif self.chain == "flow_evm":
+                # Flow EVM: /evm/vault/:chain_id/:vault_address/operations
+                url = f"{MONITOR_URL}/evm/vault/{self.chain_id}/{vault_address}/operations"
+                params = {"limit": limit}
+            else:
+                await self.persist_log(f"Unsupported chain for transactions: {self.chain}", "WARNING")
+                return []
+
+            await self.persist_log(f"Fetching transactions from: {url}", "DEBUG")
+
+            response = await self._http_client.get(url, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Extract operations from response
+            if self.chain == "aptos":
+                # Aptos response format: {"data": {"events": [...]}}
+                operations = data.get("data", {}).get("events", [])
+            else:
+                # Flow EVM response format: {"success": true, "data": [...]}
+                operations = data.get("data", [])
+
+            await self.persist_log(f"Retrieved {len(operations)} transactions", "INFO")
+
+            # Format transactions to unified structure
+            formatted_transactions = []
+            for op in operations[:limit]:
+                formatted_tx = {
+                    "id": op.get("id"),
+                    "operation_type": op.get("operation_type") or op.get("event_type"),
+                    "transaction_hash": op.get("transaction_hash") or op.get("tx_hash"),
+                    "input_token_address": op.get("input_token_address"),
+                    "input_token_amount": op.get("input_token_amount"),
+                    "input_token_usd_value": op.get("input_token_usd_value"),
+                    "output_token_address": op.get("output_token_address"),
+                    "output_token_amount": op.get("output_token_amount"),
+                    "output_token_usd_value": op.get("output_token_usd_value"),
+                    "gas_used": op.get("gas_used"),
+                    "gas_price": op.get("gas_price"),
+                    "total_gas_cost_usd": op.get("total_gas_cost_usd"),
+                    "created_at": op.get("created_at") or op.get("timestamp"),
+                }
+                formatted_transactions.append(formatted_tx)
+
+            return formatted_transactions
+
+        except httpx.HTTPError as e:
+            await self.persist_log(f"HTTP error fetching transactions: {str(e)}", "WARNING")
+            return []
+        except Exception as e:
+            await self.persist_log(f"Error fetching transactions: {str(e)}", "WARNING")
+            await self.persist_log(traceback.format_exc(), "DEBUG")
+            return []
 
     async def prepare_holdings_output(self) -> Dict:
         """
@@ -370,6 +451,41 @@ class VaultNode(NodeBase):
             "raw_result": self.holdings_result,  # 保留原始结果供参考
         }
 
+    async def prepare_vault_output(self) -> Dict:
+        """
+        准备完整的 Vault 输出数据（包含 chain, address, balance, transactions）
+
+        Returns:
+            Dict: 完整的 Vault 信息
+        """
+        # 获取持仓数据
+        holdings_output = await self.prepare_holdings_output()
+
+        # 获取最近的交易历史
+        transactions = await self.get_recent_transactions(self.vault_address, limit=10)
+
+        # 构建完整的 vault 输出
+        vault_output = {
+            "chain": self.chain,
+            "chain_id": self.chain_id,
+            "address": self.vault_address,
+            "balance": {
+                "holdings": holdings_output.get("holdings", []),
+                "total_value_usd": holdings_output.get("total_value_usd", 0.0),
+                "token_count": len(holdings_output.get("holdings", [])),
+                "timestamp": holdings_output.get("timestamp") or datetime.utcnow().isoformat() + "Z",
+            },
+            "transactions": transactions,
+            "success": holdings_output.get("success", False),
+            "message": holdings_output.get("message", ""),
+        }
+
+        # Include token_count for Flow EVM if available
+        if "token_count" in holdings_output:
+            vault_output["balance"]["token_count"] = holdings_output["token_count"]
+
+        return vault_output
+
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
@@ -389,27 +505,30 @@ class VaultNode(NodeBase):
             # 查询用户持仓
             self.holdings_result = await self.query_user_holdings(self.vault_address)
 
-            # 准备输出数据 (现在是async方法)
-            holdings_output = await self.prepare_holdings_output()
+            # 准备完整的 vault 输出数据 (包含 balance 和 transactions)
+            vault_output = await self.prepare_vault_output()
             await self.persist_log(
-                f"Holdings query result: success={holdings_output.get('success')}, result={holdings_output}",
+                f"Vault query result: success={vault_output.get('success')}, chain={vault_output.get('chain')}, address={vault_output.get('address')}",
                 "INFO",
             )
 
-            # 发送持仓信息信号给下游节点
+            # 发送完整的 vault 信息信号给下游节点
             if not await self.send_signal(
-                BALANCE_HANDLE, SignalType.VAULT_INFO, payload=holdings_output
+                VAULT_OUTPUT_HANDLE, SignalType.VAULT_INFO, payload=vault_output
             ):
-                await self.persist_log("Failed to send vault holdings signal", "ERROR")
+                await self.persist_log("Failed to send vault info signal", "ERROR")
                 await self.set_status(
-                    NodeStatus.FAILED, "Failed to send vault holdings signal"
+                    NodeStatus.FAILED, "Failed to send vault info signal"
                 )
                 return False
 
             # 完成节点执行
             await self.set_status(NodeStatus.COMPLETED)
+            balance_info = vault_output.get('balance', {})
             await self.persist_log(
-                f"Vault node execution completed: user={self.vault_address}, holdings_count={len(holdings_output.get('holdings', []))}, total_value_usd={holdings_output.get('total_value_usd', 0.0)}",
+                f"Vault node execution completed: chain={vault_output.get('chain')}, address={vault_output.get('address')}, "
+                f"holdings_count={len(balance_info.get('holdings', []))}, total_value_usd={balance_info.get('total_value_usd', 0.0)}, "
+                f"transactions_count={len(vault_output.get('transactions', []))}",
                 "INFO",
             )
             return True
@@ -424,6 +543,10 @@ class VaultNode(NodeBase):
             await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, f"Vault node execution error: {str(e)}")
             return False
+        finally:
+            # Close HTTP client
+            if hasattr(self, '_http_client'):
+                await self._http_client.aclose()
 
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
@@ -451,12 +574,31 @@ class VaultNode(NodeBase):
             example="0x6a1a233...",
             auto_update_attr="vault_address",
         )
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         self.register_output_handle(
-            name=BALANCE_HANDLE,
+            name=VAULT_OUTPUT_HANDLE,
             data_type=dict,
-            description="Vault Balance - User holdings and balance information in vault",
-            example={"total_value_usd": 1000.0, "holdings": [{"token": "APT", "amount": "10.5"}]},
+            description="Complete vault information including chain, address, balance, and recent transactions",
+            example={
+                "chain": "aptos",
+                "chain_id": None,
+                "address": "0x6a1a233...",
+                "balance": {
+                    "holdings": [{"token_symbol": "APT", "amount": "10.5", "value_usd": 52.3}],
+                    "total_value_usd": 1000.0,
+                    "token_count": 2,
+                    "timestamp": "2024-01-01T12:00:00Z"
+                },
+                "transactions": [
+                    {
+                        "operation_type": "swap",
+                        "transaction_hash": "0xabc...",
+                        "input_token_address": "0xa",
+                        "output_token_address": "0xb",
+                        "created_at": "2024-01-01T12:00:00Z"
+                    }
+                ]
+            },
         )

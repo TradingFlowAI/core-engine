@@ -25,9 +25,9 @@ FROM_TOKEN_HANDLE = "from_token"
 TO_TOKEN_HANDLE = "to_token"
 AMOUNT_IN_HANDLE_HUMAN_READABLE = "amount_in_human_readable"
 AMOUNT_IN_HANDLE_PERCENTAGE = "amount_in_percentage"
-VAULT_ADDRESS_HANDLE = "vault_address"
+VAULT_HANDLE = "vault"
 SLIPPAGE_TOLERANCE_HANDLE = "slippery"
-CHAIN_HANDLE = "chain"
+# output handles
 TX_RECEIPT_HANDLE = "trade_receipt"
 
 getcontext().prec = 50
@@ -78,10 +78,9 @@ def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, s
 @register_node_type(
     "swap_node",
     default_params={
-        "chain": "aptos",
+        "vault": None,
         "from_token": None,
         "to_token": None,
-        "vault_address": None,
         "slippery": 1.0,
         "amount_in_percentage": None,
         "amount_in_human_readable": None,
@@ -112,10 +111,9 @@ class SwapNode(NodeBase):
         cycle: int,
         node_id: str,
         name: str,
-        chain: str = "aptos",
+        vault: Optional[Dict] = None,
         from_token: str = None,
         to_token: str = None,
-        vault_address: str = None,
         amount_in_percentage: Optional[float] = None,
         amount_in_human_readable: Optional[float] = None,
         slippery: float = 1.0,
@@ -125,7 +123,7 @@ class SwapNode(NodeBase):
         kwargs.setdefault('version', "0.0.2")
         kwargs.setdefault('display_name', "Swap Node")
         kwargs.setdefault('node_category', "instance")
-        
+
         super().__init__(
             flow_id=flow_id,
             component_id=component_id,
@@ -135,13 +133,18 @@ class SwapNode(NodeBase):
             **kwargs,
         )
 
-        if chain not in ["aptos", "flow_evm"]:
-            raise ValueError(f"Unsupported chain: {chain}")
+        # Extract vault information from vault object
+        self.vault = vault
+        self.chain = vault.get("chain", "aptos") if vault else "aptos"
+        self.vault_address = vault.get("address") if vault else None
+        self.vault_balance = vault.get("balance") if vault else None
+        self.vault_transactions = vault.get("transactions", []) if vault else []
 
-        self.chain = chain
+        if self.chain not in ["aptos", "flow_evm"]:
+            raise ValueError(f"Unsupported chain: {self.chain}")
+
         self.from_token = from_token
         self.to_token = to_token
-        self.vault_address = vault_address
         self.slippery = slippery
         self.amount_in_percentage = amount_in_percentage
         self.amount_in_human_readable = amount_in_human_readable
@@ -255,46 +258,46 @@ class SwapNode(NodeBase):
     async def get_estimated_min_output_amount_from_pool(self, amount_in: int, slippage: float, pool_data: dict) -> int:
         """
         Use pool exchange rate to calculate estimated min output amount (no price API dependency)
-        
+
         Args:
             amount_in: Input amount in wei
             slippage: Slippage tolerance percentage (e.g., 0.5 for 0.5%)
             pool_data: Pool information from monitor API
-            
+
         Returns:
             int: Estimated minimum output amount after slippage
         """
         try:
             pool_info = pool_data.get("pool_info", {})
             current_sqrt_price = int(pool_info.get("sqrtPrice", 0))
-            
+
             if current_sqrt_price == 0:
                 pool_inner = pool_info.get("pool", {})
                 current_sqrt_price = int(pool_inner.get("sqrtPrice", 0))
-                
+
             if current_sqrt_price == 0:
                 raise ValueError("No valid sqrtPrice found in pool data")
 
             await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "DEBUG")
-            
+
             # Calculate price from sqrt_price using X64 format (confirmed by Aptos docs)
             # sqrt_price_limit: a x64 fixed-point number
             sqrt_price_x64 = Decimal(current_sqrt_price) / Decimal(2**64)
             price_x64 = sqrt_price_x64 ** 2
-            
+
             await self.persist_log(f"X64 calculation: sqrt_price_raw={current_sqrt_price}, sqrt_price_x64={sqrt_price_x64}, price_x64={price_x64}", "DEBUG")
-            
+
             # Use X64 format as specified in Aptos documentation
             price_decimal = price_x64
-            
+
             # Determine trade direction for price conversion
             trade_direction, token0, token1 = self._determine_trade_direction(
-                self.input_token_address, 
+                self.input_token_address,
                 self.output_token_address
             )
-            
+
             amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
-            
+
             # Debug detailed pool and token info
             await self.persist_log(
                 f"Pool info details: "
@@ -304,16 +307,16 @@ class SwapNode(NodeBase):
                 f"trade_direction={trade_direction}",
                 "DEBUG"
             )
-            
+
             # Raw X64 price calculation
             await self.persist_log(f"Raw X64 price (no decimal adjustment): {price_decimal}", "DEBUG")
-            
+
             # Adjust price for token decimal differences
             # Pool price is in terms of base units, need to convert to human-readable units
             # If output has more decimals than input, we need to scale up the price
             decimal_adjustment = Decimal(10) ** (self.output_token_decimals - self.input_token_decimals)
             adjusted_price = price_decimal * decimal_adjustment
-            
+
             await self.persist_log(
                 f"Decimal adjustment: input_decimals={self.input_token_decimals}, "
                 f"output_decimals={self.output_token_decimals}, "
@@ -321,9 +324,9 @@ class SwapNode(NodeBase):
                 f"adjusted_price={adjusted_price}",
                 "DEBUG"
             )
-            
+
             price_decimal = adjusted_price
-            
+
             if trade_direction == "token0_to_token1":
                 # token0 -> token1: use price directly
                 # price = token1/token0, so token1_amount = token0_amount * price
@@ -334,12 +337,12 @@ class SwapNode(NodeBase):
                 # price = token1/token0, so token0_amount = token1_amount / price
                 output_amount_decimal = amount_in_decimal / price_decimal
                 await self.persist_log(f"Trade direction: token1->token0, inverse_price={1/price_decimal}", "DEBUG")
-            
+
             # Apply slippage protection
             slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
             output_amount_with_slippage = output_amount_decimal * slippage_factor
             output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
-            
+
             # Safety check for uint64 overflow
             uint64_max = 2**64 - 1
             if output_amount_raw > uint64_max:
@@ -353,16 +356,16 @@ class SwapNode(NodeBase):
                     f"output_token_decimals={self.output_token_decimals}, input_token_decimals={self.input_token_decimals}", "DEBUG"
                 )
                 raise ValueError(f"Calculated swap amount {output_amount_raw} exceeds uint64 maximum")
-            
+
             await self.persist_log(
                 f"Pool-based calculation: input={amount_in_decimal} -> "
                 f"output_before_slippage={output_amount_decimal} -> "
-                f"output_after_{slippage}%_slippage={output_amount_raw}", 
+                f"output_after_{slippage}%_slippage={output_amount_raw}",
                 "INFO"
             )
-            
+
             return output_amount_raw
-            
+
         except Exception as e:
             await self.persist_log(f"Error calculating output from pool: {str(e)}", "ERROR")
             raise ValueError(f"Cannot calculate output from pool data: {str(e)}")
@@ -573,7 +576,7 @@ class SwapNode(NodeBase):
     def _determine_trade_direction(self, input_token: str, output_token: str) -> tuple[str, str, str]:
         """
         Determine trade direction based on token addresses (Uniswap V3 sorting rule)
-        
+
         Returns:
             tuple: (trade_direction, token0, token1)
         """
@@ -582,9 +585,9 @@ class SwapNode(NodeBase):
             token0, token1 = input_token, output_token
             trade_direction = "token0_to_token1"  # Price goes UP
         else:
-            token0, token1 = output_token, input_token  
+            token0, token1 = output_token, input_token
             trade_direction = "token1_to_token0"  # Price goes DOWN
-            
+
         return trade_direction, token0, token1
 
     async def calculate_dynamic_sqrt_price_limit(self, best_pool: dict, slippage_pct: float = 5.0) -> int:
@@ -615,35 +618,35 @@ class SwapNode(NodeBase):
 
             # Determine trade direction
             trade_direction, token0, token1 = self._determine_trade_direction(
-                self.input_token_address, 
+                self.input_token_address,
                 self.output_token_address
             )
-            
+
             # Calculate correct sqrt multiplier: sqrt(1 ± slippage)
             import math
             slippage_decimal = slippage_pct / 100
-            
+
             # Determine slippage direction based on trade semantics, not just token order
             # When selling volatile token (APT) for stable (USDC): use lower limit (protect against price drop)
             # When buying volatile token (APT) with stable (USDC): use upper limit (protect against price rise)
-            
+
             # Check if we're selling the "main" token (APT) or buying it
             apt_address = "0xa"  # APT is always the main volatile token
             is_selling_apt = (self.input_token_address == apt_address)
-            
+
             if is_selling_apt:
                 # Selling APT: protect against price dropping, use lower limit
                 sqrt_multiplier = math.sqrt(1 - slippage_decimal)
                 direction = "-"
                 protection_type = "selling APT, lower limit"
             else:
-                # Buying APT: protect against price rising, use upper limit  
+                # Buying APT: protect against price rising, use upper limit
                 sqrt_multiplier = math.sqrt(1 + slippage_decimal)
                 direction = "+"
                 protection_type = "buying APT, upper limit"
-            
+
             sqrt_price_limit = int(current_sqrt_price * sqrt_multiplier)
-            
+
             await self.persist_log(
                 f"Dynamic sqrt_price_limit: {self.input_token_address}→{self.output_token_address} "
                 f"= {trade_direction} → {direction}{slippage_pct}% ({protection_type}) → "
@@ -686,7 +689,7 @@ class SwapNode(NodeBase):
                 if best_pool:
                     # Calculate dynamic sqrt_price_limit based on trade direction and user slippage
                     sqrt_price_limit_int = await self.calculate_dynamic_sqrt_price_limit(
-                        best_pool, 
+                        best_pool,
                         slippage_pct=self.slippery  # User input is already percentage (e.g., 0.5 for 0.5%)
                     )
                     sqrt_price_limit = str(sqrt_price_limit_int)
@@ -790,7 +793,7 @@ class SwapNode(NodeBase):
     async def _publish_trading_signal(self, trade_receipt: Dict):
         """
         Publish trading signal to MQ for co-trading system
-        
+
         Args:
             trade_receipt: Transaction receipt with trade details
         """
@@ -799,7 +802,7 @@ class SwapNode(NodeBase):
             if not trade_receipt.get("success", False):
                 await self.persist_log("Skipping signal publish - transaction failed", "INFO")
                 return
-            
+
             # Prepare signal data
             signal_data = {
                 "fromToken": self.from_token,
@@ -809,7 +812,7 @@ class SwapNode(NodeBase):
                 "slippageTolerance": self.slippery,
                 "chainType": self.chain
             }
-            
+
             # Publish to MQ
             success = publish_trading_signal(
                 flow_id=self.flow_id,
@@ -820,12 +823,12 @@ class SwapNode(NodeBase):
                 node_id=self.node_id,
                 node_type='swap_node'
             )
-            
+
             if success:
                 await self.persist_log(f"Trading signal published to MQ: flow={self.flow_id}", "INFO")
             else:
                 await self.persist_log("Failed to publish trading signal to MQ", "WARNING")
-                
+
         except Exception as e:
             # Don't fail the node if signal publish fails
             await self.persist_log(f"Error publishing trading signal: {str(e)}", "WARNING")
@@ -871,6 +874,19 @@ class SwapNode(NodeBase):
 
     def _register_input_handles(self) -> None:
         """注册输入句柄"""
+        # Register vault input (unified)
+        self.register_input_handle(
+            name=VAULT_HANDLE,
+            data_type=dict,
+            description="Vault - Complete vault information from Vault Node",
+            example={
+                "chain": "aptos",
+                "address": "0x6a1a233...",
+                "balance": {...},
+                "transactions": [...]
+            },
+            auto_update_attr="vault",
+        )
         self.register_input_handle(
             name=FROM_TOKEN_HANDLE,
             data_type=str,
@@ -884,20 +900,6 @@ class SwapNode(NodeBase):
             description="To Token - Target token symbol (e.g., 'BTC')",
             example="BTC",
             auto_update_attr="to_token",
-        )
-        self.register_input_handle(
-            name=CHAIN_HANDLE,
-            data_type=str,
-            description="Chain - Blockchain network ('aptos' or 'flow_evm')",
-            example="aptos",
-            auto_update_attr="chain",
-        )
-        self.register_input_handle(
-            name=VAULT_ADDRESS_HANDLE,
-            data_type=str,
-            description="Vault Address - Vault contract address",
-            example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
-            auto_update_attr="vault_address",
         )
         self.register_input_handle(
             name=AMOUNT_IN_HANDLE_PERCENTAGE,
@@ -920,7 +922,7 @@ class SwapNode(NodeBase):
             example=1.0,
             auto_update_attr="slippery",
         )
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         self.register_output_handle(
@@ -936,10 +938,9 @@ class SwapNode(NodeBase):
 @register_node_type(
     "buy_node",
     default_params={
-        "chain": "aptos",
+        "vault": None,
         "buy_token": None,
         "base_token": None,
-        "vault_address": None,
         # "order_type": "market",  # COMMENTED: Not in frontend
         # "limited_price": None,  # COMMENTED: Not in frontend
         "amount_in_percentage": None,
@@ -998,6 +999,19 @@ class BuyNode(SwapNode):
 
     def _register_input_handles(self) -> None:
         """注册买入节点特化的输入句柄"""
+        # Register vault input (unified)
+        self.register_input_handle(
+            name=VAULT_HANDLE,
+            data_type=dict,
+            description="Vault - Complete vault information from Vault Node",
+            example={
+                "chain": "aptos",
+                "address": "0x6a1a233...",
+                "balance": {...},
+                "transactions": [...]
+            },
+            auto_update_attr="vault",
+        )
         self.register_input_handle(
             name="buy_token",
             data_type=str,
@@ -1011,20 +1025,6 @@ class BuyNode(SwapNode):
             description="With Token - Base token symbol used for payment",
             example="USDT",
             auto_update_attr="base_token",
-        )
-        self.register_input_handle(
-            name=CHAIN_HANDLE,
-            data_type=str,
-            description="Chain - Blockchain network ('aptos' or 'flow_evm')",
-            example="aptos",
-            auto_update_attr="chain",
-        )
-        self.register_input_handle(
-            name=VAULT_ADDRESS_HANDLE,
-            data_type=str,
-            description="Vault Address - Vault contract address",
-            example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
-            auto_update_attr="vault_address",
         )
         # COMMENTED: Not in frontend
         # self.register_input_handle(
@@ -1079,10 +1079,9 @@ class BuyNode(SwapNode):
 @register_node_type(
     "sell_node",
     default_params={
-        "chain": "aptos",
+        "vault": None,
         "sell_token": None,
         "base_token": None,
-        "vault_address": None,
         # "order_type": "market",  # COMMENTED: Not in frontend
         # "limited_price": None,  # COMMENTED: Not in frontend
         "amount_in_percentage": None,
@@ -1140,6 +1139,19 @@ class SellNode(SwapNode):
 
     def _register_input_handles(self) -> None:
         """注册卖出节点特化的输入句柄"""
+        # Register vault input (unified)
+        self.register_input_handle(
+            name=VAULT_HANDLE,
+            data_type=dict,
+            description="Vault - Complete vault information from Vault Node",
+            example={
+                "chain": "aptos",
+                "address": "0x6a1a233...",
+                "balance": {...},
+                "transactions": [...]
+            },
+            auto_update_attr="vault",
+        )
         self.register_input_handle(
             name="sell_token",
             data_type=str,
@@ -1153,20 +1165,6 @@ class SellNode(SwapNode):
             description="With Token - Base token symbol to receive",
             example="USDT",
             auto_update_attr="base_token",
-        )
-        self.register_input_handle(
-            name=CHAIN_HANDLE,
-            data_type=str,
-            description="Chain - Blockchain network ('aptos' or 'flow_evm')",
-            example="aptos",
-            auto_update_attr="chain",
-        )
-        self.register_input_handle(
-            name=VAULT_ADDRESS_HANDLE,
-            data_type=str,
-            description="Vault Address - Vault contract address",
-            example="0x6a1a233e8034ad0cf8d68951864a5a49819b3e9751da4b9fe34618dd41ea9d0d",
-            auto_update_attr="vault_address",
         )
         # COMMENTED: Not in frontend
         # self.register_input_handle(
