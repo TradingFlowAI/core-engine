@@ -146,8 +146,38 @@ class SwapNode(NodeBase):
         self.from_token = from_token
         self.to_token = to_token
         self.slippery = slippery
-        self.amount_in_percentage = amount_in_percentage
-        self.amount_in_human_readable = amount_in_human_readable
+
+        # 🔧 Handle Switch type from frontend
+        # Frontend now sends amount_in_human_readable as { mode: "number"|"percentage", value: "100" }
+        if isinstance(amount_in_human_readable, dict) and "mode" in amount_in_human_readable:
+            switch_value = amount_in_human_readable
+            mode = switch_value.get("mode")
+            value = switch_value.get("value")
+
+            if mode == "number":
+                # Number mode: use as human_readable amount
+                try:
+                    self.amount_in_human_readable = float(value) if value else None
+                    self.amount_in_percentage = None
+                except (ValueError, TypeError):
+                    self.amount_in_human_readable = None
+                    self.amount_in_percentage = None
+            elif mode == "percentage":
+                # Percentage mode: use as percentage
+                try:
+                    self.amount_in_percentage = float(value) if value else None
+                    self.amount_in_human_readable = None
+                except (ValueError, TypeError):
+                    self.amount_in_percentage = None
+                    self.amount_in_human_readable = None
+            else:
+                # Unknown mode, fall back to original parameters
+                self.amount_in_percentage = amount_in_percentage
+                self.amount_in_human_readable = None
+        else:
+            # Legacy format or direct parameters
+            self.amount_in_percentage = amount_in_percentage
+            self.amount_in_human_readable = amount_in_human_readable
 
         # Convert and validate inputs
         if self.amount_in_percentage is not None:
