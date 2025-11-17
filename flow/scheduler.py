@@ -117,12 +117,12 @@ class FlowScheduler:
         except Exception as e:
             # Don't let logging errors break scheduler execution
             logger.warning("Failed to persist log to database: %s", str(e))
-        
+
         # Send log to WebSocket (via Redis Pub/Sub)
         # Use the async redis_log_publisher for consistency with NodeBase
         try:
             from core.redis_log_publisher_async import publish_log_async
-            
+
             log_entry = {
                 "node_id": node_id,
                 "level": log_level_upper.lower(),
@@ -130,7 +130,7 @@ class FlowScheduler:
                 "log_source": log_source,
                 "metadata": log_metadata,
             }
-            
+
             # Publish to Redis asynchronously (with automatic retry)
             await publish_log_async(flow_id, cycle, log_entry, max_retries=3)
         except Exception as e:
@@ -213,7 +213,7 @@ class FlowScheduler:
             "next_execution": 0,  # Timestamp, 0 means execute immediately
             "created_at": existing_flow.get("created_at") if existing_flow else datetime.now().isoformat(),
         }
-        
+
         # Add user_id for Quest tracking if provided
         if user_id:
             flow_data["user_id"] = user_id
@@ -1156,10 +1156,10 @@ class FlowScheduler:
                 log_source="scheduler"
             )
             raise ValueError(error_msg)
-        
+
         # Get user_id for Quest activity tracking
         user_id = flow_data.get("user_id")
-        
+
         # Publish RUN_FLOW event for Quest tracking
         if user_id:
             try:
@@ -1309,16 +1309,16 @@ class FlowScheduler:
             log_level="INFO",
             log_source="scheduler"
         )
-        
+
         # Publish COMPLETE_FLOW event for Quest tracking
         if user_id:
             try:
                 # Check if all nodes completed successfully
                 all_success = all(
-                    result.get("status") != "error" 
+                    result.get("status") != "error"
                     for result in completed_results.values()
                 )
-                
+
                 publish_activity(
                     user_id=user_id,
                     event_type='COMPLETE_FLOW',
@@ -1427,7 +1427,7 @@ class FlowScheduler:
         # Get user_id from flow data for Quest tracking
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
         user_id = flow_data.get("user_id")
-        
+
         # Prepare node execution request data
         node_data = {
             "flow_id": flow_id,
@@ -1587,12 +1587,12 @@ async def example_usage():
         "nodes": [
             {
                 "id": "A",
-                "type": "binance_price_node",
+                "type": "price_node",
                 "config": {
-                    "node_class_type": "binance_price_node",
-                    "symbol": "BTCUSDT",
-                    "interval": "1h",
-                    "limit": 10,
+                    "node_class_type": "price_node",
+                    "source": "coingecko",
+                    "data_type": "kline",
+                    "symbol": "bitcoin",
                 },
             },
         ],

@@ -17,7 +17,7 @@ def init_all_builtin_nodes():
     初始化所有内置节点
     为每个节点注册到版本控制系统
     """
-    
+
     # 注册所有内置节点（v0.0.1）
     node_registrations = [
         {
@@ -76,14 +76,14 @@ def init_all_builtin_nodes():
             }
         },
         {
-            'node_type': 'binance_price_node',
+            'node_type': 'price_node',
             'version': '0.0.1',
-            'module': 'nodes.binance_price_node',
-            'class': 'BinancePriceNode',
+            'module': 'nodes.price_node',
+            'class': 'PriceNode',
             'metadata': {
-                'display_name': 'Binance Price Node',
+                'display_name': 'Price Node',
                 'category': 'data',
-                'description': 'Fetch prices from Binance'
+                'description': 'Fetch cryptocurrency prices from CoinGecko'
             }
         },
         {
@@ -142,36 +142,36 @@ def init_all_builtin_nodes():
             }
         }
     ]
-    
+
     # 动态导入和注册
     for registration in node_registrations:
         try:
             # 动态导入模块
             module = __import__(registration['module'], fromlist=[registration['class']])
             node_class = getattr(module, registration['class'])
-            
+
             # 使用装饰器注册
             decorated_class = register_node(
                 registration['node_type'],
                 version=registration['version'],
                 **registration['metadata']
             )(node_class)
-            
+
             print(f"✓ Registered: {registration['node_type']} v{registration['version']}")
-            
+
         except Exception as e:
             print(f"✗ Failed to register {registration['node_type']}: {e}")
-    
+
     print(f"\nTotal nodes registered: {len(node_registrations)}")
 
 
 if __name__ == '__main__':
     # 运行注册
     init_all_builtin_nodes()
-    
+
     # 打印注册信息
     from core.node_registry import NodeRegistry
-    
+
     print("\n=== Registered Nodes ===")
     for node_type in NodeRegistry.get_all_node_types():
         versions = NodeRegistry.get_all_versions(node_type)

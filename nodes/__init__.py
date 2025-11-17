@@ -2,7 +2,7 @@
 
 # 导入所有内置节点，确保它们都被注册
 from .ai_model_node import AIModelNode
-from .binance_price_node import BinancePriceNode
+from .price_node import PriceNode
 from .code_node import CodeNode
 from .dataset_node import DatasetNode
 # from .hyperion_dex_trade_node import HyperionDEXTradeNode
