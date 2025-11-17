@@ -211,8 +211,7 @@ class SwapNode(NodeBase):
 
     async def _resolve_token_addresses(self) -> None:
         """Resolve token addresses from symbols based on chain"""
-        if not self.from_token or not self.to_token:
-            raise ValueError("Both from_token and to_token must be provided")
+        # 注意：空值检查已移至 execute() 方法中，这里假设 token 已经存在
 
         if self.chain == "aptos":
             self.input_token_address = get_aptos_token_address_by_symbol(self.from_token)
@@ -866,6 +865,26 @@ class SwapNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
+            # 🔧 NEW: 支持空值跳过交易 - 用于条件交易控制
+            if not self.from_token or not self.to_token:
+                await self.persist_log(
+                    f"Skipping swap: from_token='{self.from_token}', to_token='{self.to_token}' (empty token, no trade)", "INFO"
+                )
+                # 发送空的交易收据表示跳过
+                empty_receipt = {
+                    "success": True,
+                    "skipped": True,
+                    "message": "Trade skipped due to empty token value",
+                    "chain": self.chain,
+                    "vault_address": self.vault_address,
+                    "from_token": self.from_token or "",
+                    "to_token": self.to_token or "",
+                }
+                await self.send_signal(TX_RECEIPT_HANDLE, SignalType.DEX_TRADE_RECEIPT, payload=empty_receipt)
+                await self.set_status(NodeStatus.COMPLETED)
+                await self.persist_log("SwapNode completed (skipped)", "INFO")
+                return True
+
             await self.persist_log(
                 f"Starting SwapNode: chain={self.chain}, {self.from_token}->{self.to_token}, vault={self.vault_address}", "INFO"
             )
