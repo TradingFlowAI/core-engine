@@ -147,36 +147,54 @@ class SwapNode(NodeBase):
         self.to_token = to_token
         self.slippery = slippery
 
-        # 🔧 Handle Switch type from frontend
-        # Frontend now sends amount_in_human_readable as { mode: "number"|"percentage", value: "100" }
+        # 🔧 Handle Switch type from frontend (v0.4.1+)
+        # Frontend sends: { mode: "from_fixed"|"from_percent"|"to_fixed"|"to_percent", value: "100" }
         if isinstance(amount_in_human_readable, dict) and "mode" in amount_in_human_readable:
             switch_value = amount_in_human_readable
             mode = switch_value.get("mode")
             value = switch_value.get("value")
 
-            if mode == "number":
-                # Number mode: use as human_readable amount
-                try:
-                    self.amount_in_human_readable = float(value) if value else None
-                    self.amount_in_percentage = None
-                except (ValueError, TypeError):
-                    self.amount_in_human_readable = None
-                    self.amount_in_percentage = None
-            elif mode == "percentage":
-                # Percentage mode: use as percentage
-                try:
-                    self.amount_in_percentage = float(value) if value else None
-                    self.amount_in_human_readable = None
-                except (ValueError, TypeError):
-                    self.amount_in_percentage = None
-                    self.amount_in_human_readable = None
+            # Parse value
+            try:
+                parsed_value = float(value) if value else None
+            except (ValueError, TypeError):
+                parsed_value = None
+
+            # From modes (legacy compatible)
+            if mode in ["from_fixed", "number"]:
+                self.amount_in_human_readable = parsed_value
+                self.amount_in_percentage = None
+                self.amount_direction = "from"
+                self.amount_type = "fixed"
+            elif mode in ["from_percent", "percentage"]:
+                self.amount_in_percentage = parsed_value
+                self.amount_in_human_readable = None
+                self.amount_direction = "from"
+                self.amount_type = "percent"
+            # To modes (new in v0.4.1)
+            elif mode == "to_fixed":
+                self.amount_in_human_readable = None
+                self.amount_in_percentage = None
+                self.amount_target = parsed_value
+                self.amount_direction = "to"
+                self.amount_type = "fixed"
+            elif mode == "to_percent":
+                self.amount_in_human_readable = None
+                self.amount_in_percentage = None
+                self.amount_target = parsed_value
+                self.amount_direction = "to"
+                self.amount_type = "percent"
             else:
-                # Unknown mode, fall back to original parameters
+                # Unknown mode
                 self.amount_in_percentage = amount_in_percentage
                 self.amount_in_human_readable = None
+                self.amount_direction = "from"
+                self.amount_type = "fixed"
         else:
             # Legacy format or direct parameters
             self.amount_in_percentage = amount_in_percentage
+            self.amount_direction = "from"
+            self.amount_type = "fixed"
             self.amount_in_human_readable = amount_in_human_readable
 
         # Convert and validate inputs
