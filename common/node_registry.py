@@ -142,6 +142,7 @@ class NodeRegistry:
             or f"{node_class_type}-{node_id}",
             "input_edges": input_edges,
             "output_edges": output_edges,
+            "node_type": node_class_type,  # 添加 node_type 参数
         }
 
         # Update default parameters
