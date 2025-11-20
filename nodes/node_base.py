@@ -1200,6 +1200,16 @@ class NodeBase(abc.ABC):
             status: New status
             error_message: Error message (if any)
         """
+        # 🔒 最终状态保护：COMPLETED, FAILED, TERMINATED 是最终状态，不能被改变
+        final_states = {NodeStatus.COMPLETED, NodeStatus.FAILED, NodeStatus.TERMINATED}
+
+        if self.status in final_states:
+            self.logger.warning(
+                f"Node {self.node_id} is in final state {self.status.value}, "
+                f"cannot change to {status.value}. Ignoring status change."
+            )
+            return
+
         self.status = status
         self.error_message = error_message
 

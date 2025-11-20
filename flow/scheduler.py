@@ -252,12 +252,58 @@ class FlowScheduler:
         # Update flow status
         await self.redis.hset(f"flow:{flow_id}", "status", "stopped")
 
+        # 🛑 Update all pending/running nodes to terminated status
+        # Get the latest cycle
+        flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+        last_cycle = int(flow_data.get("last_cycle", -1))
+
+        if last_cycle >= 0:
+            # Get node task manager
+            node_manager = NodeTaskManager.get_instance()
+            await node_manager.initialize()
+
+            # Get all nodes in the latest cycle
+            comprehensive_nodes = await node_manager.get_comprehensive_node_status(
+                flow_id=flow_id,
+                cycle=last_cycle
+            )
+
+            # Update pending and running nodes to terminated
+            terminated_count = 0
+            for node_id, node_data in comprehensive_nodes.items():
+                node_status = node_data.get('status', '').lower()
+                if node_status in ['pending', 'running']:
+                    node_task_id = f"{flow_id}_{last_cycle}_{node_id}"
+                    await node_manager.update_task_status(
+                        node_task_id,
+                        "terminated",
+                        {
+                            "message": "Flow stopped by user",
+                            "terminated_at": datetime.now().isoformat(),
+                        }
+                    )
+                    terminated_count += 1
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=last_cycle,
+                        message=f"Node {node_id} status updated to terminated (was {node_status})",
+                        log_level="INFO",
+                        log_source="scheduler",
+                        node_id=node_id
+                    )
+
+            logger.info(
+                "Flow %s stopped, %d nodes updated to terminated status",
+                flow_id,
+                terminated_count
+            )
+
         # Remove from running list
         if flow_id in self.running_flows:
             self.running_flows.remove(flow_id)
 
         logger.info("Flow %s scheduling has been stopped", flow_id)
-        return {"status": "stopped", "flow_id": flow_id}
+        return {"status": "stopped", "flow_id": flow_id, "terminated_nodes": terminated_count if last_cycle >= 0 else 0}
 
     async def get_flow_status(self, flow_id: str) -> Dict:
         """Get flow status information"""
@@ -350,25 +396,37 @@ class FlowScheduler:
             # Get total nodes in the flow from Redis set
             total_flow_nodes = await self.redis.scard(f"flow:{flow_id}:cycle:{cycle}:nodes")
 
-            # Get basic flow statistics
+            # 📊 详细统计所有节点状态（区分 failed 和 terminated）
             total_nodes = len(comprehensive_nodes)
             running_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'running')
             completed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'completed')
+            failed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'failed')
+            terminated_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'terminated')
+            pending_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'pending')
+            # 保留 error 作为向后兼容（可能有些节点使用 'error' 而非 'failed'）
             error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
 
-            # Calculate flow status based on node states
-            if error_nodes > 0:
-                flow_status = "error"
+            # 🔄 根据节点状态计算 Flow 状态（优先级从高到低）
+            # 1. 如果有任何节点失败 -> flow 状态为 failed
+            if failed_nodes > 0 or error_nodes > 0:
+                flow_status = "failed"
+            # 2. 如果有节点被终止 -> flow 状态为 terminated
+            elif terminated_nodes > 0:
+                flow_status = "terminated"
+            # 3. 如果有节点在运行 -> flow 状态为 running
             elif running_nodes > 0:
                 flow_status = "running"
+            # 4. 如果所有节点都完成 -> flow 状态为 completed
             elif completed_nodes == total_flow_nodes and total_flow_nodes > 0:
-                # Only set to completed if ALL nodes in the flow are completed
                 flow_status = "completed"
+            # 5. 如果还有 pending 节点 -> flow 状态为 running
+            elif pending_nodes > 0:
+                flow_status = "running"
+            # 6. 默认状态
             else:
-                # If no nodes are running or errored, but not all are completed, flow is still running
                 flow_status = "running"
 
-            # If flow is stopped, override the status
+            # ⏸️ 如果 flow 被手动停止，覆盖计算的状态
             if flow_data.get("status") == "stopped":
                 flow_status = "stopped"
 
@@ -383,8 +441,10 @@ class FlowScheduler:
                     "total_nodes": total_nodes,
                     "running_nodes": running_nodes,
                     "completed_nodes": completed_nodes,
-                    "error_nodes": error_nodes,
-                    "pending_nodes": total_nodes - running_nodes - completed_nodes - error_nodes
+                    "failed_nodes": failed_nodes,
+                    "terminated_nodes": terminated_nodes,
+                    "pending_nodes": pending_nodes,
+                    "error_nodes": error_nodes  # 向后兼容
                 },
                 "flow_metadata": {
                     "name": flow_data.get("name"),
@@ -1222,6 +1282,36 @@ class FlowScheduler:
         # Get pre-computed edge mappings
         input_edges_map = flow_structure.get("input_edges_map", {})
         output_edges_map = flow_structure.get("output_edges_map", {})
+
+        # 🚀 Initialize all nodes with running status before dispatching to workers
+        # This ensures the frontend immediately sees all nodes as running
+        node_manager = NodeTaskManager.get_instance()
+        await node_manager.initialize()
+
+        for node_id, node_info in node_map.items():
+            component_id = node_component_map.get(node_id)
+            if component_id:
+                node_task_id = f"{flow_id}_{cycle}_{node_id}"
+                initial_task_info = {
+                    "node_task_id": node_task_id,
+                    "flow_id": flow_id,
+                    "cycle": cycle,
+                    "node_id": node_id,
+                    "component_id": component_id,
+                    "node_type": node_info.get("type", "unknown"),
+                    "status": "pending",  # 🔥 Set initial status to pending (worker will update to running)
+                    "created_at": datetime.now().isoformat(),
+                    "message": "Flow execution started, node dispatched",
+                }
+                await node_manager.register_task(node_task_id, initial_task_info)
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=f"Node {node_id} initialized with pending status",
+                    log_level="INFO",
+                    log_source="scheduler",
+                    node_id=node_id
+                )
 
         # Create node execution tasks for ALL nodes (not just entry nodes)
         tasks = {}
