@@ -1064,11 +1064,16 @@ class NodeBase(abc.ABC):
             bool: 是否发送成功
         """
         try:
+            # 添加小延迟，等待下游节点初始化消息队列（解决race condition）
+            # 从日志看下游节点需要约150-400ms完成队列绑定，这里等待1秒确保安全
+            await asyncio.sleep(1.0)
+
             await self.node_signal_publisher.send_stop_execution_signal(reason)
-            self.logger.info("Stop execution signal sent, reason: %s", reason)
+
+            self.logger.info("Stop execution signal sent successfully, reason: %s", reason)
             return True
         except Exception as e:
-            self.logger.error("Failed to send stop execution signal: %s", str(e))
+            self.logger.error("Failed to send stop execution signal: %s", str(e), exc_info=True)
             return False
 
     async def _charge_credits_sync(self) -> None:
@@ -1296,7 +1301,25 @@ class NodeBase(abc.ABC):
                         f"Node {self.node_id} received all required signals, starting execution",
                         log_level="INFO",
                     )
-                    await self.node_signal_consumer.close()
+                    # 🔥 关键修改：不要在execute之前关闭consumer，否则收不到STOP_EXECUTION信号
+                    # await self.node_signal_consumer.close()
+
+                    # ✅ 在execute之前检查停止标志，避免不必要的执行
+                    if self._stop_execution_requested:
+                        self.logger.warning(
+                            f"Node {self.node_id} received stop signal before execution, "
+                            f"reason: {self._stop_execution_reason}"
+                        )
+                        await self.set_status(
+                            NodeStatus.TERMINATED,
+                            f"Stopped before execution: {self._stop_execution_reason}"
+                        )
+                        raise NodeStopExecutionException(
+                            f"Node execution stopped before start: {self._stop_execution_reason}",
+                            node_id=self.node_id,
+                            reason=self._stop_execution_reason,
+                            source_node=self._stop_execution_source,
+                        )
 
                     # Charge credits BEFORE execution
                     await self._charge_credits_sync()
@@ -1346,6 +1369,13 @@ class NodeBase(abc.ABC):
                     raise
 
                 finally:
+                    # 🔥 在finally块中关闭consumer，确保无论如何都会清理资源
+                    if self.node_signal_consumer:
+                        try:
+                            await self.node_signal_consumer.close()
+                            self.logger.debug("Node signal consumer closed in finally block")
+                        except Exception as e:
+                            self.logger.error("Error closing node signal consumer: %s", str(e))
                     # Reset Future
                     self._signal_ready_future = None
             else:

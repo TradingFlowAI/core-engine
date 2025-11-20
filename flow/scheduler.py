@@ -406,29 +406,25 @@ class FlowScheduler:
             # 保留 error 作为向后兼容（可能有些节点使用 'error' 而非 'failed'）
             error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
 
-            # 🔄 根据节点状态计算 Flow 状态（优先级从高到低）
-            # 1. 如果有任何节点失败 -> flow 状态为 failed
-            if failed_nodes > 0 or error_nodes > 0:
-                flow_status = "failed"
-            # 2. 如果有节点被终止 -> flow 状态为 terminated
-            elif terminated_nodes > 0:
-                flow_status = "terminated"
-            # 3. 如果有节点在运行 -> flow 状态为 running
-            elif running_nodes > 0:
-                flow_status = "running"
-            # 4. 如果所有节点都完成 -> flow 状态为 completed
-            elif completed_nodes == total_flow_nodes and total_flow_nodes > 0:
-                flow_status = "completed"
-            # 5. 如果还有 pending 节点 -> flow 状态为 running
-            elif pending_nodes > 0:
-                flow_status = "running"
-            # 6. 默认状态
-            else:
-                flow_status = "running"
+            # 🔄 Flow 状态计算逻辑（优先使用存储的终态状态）
+            # 优先使用 Redis 中存储的 flow status（如果是终态：completed/stopped）
+            stored_status = flow_data.get("status")
 
-            # ⏸️ 如果 flow 被手动停止，覆盖计算的状态
-            if flow_data.get("status") == "stopped":
-                flow_status = "stopped"
+            if stored_status in ["completed", "stopped"]:
+                # Run once (interval=0) 完成后或手动停止的 flow，使用存储的状态
+                flow_status = stored_status
+            else:
+                # 否则根据节点状态动态计算
+                # 1. 如果有节点在运行或等待 -> flow 状态为 running
+                if running_nodes > 0 or pending_nodes > 0:
+                    flow_status = "running"
+                # 2. 如果所有节点已完成执行（无论成功、失败或终止）-> flow 状态为 completed
+                # 这符合 Run once 的语义：Flow 层面已跑完，节点错误单独显示
+                elif (completed_nodes + failed_nodes + terminated_nodes) == total_flow_nodes and total_flow_nodes > 0:
+                    flow_status = "completed"
+                # 3. 默认状态
+                else:
+                    flow_status = "running"
 
             return {
                 "flow_id": flow_id,
@@ -1138,8 +1134,10 @@ class FlowScheduler:
                     )
 
                     # Execute flow cycle
+                    execution_result = None
+                    execution_error = None
                     try:
-                        await self._execute_flow_cycle(flow_id, new_cycle)
+                        execution_result = await self._execute_flow_cycle(flow_id, new_cycle)
                     except Exception as e:
                         logger.error(
                             "Error executing flow %s cycle %s: %s",
@@ -1147,6 +1145,29 @@ class FlowScheduler:
                             new_cycle,
                             str(e),
                         )
+                        execution_error = str(e)
+
+                    # 🔔 发送执行完成事件到 WebSocket (通过 Redis Pub/Sub)
+                    try:
+                        completion_event = {
+                            "flow_id": flow_id,
+                            "cycle": new_cycle,
+                            "status": "error" if execution_error else "completed",
+                            "error": execution_error,
+                            "result": execution_result,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+
+                        # 发布到 execution_complete 频道
+                        await self.redis.publish(
+                            f"execution_complete:flow:{flow_id}",
+                            json.dumps(completion_event)
+                        )
+                        logger.info(
+                            f"Published execution_complete event for flow {flow_id} cycle {new_cycle}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to publish execution_complete event: {e}")
 
                     # Update next execution time
                     flow_config = json.loads(flow_data.get("config", "{}"))
