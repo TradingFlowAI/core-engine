@@ -4,8 +4,9 @@ import logging
 import random
 import time
 import traceback
-from datetime import datetime
-from typing import Dict, List, Optional, Set
+from collections import Counter
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set
 
 import httpx
 import redis.asyncio as aioredis
@@ -37,6 +38,15 @@ class FlowScheduler:
         # Initialize flow execution log service
         self._log_service = None
 
+        # Cycle monitoring configuration
+        self._cycle_monitor_tasks: Dict[str, asyncio.Task] = {}
+        self.monitor_poll_interval = self._parse_int_config(
+            CONFIG.get("FLOW_MONITOR_POLL_INTERVAL", 3), default=3
+        )
+        self.monitor_max_wait_seconds = self._parse_int_config(
+            CONFIG.get("FLOW_MONITOR_MAX_WAIT_SECONDS", 300), default=300
+        )
+
     async def initialize(self):
         """Initialize scheduler, connect to Redis"""
         # Connect to Redis
@@ -46,6 +56,9 @@ class FlowScheduler:
 
         # Initialize log service
         await self._initialize_log_service()
+
+        # Attempt to recover flows in case of ungraceful shutdown
+        await self._recover_flows_on_start()
 
     async def shutdown(self):
         """Shutdown scheduler, release resources"""
@@ -172,6 +185,236 @@ class FlowScheduler:
         except Exception as e:
             logger.warning("Failed to cleanup old logs for flow %s: %s", flow_id, str(e))
 
+
+    async def _recover_flows_on_start(self) -> None:
+        """Recover flows that might have been left in running state after restart."""
+        if not self.redis:
+            return
+
+        try:
+            flow_ids = await self._list_registered_flow_ids()
+            if not flow_ids:
+                return
+
+            node_manager = NodeTaskManager.get_instance()
+            await node_manager.initialize()
+
+            for flow_id in flow_ids:
+                try:
+                    await self._recover_flow(flow_id, node_manager)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to recover flow %s: %s",
+                        flow_id,
+                        exc,
+                    )
+        except Exception as exc:
+            logger.warning("Flow recovery skipped due to error: %s", exc)
+
+    async def _list_registered_flow_ids(self) -> List[str]:
+        """Enumerate all registered flows (excluding cycle/meta keys)."""
+        if not self.redis:
+            return []
+
+        flow_ids: Set[str] = set()
+        async for key in self.redis.scan_iter(match="flow:*"):
+            if not key.startswith("flow:"):
+                continue
+            suffix = key.split("flow:", 1)[1]
+            if ":" in suffix:
+                continue
+            flow_ids.add(suffix)
+        return sorted(flow_ids)
+
+    async def _recover_flow(
+        self,
+        flow_id: str,
+        node_manager: NodeTaskManager,
+    ) -> None:
+        """Recover a single flow based on its configuration/state."""
+        flow_key = f"flow:{flow_id}"
+        flow_data = await self.redis.hgetall(flow_key)
+        if not flow_data:
+            return
+
+        try:
+            flow_config = json.loads(flow_data.get("config", "{}"))
+        except Exception:
+            flow_config = {}
+
+        interval_seconds = self._parse_interval(flow_config.get("interval", "0"))
+        flow_status = flow_data.get("status", "registered")
+
+        if interval_seconds == 0:
+            await self._handle_stale_run_once_flow(flow_id, flow_data)
+            return
+
+        if flow_status in {"running", "monitoring"}:
+            await self._resume_flow_scheduler(flow_id)
+
+        last_cycle = int(flow_data.get("last_cycle", -1))
+        if last_cycle < 0 or interval_seconds <= 0:
+            return
+
+        await self._maybe_trigger_flow_catchup(
+            flow_id=flow_id,
+            flow_data=flow_data,
+            last_cycle=last_cycle,
+            interval_seconds=interval_seconds,
+            node_manager=node_manager,
+        )
+
+    async def _handle_stale_run_once_flow(self, flow_id: str, flow_data: Dict[str, Any]) -> None:
+        """Mark orphaned run-once flows as expired."""
+        status = flow_data.get("status", "registered")
+        if status not in {"running", "monitoring"}:
+            return
+
+        await self.redis.hset(
+            f"flow:{flow_id}",
+            mapping={
+                "status": "expired",
+                "last_cycle_status": "expired",
+                "last_cycle_completed_at": datetime.now().isoformat(),
+            },
+        )
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=int(flow_data.get("last_cycle", -1)),
+            message="Detected stale run-once flow after restart, marking as expired.",
+            log_level="WARNING",
+            log_source="scheduler",
+        )
+
+    async def _resume_flow_scheduler(self, flow_id: str) -> None:
+        """Resume scheduling loop for flows that were running before restart."""
+        if flow_id in self.running_flows:
+            return
+
+        self.running_flows.add(flow_id)
+        asyncio.create_task(self._schedule_flow_execution(flow_id))
+        logger.info("Resumed scheduling loop for flow %s", flow_id)
+
+    async def _maybe_trigger_flow_catchup(
+        self,
+        flow_id: str,
+        flow_data: Dict[str, Any],
+        last_cycle: int,
+        interval_seconds: int,
+        node_manager: NodeTaskManager,
+    ) -> None:
+        """Trigger a catch-up cycle when downtime exceeded allowed threshold."""
+        flow_structure_raw = flow_data.get("structure", "{}")
+        try:
+            flow_structure = json.loads(flow_structure_raw)
+        except Exception:
+            flow_structure = {}
+
+        node_map = flow_structure.get("node_map") or {}
+        expected_node_ids = list(node_map.keys())
+        if not expected_node_ids:
+            return
+
+        last_activity = await self._determine_last_activity_timestamp(flow_id, last_cycle, flow_data)
+        if not last_activity:
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        elapsed_seconds = (now_utc - last_activity).total_seconds()
+        if elapsed_seconds <= interval_seconds * 2:
+            return
+
+        statuses = await self._collect_node_statuses(
+            node_manager,
+            flow_id=flow_id,
+            cycle=last_cycle,
+            expected_node_ids=expected_node_ids,
+        )
+
+        if any(status in {"pending", "running"} for status in statuses.values()):
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=last_cycle,
+                message=(
+                    "Flow recovery check detected pending/running nodes, "
+                    "skipping automatic catch-up."
+                ),
+                log_level="INFO",
+                log_source="scheduler",
+            )
+            return
+
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=last_cycle,
+            message=(
+                f"No activity detected for {int(elapsed_seconds)}s "
+                f"(>2x interval). Triggering catch-up cycle."
+            ),
+            log_level="WARNING",
+            log_source="scheduler",
+        )
+
+        asyncio.create_task(self._trigger_catchup_cycle(flow_id))
+
+    async def _trigger_catchup_cycle(self, flow_id: str) -> None:
+        """Fire a new cycle asynchronously for catch-up purposes."""
+        try:
+            await self.execute_cycle(flow_id)
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=-1,
+                message="Catch-up cycle dispatched successfully after downtime.",
+                log_level="INFO",
+                log_source="scheduler",
+            )
+        except Exception as exc:
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=-1,
+                message=f"Failed to dispatch catch-up cycle: {exc}",
+                log_level="ERROR",
+                log_source="scheduler",
+            )
+
+    async def _determine_last_activity_timestamp(
+        self,
+        flow_id: str,
+        last_cycle: int,
+        flow_data: Dict[str, Any],
+    ) -> Optional[datetime]:
+        """Determine the last time the flow executed a cycle."""
+        candidates = [flow_data.get("last_cycle_completed_at")]
+
+        if self.redis:
+            cycle_key = f"flow:{flow_id}:cycle:{last_cycle}"
+            cycle_data = await self.redis.hgetall(cycle_key)
+        else:
+            cycle_data = {}
+
+        if cycle_data:
+            candidates.append(cycle_data.get("end_time"))
+            candidates.append(cycle_data.get("start_time"))
+
+        for candidate in candidates:
+            dt = self._parse_iso_datetime(candidate)
+            if dt:
+                return dt
+        return None
+
+    @staticmethod
+    def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+        """Parse ISO timestamps (with or without timezone) into aware datetime."""
+        if not value:
+            return None
+        try:
+            normalized = value.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
 
     async def register_flow(self, flow_id: str, flow_config: Dict, user_id: Optional[str] = None):
         """
@@ -301,6 +544,8 @@ class FlowScheduler:
         # Remove from running list
         if flow_id in self.running_flows:
             self.running_flows.remove(flow_id)
+
+        await self._cancel_cycle_monitor(flow_id)
 
         logger.info("Flow %s scheduling has been stopped", flow_id)
         return {"status": "stopped", "flow_id": flow_id, "terminated_nodes": terminated_count if last_cycle >= 0 else 0}
@@ -1152,19 +1397,23 @@ class FlowScheduler:
                         completion_event = {
                             "flow_id": flow_id,
                             "cycle": new_cycle,
-                            "status": "error" if execution_error else "completed",
+                            "status": (
+                                "error"
+                                if execution_error
+                                else (execution_result or {}).get("status", "unknown")
+                            ),
                             "error": execution_error,
                             "result": execution_result,
                             "timestamp": datetime.now().isoformat(),
                         }
 
-                        # 发布到 execution_complete 频道
+                        # 发布到 execution_complete 频道（最终状态由监控任务再次推送）
                         await self.redis.publish(
                             f"execution_complete:flow:{flow_id}",
                             json.dumps(completion_event)
                         )
                         logger.info(
-                            f"Published execution_complete event for flow {flow_id} cycle {new_cycle}"
+                            f"Published execution_complete event for flow {flow_id} cycle {new_cycle} with status {completion_event['status']}"
                         )
                     except Exception as e:
                         logger.warning(f"Failed to publish execution_complete event: {e}")
@@ -1184,10 +1433,13 @@ class FlowScheduler:
                     # 从运行中的流程列表中移除
                     if flow_id in self.running_flows:
                         self.running_flows.remove(flow_id)
-                    # 更新状态为已完成
-                    await self.redis.hset(f"flow:{flow_id}", "status", "completed")
+                    # 更新状态为监控中，等待异步监控完成后再写最终结果
                     await self.redis.hset(
-                        f"flow:{flow_id}", "last_cycle", str(new_cycle)
+                        f"flow:{flow_id}",
+                        mapping={
+                            "status": "monitoring",
+                            "last_cycle": str(new_cycle),
+                        },
                     )
                     # 退出循环
                     break
@@ -1380,7 +1632,7 @@ class FlowScheduler:
             node_id: asyncio.create_task(task) for node_id, task in tasks.items()
         }
 
-        # Wait for all tasks to complete
+        # Wait for all tasks to complete (dispatch stage)
         completed_results = {}
         for node_id, task in running_tasks.items():
             try:
@@ -1389,7 +1641,7 @@ class FlowScheduler:
                 await self.persist_log(
                     flow_id=flow_id,
                     cycle=cycle,
-                    message=f"Node {node_id} execution registered",
+                    message=f"Node {node_id} execution dispatched to worker",
                     log_level="INFO",
                     log_source="scheduler",
                     node_id=node_id
@@ -1406,53 +1658,44 @@ class FlowScheduler:
                 )
                 completed_results[node_id] = {"status": "error", "error": str(e)}
 
-        # Update cycle status to completed
+        # Mark cycle as being monitored rather than completed immediately
         await self.redis.hset(
             cycle_key,
-            mapping={"status": "completed", "end_time": datetime.now().isoformat()},
+            mapping={
+                "status": "monitoring",
+                "end_time": "",  # Actual end time filled when monitor finishes
+            },
         )
 
-        # Log cycle completion
         await self.persist_log(
             flow_id=flow_id,
             cycle=cycle,
-            message=f"Flow {flow_id} cycle {cycle} completed. Nodes: {len(node_map)} total, {len(completed_results)} executed",
+            message=(
+                f"Flow {flow_id} cycle {cycle} dispatched {len(completed_results)} nodes, "
+                "entering monitoring phase until nodes finish or timeout"
+            ),
             log_level="INFO",
             log_source="scheduler"
         )
 
-        # Publish COMPLETE_FLOW event for Quest tracking
-        if user_id:
-            try:
-                # Check if all nodes completed successfully
-                all_success = all(
-                    result.get("status") != "error"
-                    for result in completed_results.values()
-                )
-
-                publish_activity(
-                    user_id=user_id,
-                    event_type='COMPLETE_FLOW',
-                    metadata={
-                        'flowId': flow_id,
-                        'cycle': cycle,
-                        'success': all_success,
-                        'nodesCount': len(node_map),
-                        'nodesCompleted': len(completed_results),
-                        'endTime': datetime.now().isoformat()
-                    }
-                )
-                logger.info(f"Published COMPLETE_FLOW event for user {user_id}, flow {flow_id}, cycle {cycle}, success={all_success}")
-            except Exception as e:
-                logger.warning(f"Failed to publish COMPLETE_FLOW activity: {e}")
+        await self._start_cycle_monitor(
+            flow_id=flow_id,
+            cycle=cycle,
+            expected_node_ids=list(node_map.keys()),
+            user_id=user_id,
+        )
 
         return {
             "flow_id": flow_id,
             "cycle": cycle,
-            "status": "completed",
+            "status": "monitoring",
             "nodes_count": len(node_map),
-            "nodes_completed": len(completed_results),
+            "nodes_dispatched": len(completed_results),
             "results": completed_results,
+            "monitoring": {
+                "timeout_seconds": self.monitor_max_wait_seconds,
+                "poll_interval_seconds": self.monitor_poll_interval,
+            },
         }
 
     # Update _execute_node method to use input_edges and output_edges instead of downstream_nodes
@@ -1636,6 +1879,351 @@ class FlowScheduler:
             await self.redis.hset(f"node:{node_id}", mapping=error_data)
 
             return {"status": "error", "error": str(e)}
+
+    def _monitor_task_key(self, flow_id: str, cycle: int) -> str:
+        """Generate unique key for monitor tasks."""
+        return f"{flow_id}:{cycle}"
+
+    async def _start_cycle_monitor(
+        self,
+        flow_id: str,
+        cycle: int,
+        expected_node_ids: List[str],
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Spawn or replace the background task that watches node completion."""
+        monitor_key = self._monitor_task_key(flow_id, cycle)
+        existing = self._cycle_monitor_tasks.pop(monitor_key, None)
+        if existing and not existing.done():
+            existing.cancel()
+            try:
+                await existing
+            except asyncio.CancelledError:
+                pass
+
+        monitor_task = asyncio.create_task(
+            self._monitor_cycle_until_terminal(
+                flow_id=flow_id,
+                cycle=cycle,
+                expected_node_ids=expected_node_ids,
+                user_id=user_id,
+            )
+        )
+
+        self._cycle_monitor_tasks[monitor_key] = monitor_task
+
+        def _cleanup(task: asyncio.Task, key: str = monitor_key):
+            self._cycle_monitor_tasks.pop(key, None)
+
+        monitor_task.add_done_callback(_cleanup)
+
+    async def _cancel_cycle_monitor(
+        self, flow_id: str, cycle: Optional[int] = None
+    ) -> None:
+        """Cancel monitoring tasks for a flow (optionally scoped to a cycle)."""
+        keys = []
+        if cycle is None:
+            prefix = f"{flow_id}:"
+            keys = [key for key in self._cycle_monitor_tasks.keys() if key.startswith(prefix)]
+        else:
+            keys = [self._monitor_task_key(flow_id, cycle)]
+
+        for key in keys:
+            task = self._cycle_monitor_tasks.pop(key, None)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    _, _, key_cycle = key.partition(":")
+                    try:
+                        cycle_for_log = int(key_cycle)
+                    except ValueError:
+                        cycle_for_log = -1
+                    await self.persist_log(
+                        flow_id=flow_id,
+                        cycle=cycle_for_log,
+                        message=f"Cycle monitor {key} cancelled",
+                        log_level="INFO",
+                        log_source="scheduler",
+                    )
+
+    async def _collect_node_statuses(
+        self,
+        node_manager: NodeTaskManager,
+        flow_id: str,
+        cycle: int,
+        expected_node_ids: List[str],
+    ) -> Dict[str, str]:
+        """Fetch current node statuses from NodeTaskManager."""
+        statuses: Dict[str, str] = {}
+        for node_id in expected_node_ids:
+            node_task_id = f"{flow_id}_{cycle}_{node_id}"
+            task_info = await node_manager.get_task(node_task_id)
+            raw_status = (task_info or {}).get("status") or "pending"
+            statuses[node_id] = str(raw_status).lower()
+        return statuses
+
+    def _summarize_node_statuses(
+        self, statuses: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """Summarize node status counts and classify success/failure/pending."""
+        counter = Counter(statuses.values())
+        success_states = {"completed", "skipped"}
+        failure_states = {"failed", "error", "terminated"}
+
+        success_nodes = [node_id for node_id, state in statuses.items() if state in success_states]
+        failure_nodes = [node_id for node_id, state in statuses.items() if state in failure_states]
+        pending_nodes = [
+            node_id
+            for node_id, state in statuses.items()
+            if state not in success_states | failure_states
+        ]
+
+        return {
+            "counts": dict(counter),
+            "success_nodes": success_nodes,
+            "failed_nodes": failure_nodes,
+            "pending_nodes": pending_nodes,
+            "success_count": len(success_nodes),
+            "failure_count": len(failure_nodes),
+            "pending_count": len(pending_nodes),
+        }
+
+    async def _monitor_cycle_until_terminal(
+        self,
+        flow_id: str,
+        cycle: int,
+        expected_node_ids: List[str],
+        user_id: Optional[str] = None,
+    ):
+        """Poll node statuses until they reach a terminal state or timeout."""
+        if not expected_node_ids:
+            summary = {
+                "counts": {},
+                "success_nodes": [],
+                "failed_nodes": [],
+                "pending_nodes": [],
+                "success_count": 0,
+                "failure_count": 0,
+                "pending_count": 0,
+                "note": "No nodes to monitor",
+            }
+            await self._finalize_cycle_state(
+                flow_id=flow_id,
+                cycle=cycle,
+                final_status="completed",
+                summary=summary,
+                user_id=user_id,
+            )
+            return
+
+        poll_interval = max(1, self.monitor_poll_interval)
+        timeout_seconds = max(1, self.monitor_max_wait_seconds)
+        deadline = time.time() + timeout_seconds
+
+        node_manager = NodeTaskManager.get_instance()
+        await node_manager.initialize()
+
+        iteration = 0
+        last_counts = None
+        final_status = "timeout"
+        summary: Dict[str, Any] = {}
+        error_message: Optional[str] = None
+
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=(
+                f"Started monitoring flow {flow_id} cycle {cycle}: "
+                f"{len(expected_node_ids)} nodes, timeout={timeout_seconds}s, poll={poll_interval}s"
+            ),
+            log_level="INFO",
+            log_source="scheduler",
+        )
+
+        while True:
+            iteration += 1
+            statuses = await self._collect_node_statuses(
+                node_manager, flow_id, cycle, expected_node_ids
+            )
+            summary = self._summarize_node_statuses(statuses)
+            summary["iterations"] = iteration
+
+            counts_snapshot = summary.get("counts", {})
+            if counts_snapshot != last_counts:
+                await self.persist_log(
+                    flow_id=flow_id,
+                    cycle=cycle,
+                    message=(
+                        f"[Monitor] Cycle {cycle} status update: {counts_snapshot}, "
+                        f"pending_nodes={summary.get('pending_nodes')}"
+                    ),
+                    log_level="DEBUG",
+                    log_source="scheduler",
+                )
+                last_counts = counts_snapshot
+
+            if summary["failed_nodes"]:
+                final_status = "failed"
+                error_message = (
+                    f"Detected failed/terminated nodes: {', '.join(summary['failed_nodes'])}"
+                )
+                break
+
+            node_total = len(expected_node_ids)
+            if summary["success_count"] >= node_total and node_total > 0:
+                final_status = "completed"
+                break
+
+            if time.time() >= deadline:
+                final_status = "timeout"
+                pending_nodes = summary.get("pending_nodes") or []
+                error_message = (
+                    f"Monitoring timeout after {timeout_seconds}s; pending nodes: {pending_nodes}"
+                )
+                break
+
+            await asyncio.sleep(poll_interval)
+
+        summary.update(
+            {
+                "timeout_seconds": timeout_seconds,
+                "poll_interval_seconds": poll_interval,
+                "finished_at": datetime.now().isoformat(),
+            }
+        )
+
+        await self._finalize_cycle_state(
+            flow_id=flow_id,
+            cycle=cycle,
+            final_status=final_status,
+            summary=summary,
+            error_message=error_message,
+            user_id=user_id,
+        )
+
+    async def _finalize_cycle_state(
+        self,
+        flow_id: str,
+        cycle: int,
+        final_status: str,
+        summary: Dict[str, Any],
+        error_message: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Persist final cycle status and publish events/logs."""
+        cycle_key = f"flow:{flow_id}:cycle:{cycle}"
+        await self.redis.hset(
+            cycle_key,
+            mapping={
+                "status": final_status,
+                "end_time": datetime.now().isoformat(),
+                "result_summary": json.dumps(summary),
+            },
+        )
+
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=cycle,
+            message=(
+                f"Flow {flow_id} cycle {cycle} finished with status '{final_status}'. "
+                f"Summary: {summary}"
+            ),
+            log_level="INFO" if final_status == "completed" else "WARNING",
+            log_source="scheduler",
+        )
+
+        await self._publish_cycle_completion_event(
+            flow_id=flow_id,
+            cycle=cycle,
+            final_status=final_status,
+            summary=summary,
+            error_message=error_message,
+        )
+
+        await self._update_flow_completion_status(flow_id, final_status)
+
+        if user_id:
+            try:
+                total_nodes = sum(summary.get("counts", {}).values())
+                publish_activity(
+                    user_id=user_id,
+                    event_type="COMPLETE_FLOW",
+                    metadata={
+                        "flowId": flow_id,
+                        "cycle": cycle,
+                        "success": final_status == "completed",
+                        "nodesCount": total_nodes,
+                        "endTime": datetime.now().isoformat(),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to publish COMPLETE_FLOW activity: {exc}")
+
+    async def _publish_cycle_completion_event(
+        self,
+        flow_id: str,
+        cycle: int,
+        final_status: str,
+        summary: Dict[str, Any],
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Publish completion event to Redis."""
+        if not self.redis:
+            return
+
+        event_payload = {
+            "flow_id": flow_id,
+            "cycle": cycle,
+            "status": final_status,
+            "error": error_message,
+            "summary": summary,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        try:
+            await self.redis.publish(
+                f"execution_complete:flow:{flow_id}", json.dumps(event_payload)
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to publish completion event for flow {flow_id}: {exc}")
+
+    async def _update_flow_completion_status(self, flow_id: str, final_status: str) -> None:
+        """Update flow level status fields when a cycle ends."""
+        flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+        if not flow_data:
+            return
+
+        metadata = {
+            "last_cycle_status": final_status,
+            "last_cycle_completed_at": datetime.now().isoformat(),
+        }
+
+        await self.redis.hset(f"flow:{flow_id}", mapping=metadata)
+
+        # Only mark entire flow as completed/failed when interval is 0 (run once flows)
+        try:
+            flow_config = json.loads(flow_data.get("config", "{}"))
+        except Exception:
+            flow_config = {}
+
+        interval_seconds = self._parse_interval(flow_config.get("interval", "0"))
+        if interval_seconds == 0:
+            await self.redis.hset(f"flow:{flow_id}", "status", final_status)
+
+    def _parse_int_config(self, value, default: int) -> int:
+        """Safely parse integer configuration values."""
+        try:
+            if value is None:
+                return default
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     def _parse_interval(self, interval_str: str) -> int:
         """
