@@ -605,6 +605,7 @@ class CodeNode(NodeBase):
 
             # 初始化执行状态
             success = False
+            self.loop = asyncio.get_running_loop()
 
             # 创建一个Future对象用于线程间通信
             # 注意：不要在工作线程中使用主线程的事件循环
