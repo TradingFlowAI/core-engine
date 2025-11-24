@@ -41,6 +41,10 @@ TX_RECEIPT_HANDLE = "trade_receipt"
 getcontext().prec = 50
 
 
+class SwapSkipException(Exception):
+    """Raised when a swap should be skipped without marking the node as failed."""
+
+
 def calculate_sqrt_price_limit_q64_64(input_price: float, output_price: float, slippage_tolerance: float) -> str:
     """
     Calculate sqrt_price_limit for Hyperion DEX
@@ -270,6 +274,33 @@ class SwapNode(NodeBase):
             if self.amount_target is None or self.amount_target <= 0:
                 raise ValueError("Target amount must be greater than 0")
 
+    async def _complete_skip(
+        self,
+        message: str,
+        extra_payload: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Send a unified skip receipt and mark node as completed."""
+        receipt_payload = {
+            "success": True,
+            "skipped": True,
+            "message": message,
+            "chain": self.chain,
+            "vault_address": self.vault_address,
+            "from_token": self.from_token or "",
+            "to_token": self.to_token or "",
+        }
+        if extra_payload:
+            receipt_payload.update(extra_payload)
+
+        await self.send_signal(
+            TX_RECEIPT_HANDLE,
+            SignalType.DEX_TRADE_RECEIPT,
+            payload=receipt_payload,
+        )
+        await self.set_status(NodeStatus.COMPLETED, message)
+        await self.persist_log(message, "INFO")
+        return True
+
     def _extract_signal_value(self, value: Any, key: str) -> Optional[str]:
         if isinstance(value, Signal):
             payload = value.payload or {}
@@ -471,13 +502,19 @@ class SwapNode(NodeBase):
                     await self.persist_log(f"Found Aptos balance via API: {token_address}={amount_raw_str}", "INFO")
                     return Decimal(amount_raw_str)
 
-            raise ValueError(f"Token {token_address} not found in Aptos holdings")
+            raise SwapSkipException(
+                f"No holdings found for {token_symbol or token_address} in vault {self.vault_address}, skipping swap"
+            )
 
         elif self.chain == "flow_evm":
             if not self.vault_address and isinstance(self.vault, dict):
                 self.vault_address = self.vault.get("address")
             balance_data = await self.vault_service.get_token_balance(token_address, self.vault_address)
-            balance_raw = balance_data.get("balance", "0")
+            balance_raw = balance_data.get("balance")
+            if balance_raw is None:
+                raise SwapSkipException(
+                    f"No holdings found for {token_symbol or token_address} in Flow vault {self.vault_address}, skipping swap"
+                )
             await self.persist_log(f"Found Flow EVM balance via API: {token_address}={balance_raw}", "INFO")
             return Decimal(balance_raw)
 
@@ -493,7 +530,15 @@ class SwapNode(NodeBase):
 
         if self.amount_in_percentage is not None:
             balance_raw = await self.get_token_balance(self.input_token_address, self.from_token)
+            if balance_raw <= 0:
+                raise SwapSkipException(
+                    f"Vault has no spendable balance for {self.from_token}, skipping swap"
+                )
             calculated_amount = int(balance_raw * Decimal(self.amount_in_percentage) / Decimal(100))
+            if calculated_amount <= 0:
+                raise SwapSkipException(
+                    f"Calculated spend amount is zero for {self.from_token}, skipping swap"
+                )
             await self.persist_log(f"Using percentage: {self.amount_in_percentage}% -> {calculated_amount}", "INFO")
             return calculated_amount
 
@@ -911,6 +956,10 @@ class SwapNode(NodeBase):
 
             # Get final amount
             final_amount_in = await self.get_final_amount_in()
+            if final_amount_in <= 0:
+                raise SwapSkipException(
+                    f"Calculated final amount is zero for {self.from_token}, skipping swap"
+                )
 
             if self.chain == "aptos":
                 # 搜索最优池子
@@ -978,6 +1027,8 @@ class SwapNode(NodeBase):
 
             return True
 
+        except SwapSkipException:
+            raise
         except Exception as e:
             await self.persist_log(f"Error executing swap: {str(e)}", "ERROR")
             await self.persist_log(traceback.format_exc(), "ERROR")
@@ -1082,23 +1133,10 @@ class SwapNode(NodeBase):
         try:
             # 🔧 NEW: 支持空值跳过交易 - 用于条件交易控制
             if not self.from_token or not self.to_token:
-                await self.persist_log(
-                    f"Skipping swap: from_token='{self.from_token}', to_token='{self.to_token}' (empty token, no trade)", "INFO"
+                return await self._complete_skip(
+                    "Skipping swap: empty from_token/to_token input, no trade executed",
+                    {"reason": "empty_token"},
                 )
-                # 发送空的交易收据表示跳过
-                empty_receipt = {
-                    "success": True,
-                    "skipped": True,
-                    "message": "Trade skipped due to empty token value",
-                    "chain": self.chain,
-                    "vault_address": self.vault_address,
-                    "from_token": self.from_token or "",
-                    "to_token": self.to_token or "",
-                }
-                await self.send_signal(TX_RECEIPT_HANDLE, SignalType.DEX_TRADE_RECEIPT, payload=empty_receipt)
-                await self.set_status(NodeStatus.COMPLETED)
-                await self.persist_log("SwapNode completed (skipped)", "INFO")
-                return True
 
             await self.persist_log(
                 f"Starting SwapNode: chain={self.chain}, {self.from_token}->{self.to_token}, vault={self.vault_address}", "INFO"
@@ -1129,6 +1167,9 @@ class SwapNode(NodeBase):
             await self.persist_log("SwapNode cancelled", "INFO")
             await self.set_status(NodeStatus.TERMINATED, "Execution cancelled")
             return False
+        except SwapSkipException as skip_exc:
+            await self._complete_skip(str(skip_exc), {"reason": "missing_balance"})
+            return True
         except Exception as e:
             error_message = f"SwapNode error: {str(e)}"
             await self.persist_log(error_message, "ERROR")
