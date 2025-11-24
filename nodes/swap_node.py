@@ -1029,6 +1029,16 @@ class SwapNode(NodeBase):
 
         except SwapSkipException:
             raise
+        except ValueError as e:
+            error_message = str(e)
+            lower_message = error_message.lower()
+            if (
+                "not found in aptos holdings" in lower_message
+                or "not found in holdings" in lower_message
+                or "no holdings" in lower_message
+            ):
+                raise SwapSkipException(error_message)
+            raise
         except Exception as e:
             await self.persist_log(f"Error executing swap: {str(e)}", "ERROR")
             await self.persist_log(traceback.format_exc(), "ERROR")
