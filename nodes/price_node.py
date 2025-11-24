@@ -106,7 +106,7 @@ class PriceNode(NodeBase):
             Dict: Current price data, returns None if error occurs
         """
         try:
-            url = f"{self.monitor_url}/api/price/simple/{self.symbol}"
+            url = f"{self.monitor_url}/api/v1/price/simple/{self.symbol}"
             params = {"vs_currency": "usd"}
 
             await self.persist_log(
