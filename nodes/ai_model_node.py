@@ -109,6 +109,9 @@ class AIModelNode(NodeBase):
         self.site_name = "TradingFlow"
         self.auto_format_output = auto_format_output
 
+        # Default output signal type (can be overridden via kwargs if needed)
+        self.output_signal_type = kwargs.get("output_signal_type", SignalType.JSON_DATA)
+
         # Process model parameters
         self.parameters = parameters or {}
         self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
@@ -125,7 +128,7 @@ class AIModelNode(NodeBase):
     def _calculate_model_credits(self) -> int:
         """
         根据模型类型计算 Credits 消耗
-        
+
         定价策略：
         - GPT-3.5 / Claude Haiku: 5 credits (最便宜)
         - GPT-4 / Claude Sonnet: 10 credits (标准)
@@ -133,68 +136,68 @@ class AIModelNode(NodeBase):
         - GPT-4o / o1-preview: 20 credits (高级)
         - Claude Opus / o1: 30 credits (旗舰)
         - 默认: 10 credits (标准)
-        
+
         Returns:
             int: Credits 消耗数量
         """
         model_lower = self.model_name.lower()
-        
+
         # GPT-3.5 系列 (最便宜)
         if 'gpt-3.5' in model_lower or '3.5' in model_lower:
             return 5
-        
+
         # Claude Haiku (最快最便宜)
         if 'haiku' in model_lower:
             return 5
-        
+
         # Claude Opus 或 o1 (旗舰模型)
         if 'opus' in model_lower or model_lower == 'o1' or 'o1-mini' not in model_lower and 'o1' in model_lower:
             return 30
-        
+
         # GPT-4o / o1-preview (高级)
         if 'gpt-4o' in model_lower or 'o1-preview' in model_lower:
             return 20
-        
+
         # GPT-4 Turbo (增强)
         if 'gpt-4-turbo' in model_lower or 'turbo' in model_lower:
             return 15
-        
+
         # GPT-4 标准版或 Claude Sonnet
         if 'gpt-4' in model_lower or 'sonnet' in model_lower:
             return 10
-        
+
         # 默认标准定价
         return 10
-    
+
     async def _charge_credits_sync(self) -> None:
         """
         覆盖基类的 Credits 扣除方法，使用 AI 模型特殊定价
-        
+
         Raises:
             InsufficientCreditsException: 余额不足时抛出
         """
         if not self.enable_credits:
             await self.persist_log(f"Credits tracking is disabled for node {self.node_id}", "DEBUG")
             return
-            
+
         if not self.user_id:
             await self.persist_log("No user_id provided, skipping credits charge", "WARNING")
             return
-        
+
         try:
             from weather_depot.exceptions.tf_exception import InsufficientCreditsException
-            
+
             credits_cost = self.ai_model_credits
             await self.persist_log(
                 f"Charging {credits_cost} credits for AI model: {self.model_name}", "INFO"
             )
-            
+
             # 获取 weather_control URL
             weather_control_url = CONFIG.get(
-                "WEATHER_CONTROL_URL", 
+                "WEATHER_CONTROL_URL",
                 "http://weather-control:3050"
             )
-            
+
             # 调用同步扣费 API
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
@@ -211,17 +214,17 @@ class AIModelNode(NodeBase):
                         }
                     }
                 )
-                
+
                 # 检查是否余额不足
                 if response.status_code == 402:  # Payment Required
                     data = response.json()
                     balance = data.get("balance", 0)
-                    
+
                     await self.persist_log(
                         f"Insufficient credits: user={self.user_id}, "
                         f"required={credits_cost}, balance={balance}", "ERROR"
                     )
-                    
+
                     raise InsufficientCreditsException(
                         message=f"Insufficient credits to execute AI model node {self.node_id}",
                         node_id=self.node_id,
@@ -229,20 +232,20 @@ class AIModelNode(NodeBase):
                         required_credits=credits_cost,
                         current_balance=balance,
                     )
-                
+
                 # 其他错误
                 response.raise_for_status()
-                
+
                 # 成功
                 result = response.json()
                 remaining_balance = result.get("data", {}).get("balance", 0)
-                
+
                 await self.persist_log(
                     f"Credits charged successfully: user={self.user_id}, "
                     f"node={self.node_id}, model={self.model_name}, cost={credits_cost}, "
                     f"remaining={remaining_balance}", "INFO"
                 )
-                
+
         except InsufficientCreditsException:
             # 重新抛出余额不足异常
             raise
@@ -253,11 +256,11 @@ class AIModelNode(NodeBase):
             await self.persist_log(f"Error charging credits: {str(e)}", "ERROR")
             await self.persist_log(traceback.format_exc(), "ERROR")
             raise Exception(f"Failed to charge credits: {str(e)}")
-    
+
     def _register_input_handles(self) -> None:
         """
         Register input handles
-        
+
         🔧 Dynamic Parameters Handle Support:
         - model and prompt are static handles
         - Other handles (like tweet_content, market_data) are dynamically registered as parameter handles
@@ -278,7 +281,7 @@ class AIModelNode(NodeBase):
             example="Please analyze the trading data and provide recommendations:",
             auto_update_attr="prompt",
         )
-        
+
         # 🔧 Register dynamic parameter handles based on input_edges
         # Each edge targeting a handle other than 'model' or 'prompt' is treated as a parameter
         if hasattr(self, '_input_edges') and self._input_edges:
@@ -291,7 +294,7 @@ class AIModelNode(NodeBase):
                 # Skip already registered
                 if target_handle in registered_params:
                     continue
-                    
+
                 # Register as dynamic parameter handle
                 self.register_input_handle(
                     name=target_handle,
@@ -302,11 +305,11 @@ class AIModelNode(NodeBase):
                 )
                 registered_params.add(target_handle)
                 self.logger.info(f"Registered dynamic parameter handle: {target_handle}")
-        
+
         # Log if no dynamic parameters were registered
         if not (hasattr(self, '_input_edges') and self._input_edges):
             self.logger.debug("No input_edges provided, skipping dynamic parameter handle registration")
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         self.register_output_handle(
@@ -521,7 +524,7 @@ class AIModelNode(NodeBase):
         """
         # 先进行参数替换
         context = self.prompt
-        
+
         # 从 parameters 字典中提取参数并替换占位符
         if self.parameters and isinstance(self.parameters, dict):
             await self.persist_log(f"Replacing parameters in prompt: {list(self.parameters.keys())}", "DEBUG")
@@ -534,10 +537,10 @@ class AIModelNode(NodeBase):
                         param_str = json.dumps(param_value, ensure_ascii=False, indent=2)
                     else:
                         param_str = str(param_value)
-                    
+
                     context = context.replace(placeholder, param_str)
                     await self.persist_log(f"Replaced {placeholder} with value (length: {len(param_str)})", "DEBUG")
-        
+
         context += "\n\n"
 
         # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
@@ -793,7 +796,7 @@ class AIModelNode(NodeBase):
 
             # 发送AI响应信号
             output_handle = AI_RESPONSE_OUTPUT_HANDLE
-            
+
             # 创建信号并发送
             signal = Signal(
                 type=SignalType.JSON_DATA,
@@ -801,7 +804,7 @@ class AIModelNode(NodeBase):
                 source_node_id=self.node_id,
                 source_node_handle=output_handle,
             )
-            
+
             if await self.send_signal_to_outputs(signal, output_handle):
                 await self.persist_log(
                     f"Successfully sent AI response signal via handle {output_handle}", "INFO"

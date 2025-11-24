@@ -12,7 +12,7 @@ import json
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime
-
+from weather_depot.config import CONFIG
 
 class RedisStatusPublisher:
     """Redis 状态发布器"""

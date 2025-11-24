@@ -1,8 +1,9 @@
 import asyncio
 # Removed logging import - using persist_log from NodeBase
+import os
 import traceback
 from decimal import Decimal, getcontext
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -15,10 +16,12 @@ from utils.token_price_util import (
     get_flow_evm_token_prices_usd,
 )
 from common.node_decorators import register_node_type
-from common.signal_types import SignalType
+from common.signal_types import Signal, SignalType
 from nodes.node_base import NodeBase, NodeStatus
 from weather_depot.config import CONFIG
 from mq.trading_signal_publisher import publish_trading_signal
+
+CO_TRADING_ENABLED = os.getenv("ENABLE_CO_TRADING", "false").lower() == "true"
 
 # input handles
 FROM_TOKEN_HANDLE = "from_token"
@@ -27,6 +30,11 @@ AMOUNT_IN_HANDLE_HUMAN_READABLE = "amount_in_human_readable"
 AMOUNT_IN_HANDLE_PERCENTAGE = "amount_in_percentage"
 VAULT_HANDLE = "vault"
 SLIPPAGE_TOLERANCE_HANDLE = "slippery"
+
+FROM_FIXED_MODES = {"from_fixed", "number", "spend_fixed", "sell_fixed"}
+FROM_PERCENT_MODES = {"from_percent", "percentage", "spend_percent", "sell_percent"}
+TO_FIXED_MODES = {"to_fixed", "buy_fixed", "receive_fixed"}
+TO_PERCENT_MODES = {"to_percent", "buy_percent", "receive_percent"}
 # output handles
 TX_RECEIPT_HANDLE = "trade_receipt"
 
@@ -137,6 +145,7 @@ class SwapNode(NodeBase):
         self.vault = vault
         self.chain = vault.get("chain", "aptos") if vault else "aptos"
         self.vault_address = vault.get("address") if vault else None
+        self.vault_address = self._normalize_chain_address(self.vault_address)
         self.vault_balance = vault.get("balance") if vault else None
         self.vault_transactions = vault.get("transactions", []) if vault else []
 
@@ -148,69 +157,15 @@ class SwapNode(NodeBase):
         self.slippery = slippery
 
         # 🔧 Handle Switch type from frontend (v0.4.1+)
-        # Frontend sends: { mode: "from_fixed"|"from_percent"|"to_fixed"|"to_percent", value: "100" }
+        # Frontend sends: { mode: "...", value: "100" }
         if isinstance(amount_in_human_readable, dict) and "mode" in amount_in_human_readable:
-            switch_value = amount_in_human_readable
-            mode = switch_value.get("mode")
-            value = switch_value.get("value")
-
-            # Parse value
-            try:
-                parsed_value = float(value) if value else None
-            except (ValueError, TypeError):
-                parsed_value = None
-
-            # From modes (legacy compatible)
-            if mode in ["from_fixed", "number"]:
-                self.amount_in_human_readable = parsed_value
-                self.amount_in_percentage = None
-                self.amount_direction = "from"
-                self.amount_type = "fixed"
-            elif mode in ["from_percent", "percentage"]:
-                self.amount_in_percentage = parsed_value
-                self.amount_in_human_readable = None
-                self.amount_direction = "from"
-                self.amount_type = "percent"
-            # To modes (new in v0.4.1)
-            elif mode == "to_fixed":
-                self.amount_in_human_readable = None
-                self.amount_in_percentage = None
-                self.amount_target = parsed_value
-                self.amount_direction = "to"
-                self.amount_type = "fixed"
-            elif mode == "to_percent":
-                self.amount_in_human_readable = None
-                self.amount_in_percentage = None
-                self.amount_target = parsed_value
-                self.amount_direction = "to"
-                self.amount_type = "percent"
-            else:
-                # Unknown mode
-                self.amount_in_percentage = amount_in_percentage
-                self.amount_in_human_readable = None
-                self.amount_direction = "from"
-                self.amount_type = "fixed"
+            self.amount_in_percentage = None
+            self.amount_in_human_readable = None
+            self._apply_amount_switch(amount_in_human_readable)
         else:
-            # Legacy format or direct parameters
             self.amount_in_percentage = amount_in_percentage
-            self.amount_direction = "from"
-            self.amount_type = "fixed"
             self.amount_in_human_readable = amount_in_human_readable
-
-        # Convert and validate inputs
-        if self.amount_in_percentage is not None:
-            # Convert to float if it's a string
-            if isinstance(self.amount_in_percentage, str):
-                self.amount_in_percentage = float(self.amount_in_percentage)
-            if not (0 < self.amount_in_percentage <= 100):
-                raise ValueError("amount_in_percentage must be between 0 and 100")
-
-        if self.amount_in_human_readable is not None:
-            # Convert to float if it's a string
-            if isinstance(self.amount_in_human_readable, str):
-                self.amount_in_human_readable = float(self.amount_in_human_readable)
-            if not (self.amount_in_human_readable > 0):
-                raise ValueError("amount_in_human_readable must be greater than 0")
+            self._validate_amount_inputs()
 
         # Token info
         self.input_token_address = None
@@ -227,6 +182,230 @@ class SwapNode(NodeBase):
 
         # Initialization log will be handled in execute method
 
+    def _ensure_vault_context(self) -> None:
+        """Ensure vault-derived attributes (address/chain) are populated."""
+        if isinstance(self.vault, dict):
+            vault_chain = self.vault.get("chain")
+            if vault_chain:
+                self.chain = vault_chain
+
+            vault_addr = self._normalize_chain_address(self.vault.get("address"))
+            if vault_addr:
+                self.vault_address = vault_addr
+
+        if not self.vault_address:
+            raise ValueError("vault_address is required to execute swap node")
+        self.vault_address = self._normalize_chain_address(self.vault_address)
+
+    def _normalize_chain_address(self, address: Optional[str]) -> Optional[str]:
+        if not address:
+            return address
+        addr = address.lower()
+        if self.chain == "aptos":
+            if addr.startswith("0x"):
+                addr = addr[2:]
+            addr = addr.zfill(64)
+            return "0x" + addr[-64:]
+        if not addr.startswith("0x"):
+            addr = "0x" + addr
+        return addr
+
+    def _safe_float(self, value: Optional[float]) -> Optional[float]:
+        try:
+            return float(value) if value is not None and value != "" else None
+        except (ValueError, TypeError):
+            return None
+
+    def _apply_amount_switch(self, switch_value: Dict[str, Any]) -> None:
+        mode = (switch_value.get("mode") or "").lower()
+        parsed_value = self._safe_float(switch_value.get("value"))
+
+        if mode in FROM_FIXED_MODES:
+            self.amount_direction = "from"
+            self.amount_type = "fixed"
+            self.amount_in_human_readable = parsed_value
+            self.amount_in_percentage = None
+            self.amount_target = None
+        elif mode in FROM_PERCENT_MODES:
+            self.amount_direction = "from"
+            self.amount_type = "percent"
+            self.amount_in_percentage = parsed_value
+            self.amount_in_human_readable = None
+            self.amount_target = None
+        elif mode in TO_FIXED_MODES:
+            self.amount_direction = "to"
+            self.amount_type = "fixed"
+            self.amount_target = parsed_value
+            self.amount_in_human_readable = None
+            self.amount_in_percentage = None
+        elif mode in TO_PERCENT_MODES:
+            self.amount_direction = "to"
+            self.amount_type = "percent"
+            self.amount_target = parsed_value
+            self.amount_in_human_readable = None
+            self.amount_in_percentage = None
+        else:
+            self.amount_direction = "from"
+            self.amount_type = "fixed"
+            self.amount_in_human_readable = parsed_value
+            self.amount_in_percentage = None
+            self.amount_target = None
+
+        self._validate_amount_inputs()
+
+    def _validate_amount_inputs(self) -> None:
+        if self.amount_in_percentage is not None:
+            if isinstance(self.amount_in_percentage, str):
+                self.amount_in_percentage = float(self.amount_in_percentage)
+            if not (0 < float(self.amount_in_percentage) <= 100):
+                raise ValueError("amount_in_percentage must be between 0 and 100")
+
+        if self.amount_in_human_readable is not None:
+            if isinstance(self.amount_in_human_readable, str):
+                self.amount_in_human_readable = float(self.amount_in_human_readable)
+            if not (float(self.amount_in_human_readable) > 0):
+                raise ValueError("amount_in_human_readable must be greater than 0")
+
+        if self.amount_direction == "to" and self.amount_target is not None:
+            if self.amount_target is None or self.amount_target <= 0:
+                raise ValueError("Target amount must be greater than 0")
+
+    def _extract_signal_value(self, value: Any, key: str) -> Optional[str]:
+        if isinstance(value, Signal):
+            payload = value.payload or {}
+            candidate = payload.get(key)
+        else:
+            candidate = value
+        if isinstance(candidate, str):
+            candidate = candidate.strip()
+        return candidate or None
+
+    def _get_vault_holdings(self) -> List[Dict[str, Any]]:
+        if isinstance(self.vault, dict):
+            balance = self.vault.get("balance")
+            if isinstance(balance, dict) and isinstance(balance.get("holdings"), list):
+                return balance["holdings"]
+            if isinstance(self.vault.get("holdings"), list):
+                return self.vault["holdings"]
+        return []
+
+    def _find_vault_holding(self, token_address: Optional[str], token_symbol: Optional[str]) -> Optional[Dict[str, Any]]:
+        compare_address = self._normalize_chain_address(token_address)
+        token_symbol_norm = (token_symbol or "").lower()
+        for holding in self._get_vault_holdings():
+            holding_symbol = (holding.get("symbol") or holding.get("token_symbol") or "").lower()
+            holding_address = self._normalize_chain_address(holding.get("token_address"))
+            if compare_address and holding_address == compare_address:
+                return holding
+            if token_symbol_norm and holding_symbol == token_symbol_norm:
+                return holding
+        return None
+
+    def _extract_raw_amount_from_holding(self, holding: Dict[str, Any]) -> Optional[Decimal]:
+        amount_raw = holding.get("amount")
+        decimals = holding.get("decimals", 0)
+        amount_hr = holding.get("amount_human_readable")
+
+        if amount_raw is not None:
+            try:
+                return Decimal(str(amount_raw))
+            except (ValueError, TypeError):
+                pass
+
+        if amount_hr is not None and decimals is not None:
+            try:
+                return Decimal(str(amount_hr)) * Decimal(10) ** int(decimals)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _extract_decimal_amount_from_holding(self, holding: Dict[str, Any]) -> Optional[Decimal]:
+        amount_hr = holding.get("amount_human_readable")
+        if amount_hr is not None:
+            try:
+                return Decimal(str(amount_hr))
+            except (ValueError, TypeError):
+                return None
+        amount_raw = holding.get("amount")
+        decimals = holding.get("decimals", 0)
+        if amount_raw is not None:
+            try:
+                return Decimal(str(amount_raw)) / (Decimal(10) ** int(decimals))
+            except (ValueError, TypeError, ZeroDivisionError):
+                return None
+        return None
+
+    async def _get_token_price_usd(self, token_address: str) -> Optional[Decimal]:
+        normalized_address = self._normalize_chain_address(token_address)
+        try:
+            if self.chain == "aptos":
+                price = await get_aptos_token_price_usd_async(normalized_address)
+                return Decimal(str(price)) if price is not None else None
+            elif self.chain == "flow_evm":
+                prices = await get_flow_evm_token_prices_usd([normalized_address])
+                price = prices.get(normalized_address) if prices else None
+                return Decimal(str(price)) if price is not None else None
+        except Exception as err:
+            await self.persist_log(f"Failed to fetch price for {normalized_address}: {err}", "WARNING")
+        return None
+
+    async def _prepare_amount_from_target(self) -> None:
+        if self.amount_direction != "to" or self.amount_target is None:
+            return
+
+        if not self.vault_address and isinstance(self.vault, dict):
+            self.vault_address = self._normalize_chain_address(self.vault.get("address"))
+
+        if self.amount_type == "percent":
+            target_decimal = await self._calculate_target_amount_from_percent()
+            if target_decimal is None:
+                # Converted to from-percent fallback
+                return
+        else:
+            target_decimal = Decimal(str(self.amount_target))
+
+        required_input = await self._convert_target_amount_to_input(target_decimal)
+        self.amount_in_human_readable = float(required_input)
+        self.amount_in_percentage = None
+        await self.persist_log(
+            f"Target amount {target_decimal} {self.to_token} requires ~{self.amount_in_human_readable} {self.from_token}",
+            "INFO",
+        )
+
+    async def _calculate_target_amount_from_percent(self) -> Optional[Decimal]:
+        percent = Decimal(str(self.amount_target))
+        target_holding = self._find_vault_holding(self.output_token_address, self.to_token)
+        if target_holding:
+            token_amount = self._extract_decimal_amount_from_holding(target_holding) or Decimal(0)
+            return token_amount * percent / Decimal(100)
+
+        input_holding = self._find_vault_holding(self.input_token_address, self.from_token)
+        if input_holding:
+            input_amount = self._extract_raw_amount_from_holding(input_holding)
+            if input_amount is not None and input_amount > 0:
+                self.amount_direction = "from"
+                self.amount_type = "percent"
+                self.amount_in_percentage = float(percent)
+                self.amount_target = None
+                self._validate_amount_inputs()
+                await self.persist_log(
+                    "Vault has no target token holdings; falling back to from-percent calculation based on input token.",
+                    "WARNING",
+                )
+                return None
+
+        raise ValueError("Cannot calculate target percentage amount – target holdings unavailable.")
+
+    async def _convert_target_amount_to_input(self, target_amount_decimal: Decimal) -> Decimal:
+        price_out = await self._get_token_price_usd(self.output_token_address)
+        price_in = await self._get_token_price_usd(self.input_token_address)
+        if not price_out or not price_in or price_in == 0:
+            raise ValueError("Unable to fetch token prices for target conversion")
+
+        required_input_decimal = (target_amount_decimal * price_out) / price_in
+        if required_input_decimal <= 0:
+            raise ValueError("Calculated required input is invalid")
+        return required_input_decimal
     async def _resolve_token_addresses(self) -> None:
         """Resolve token addresses from symbols based on chain"""
         # 注意：空值检查已移至 execute() 方法中，这里假设 token 已经存在
@@ -253,6 +432,8 @@ class SwapNode(NodeBase):
 
             self.input_token_decimals = input_info.get("decimals")
             self.output_token_decimals = output_info.get("decimals")
+            self.input_token_address = self._normalize_chain_address(self.input_token_address)
+            self.output_token_address = self._normalize_chain_address(self.output_token_address)
 
         elif self.chain == "flow_evm":
             # For Flow EVM, use symbols as addresses (placeholder)
@@ -266,25 +447,41 @@ class SwapNode(NodeBase):
             f"Resolved tokens: {self.from_token}({self.input_token_address}) -> {self.to_token}({self.output_token_address})", "INFO"
         )
 
-    async def get_token_balance(self, token_address: str) -> Decimal:
+    async def get_token_balance(self, token_address: str, token_symbol: Optional[str] = None) -> Decimal:
         """Get token balance from vault"""
+        holding = self._find_vault_holding(token_address, token_symbol)
+        if holding:
+            cached_amount = self._extract_raw_amount_from_holding(holding)
+            if cached_amount is not None:
+                await self.persist_log(
+                    f"Using vault signal holdings for {token_symbol or token_address}: {cached_amount}",
+                    "DEBUG",
+                )
+                return cached_amount
+
         if self.chain == "aptos":
+            if not self.vault_address and isinstance(self.vault, dict):
+                self.vault_address = self.vault.get("address")
             holdings_data = await self.vault_service.get_investor_holdings(self.vault_address)
             holdings = holdings_data.get("holdings", [])
 
-            for holding in holdings:
-                if holding.get("token_address", "").lower() == token_address.lower():
-                    amount_raw_str = holding.get("amount", "0")
-                    await self.persist_log(f"Found Aptos balance: {token_address}={amount_raw_str}", "INFO")
+            for entry in holdings:
+                if entry.get("token_address", "").lower() == token_address.lower():
+                    amount_raw_str = entry.get("amount", "0")
+                    await self.persist_log(f"Found Aptos balance via API: {token_address}={amount_raw_str}", "INFO")
                     return Decimal(amount_raw_str)
 
             raise ValueError(f"Token {token_address} not found in Aptos holdings")
 
         elif self.chain == "flow_evm":
+            if not self.vault_address and isinstance(self.vault, dict):
+                self.vault_address = self.vault.get("address")
             balance_data = await self.vault_service.get_token_balance(token_address, self.vault_address)
             balance_raw = balance_data.get("balance", "0")
-            await self.persist_log(f"Found Flow EVM balance: {token_address}={balance_raw}", "INFO")
+            await self.persist_log(f"Found Flow EVM balance via API: {token_address}={balance_raw}", "INFO")
             return Decimal(balance_raw)
+
+        raise ValueError("Unsupported chain for token balance query")
 
     async def get_final_amount_in(self) -> int:
         """Get final amount_in from human readable or percentage"""
@@ -295,7 +492,7 @@ class SwapNode(NodeBase):
             return amount_wei
 
         if self.amount_in_percentage is not None:
-            balance_raw = await self.get_token_balance(self.input_token_address)
+            balance_raw = await self.get_token_balance(self.input_token_address, self.from_token)
             calculated_amount = int(balance_raw * Decimal(self.amount_in_percentage) / Decimal(100))
             await self.persist_log(f"Using percentage: {self.amount_in_percentage}% -> {calculated_amount}", "INFO")
             return calculated_amount
@@ -663,34 +860,28 @@ class SwapNode(NodeBase):
 
             await self.persist_log(f"Pool original sqrt_price: {current_sqrt_price}", "INFO")
 
-            # Determine trade direction
+            # Determine trade direction relative to pool order
             trade_direction, token0, token1 = self._determine_trade_direction(
                 self.input_token_address,
-                self.output_token_address
+                self.output_token_address,
             )
 
-            # Calculate correct sqrt multiplier: sqrt(1 ± slippage)
             import math
             slippage_decimal = slippage_pct / 100
+            if slippage_decimal >= 1:
+                raise ValueError("Slippage must be less than 100%")
 
-            # Determine slippage direction based on trade semantics, not just token order
-            # When selling volatile token (APT) for stable (USDC): use lower limit (protect against price drop)
-            # When buying volatile token (APT) with stable (USDC): use upper limit (protect against price rise)
-
-            # Check if we're selling the "main" token (APT) or buying it
-            apt_address = "0xa"  # APT is always the main volatile token
-            is_selling_apt = (self.input_token_address == apt_address)
-
-            if is_selling_apt:
-                # Selling APT: protect against price dropping, use lower limit
+            # Uniswap/Hyperion semantics:
+            # - token0 -> token1 swaps push price DOWN, so limit must be LOWER
+            # - token1 -> token0 swaps push price UP, so limit must be HIGHER
+            if trade_direction == "token0_to_token1":
                 sqrt_multiplier = math.sqrt(1 - slippage_decimal)
                 direction = "-"
-                protection_type = "selling APT, lower limit"
+                protection_type = "token0→token1 (price decreases), lower limit"
             else:
-                # Buying APT: protect against price rising, use upper limit
                 sqrt_multiplier = math.sqrt(1 + slippage_decimal)
                 direction = "+"
-                protection_type = "buying APT, upper limit"
+                protection_type = "token1→token0 (price increases), upper limit"
 
             sqrt_price_limit = int(current_sqrt_price * sqrt_multiplier)
 
@@ -713,8 +904,10 @@ class SwapNode(NodeBase):
     async def execute_swap(self) -> bool:
         """Execute swap transaction based on chain"""
         try:
+            self._ensure_vault_context()
             # Resolve token addresses
             await self._resolve_token_addresses()
+            await self._prepare_amount_from_target()
 
             # Get final amount
             final_amount_in = await self.get_final_amount_in()
@@ -845,6 +1038,10 @@ class SwapNode(NodeBase):
             trade_receipt: Transaction receipt with trade details
         """
         try:
+            if not CO_TRADING_ENABLED:
+                await self.persist_log("Co-trading disabled, skipping signal publish", "DEBUG")
+                return
+
             # Only publish if transaction was successful
             if not trade_receipt.get("success", False):
                 await self.persist_log("Skipping signal publish - transaction failed", "INFO")
@@ -1084,14 +1281,14 @@ class BuyNode(SwapNode):
             data_type=str,
             description="Token to Buy - Target token symbol to purchase",
             example="BTC",
-            auto_update_attr="buy_token",
+            auto_update_attr=None,
         )
         self.register_input_handle(
             name="base_token",
             data_type=str,
             description="With Token - Base token symbol used for payment",
             example="USDT",
-            auto_update_attr="base_token",
+            auto_update_attr=None,
         )
         # COMMENTED: Not in frontend
         # self.register_input_handle(
@@ -1131,16 +1328,16 @@ class BuyNode(SwapNode):
         )
 
     async def _on_buy_token_received(self, buy_token: str) -> None:
-        """处理买入代币更新"""
-        await self.persist_log(f"Received buy token: {buy_token}", "INFO")
-        self.buy_token = buy_token
-        self.to_token = buy_token
+        token_value = self._extract_signal_value(buy_token, "buy_token")
+        self.buy_token = token_value or ""
+        self.to_token = token_value
+        await self.persist_log(f"Buy token updated to: {self.to_token}", "INFO")
 
     async def _on_base_token_received(self, base_token: str) -> None:
-        """Handle base token update"""
-        await self.persist_log(f"Received base token: {base_token}", "INFO")
-        self.base_token = base_token
-        self.from_token = base_token
+        token_value = self._extract_signal_value(base_token, "base_token")
+        self.base_token = token_value or ""
+        self.from_token = token_value
+        await self.persist_log(f"Base token updated to: {self.from_token}", "INFO")
 
 
 @register_node_type(
@@ -1224,14 +1421,14 @@ class SellNode(SwapNode):
             data_type=str,
             description="Token to Sell - Source token symbol to sell",
             example="BTC",
-            auto_update_attr="sell_token",
+            auto_update_attr=None,
         )
         self.register_input_handle(
             name="base_token",
             data_type=str,
             description="With Token - Base token symbol to receive",
             example="USDT",
-            auto_update_attr="base_token",
+            auto_update_attr=None,
         )
         # COMMENTED: Not in frontend
         # self.register_input_handle(
@@ -1271,13 +1468,13 @@ class SellNode(SwapNode):
         )
 
     async def _on_sell_token_received(self, sell_token: str) -> None:
-        """Handle sell token update"""
-        await self.persist_log(f"Received sell token: {sell_token}", "INFO")
-        self.sell_token = sell_token
-        self.from_token = sell_token
+        token_value = self._extract_signal_value(sell_token, "sell_token")
+        self.sell_token = token_value or ""
+        self.from_token = token_value
+        await self.persist_log(f"Sell token updated to: {self.from_token}", "INFO")
 
     async def _on_base_token_received(self, base_token: str) -> None:
-        """Handle base token update"""
-        await self.persist_log(f"Received base token: {base_token}", "INFO")
-        self.base_token = base_token
-        self.to_token = base_token
+        token_value = self._extract_signal_value(base_token, "base_token")
+        self.base_token = token_value or ""
+        self.to_token = token_value
+        await self.persist_log(f"Base token updated to: {self.to_token}", "INFO")

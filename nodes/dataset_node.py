@@ -18,6 +18,8 @@ from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
 
+DATA_OUTPUT_HANDLE = "data"
+
 
 @register_node_type(
     "dataset_node",
@@ -132,6 +134,23 @@ class DatasetNode(NodeBase):
         self.client = None
         self.spreadsheet = None
         self.worksheet = None
+
+    def _register_output_handles(self) -> None:
+        """注册输出句柄"""
+        self.register_output_handle(
+            name=DATA_OUTPUT_HANDLE,
+            data_type=dict,
+            description="Dataset output containing rows and metadata",
+            example={
+                "data": [{"columnA": "value"}],
+                "_metadata": {
+                    "spreadsheet_id": "1abc",
+                    "worksheet_name": "Sheet1",
+                    "range": "A1:Z10",
+                    "row_count": 1,
+                },
+            },
+        )
 
     @staticmethod
     def _extract_spreadsheet_id(spreadsheet_input: str) -> str:

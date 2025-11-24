@@ -135,7 +135,7 @@ class XListenerNode(NodeBase):
             example="AI, Tesla, SpaceX",
             auto_update_attr="keywords",
         )
-    
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         self.register_output_handle(
@@ -165,13 +165,25 @@ class XListenerNode(NodeBase):
                 else:
                     query_parts.append(f'"{keywords_list[0]}"')
 
-        # 如果指定了用户，添加 from: 操作符
-        if self.account and self.search_mode == "advanced_search":
-            if is_user_id(self.account):
-                # 如果是用户ID，需要转换为用户名或使用其他方式
-                await self.persist_log(f"Advanced search does not support user ID, skipping user filter: {self.account}", "WARNING")
-            else:
-                query_parts.append(f"from:{self.account}")
+        # 如果指定了用户列表，添加 from: 过滤条件
+        if self.accounts and self.search_mode == "advanced_search":
+            account_filters = []
+            for account in self.accounts:
+                if not account:
+                    continue
+                if is_user_id(account):
+                    await self.persist_log(
+                        f"Advanced search does not support numeric user ID directly, skipping: {account}",
+                        "WARNING",
+                    )
+                    continue
+                account_filters.append(f"from:{account}")
+
+            if account_filters:
+                if len(account_filters) == 1:
+                    query_parts.append(account_filters[0])
+                else:
+                    query_parts.append(f"({' OR '.join(account_filters)})")
 
         # 如果没有任何查询条件，返回默认查询
         if not query_parts:
@@ -401,15 +413,15 @@ class XListenerNode(NodeBase):
         """
         all_tweets = []
         all_errors = []
-        
+
         await self.persist_log(f"Starting to fetch tweets from {len(self.accounts)} accounts", "INFO")
-        
+
         for account in self.accounts:
             await self.persist_log(f"Fetching tweets from account: {account}", "INFO")
-            
+
             # 为每个账户获取推文
             account_result = await self.fetch_tweets_for_account(account)
-            
+
             if "error" in account_result:
                 error_msg = f"Failed to fetch from account {account}: {account_result['error']}"
                 await self.persist_log(error_msg, "WARNING")
@@ -419,36 +431,36 @@ class XListenerNode(NodeBase):
                 # 为每条推文添加来源账户信息
                 for tweet in tweets:
                     tweet["source_account"] = account
-                
+
                 all_tweets.extend(tweets)
                 await self.persist_log(f"Fetched {len(tweets)} tweets from account {account}", "INFO")
-            
+
             # 简单的速率限制，避免API调用过快
             await asyncio.sleep(0.5)
-        
+
         # 按时间排序所有推文（如果有时间戳）
         try:
             all_tweets.sort(key=lambda x: x.get('created_at', ''), reverse=True)
         except:
             pass  # 如果排序失败，保持原顺序
-        
+
         # 限制总推文数量
         if len(all_tweets) > self.limit:
             all_tweets = all_tweets[:self.limit]
-        
+
         await self.persist_log(f"Total fetched {len(all_tweets)} tweets", "INFO")
-        
+
         result = {
             "tweets": all_tweets,
             "total_count": len(all_tweets),
             "accounts_processed": len(self.accounts),
             "errors": all_errors
         }
-        
+
         # 如果所有账户都失败了，返回错误
         if len(all_errors) == len(self.accounts) and len(all_tweets) == 0:
             result["error"] = f"All accounts failed to fetch: {'; '.join(all_errors)}"
-        
+
         return result
 
     async def execute(self) -> bool:

@@ -1525,6 +1525,16 @@ class NodeBase(abc.ABC):
 
         # 如果有连接的信号，优先使用信号的值
         if has_signal:
+            # 聚合句柄优先返回聚合后的最新状态，确保节点端能拿到完整数据
+            if handle_obj.is_aggregate and hasattr(self, handle_obj.auto_update_attr):
+                aggregated_value = getattr(self, handle_obj.auto_update_attr)
+                if aggregated_value is not None:
+                    self.logger.debug(
+                        "Using aggregated value for handle '%s' (aggregate handle with edge connected)",
+                        target_handle,
+                    )
+                    return aggregated_value
+
             self.logger.info(
                 "Using signal value for handle '%s' (edge connected, priority over member variable)",
                 target_handle

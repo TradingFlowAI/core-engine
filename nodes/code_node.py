@@ -549,6 +549,11 @@ class CodeNode(NodeBase):
             await self.persist_log(f"Executing CodeNode {self.node_id}", "INFO")
             await self.set_status(NodeStatus.RUNNING)
 
+            # 统一通过 input handle 获取可能的动态输入
+            python_code_value = self.get_input_handle_data(PYTHON_CODE_HANDLE)
+            if python_code_value is not None:
+                self.python_code = python_code_value
+
             # 安全检查
             if not await self._validate_security():
                 return False
@@ -565,10 +570,8 @@ class CodeNode(NodeBase):
                 }
             )
 
-            # 使用BaseNode自动聚合的input_data（避免双重处理）
-            input_data_dict = getattr(self, 'input_data', {})
-
-            # 确保input_data是字典格式
+            # 使用统一的句柄读取逻辑，支持聚合句柄返回完整字典
+            input_data_dict = self.get_input_handle_data(INPUT_DATA_HANDLE) or {}
             if not isinstance(input_data_dict, dict):
                 input_data_dict = {}
 

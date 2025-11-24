@@ -4,7 +4,7 @@ import traceback
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 from weather_depot.config import CONFIG
@@ -118,6 +118,7 @@ class TelegramSenderNode(NodeBase):
         self.disable_notification = disable_notification
         self.timeout = max(1, min(300, timeout))  # 限制在1-300秒之间
         self.retry_count = max(0, min(10, retry_count))  # 限制在0-10次之间
+        self.message_payload: Optional[Any] = None
 
         # Logging will be handled by persist_log method
 
@@ -137,6 +138,7 @@ class TelegramSenderNode(NodeBase):
             data_type=str,
             description="Message Input - Message content to send to Telegram",
             example="Hello from TradingFlow!",
+            auto_update_attr="message_payload",
         )
 
     def _register_output_handles(self) -> None:
@@ -257,6 +259,24 @@ class TelegramSenderNode(NodeBase):
         # 如果所有重试都失败
         return {"success": False, "error": "All retry attempts failed"}
 
+    async def _emit_result(
+        self,
+        success: bool,
+        execution_time: float,
+        **extra: Any,
+    ) -> None:
+        """
+        Send unified result payload to downstream nodes
+        """
+        payload = {
+            "success": success,
+            "chat_id": self.chat_id,
+            "timestamp": time.time(),
+            "execution_time": execution_time,
+        }
+        payload.update(extra)
+        await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload=payload)
+
     async def format_message(self, data: Any) -> str:
         """
         Format message content
@@ -350,40 +370,26 @@ class TelegramSenderNode(NodeBase):
                 error_msg = "Bot token is required"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
-                    "success": False,
-                    "error": error_msg,
-                    "timestamp": time.time()
-                })
+                await self._emit_result(False, time.time() - start_time, error=error_msg)
                 return False
 
             if not self.chat_id:
                 error_msg = "Chat ID is required (either from input or configuration)"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
-                    "success": False,
-                    "error": error_msg,
-                    "timestamp": time.time()
-                })
+                await self._emit_result(False, time.time() - start_time, error=error_msg)
                 return False
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 🔥 修复：获取消息输入（支持连线和信号两种方式）
+            # 🔥 使用统一的输入句柄读取逻辑
             input_data = self.get_input_handle_data(MESSAGE_INPUT_HANDLE)
-            if input_data is None:
-                input_data = await self.get_input_signal(MESSAGE_INPUT_HANDLE)
 
             if input_data is None:
                 error_msg = "No input message received"
                 await self.persist_log(error_msg, "WARNING")
                 await self.set_status(NodeStatus.FAILED, error_msg)
-                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
-                    "success": False,
-                    "error": error_msg,
-                    "timestamp": time.time()
-                })
+                await self._emit_result(False, time.time() - start_time, error=error_msg)
                 return False
 
             # Format message
@@ -396,17 +402,12 @@ class TelegramSenderNode(NodeBase):
             if result.get("success"):
                 await self.persist_log(f"Successfully sent Telegram message to chat {self.chat_id}", "INFO")
 
-                # Send unified result signal
-                result_data = {
-                    "success": True,
-                    "message_id": result.get("message_id"),
-                    "chat_id": self.chat_id,
-                    "timestamp": time.time(),
-                    "execution_time": time.time() - start_time,
-                    "error": None
-                }
-
-                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload=result_data)
+                await self._emit_result(
+                    True,
+                    time.time() - start_time,
+                    message_id=result.get("message_id"),
+                    error=None,
+                )
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:
@@ -414,16 +415,13 @@ class TelegramSenderNode(NodeBase):
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
 
-                # Send unified result signal with error
-                result_data = {
-                    "success": False,
-                    "error": error_msg,
-                    "timestamp": time.time(),
-                    "execution_time": time.time() - start_time,
-                    "message_id": None,
-                    "chat_id": self.chat_id
-                }
-                await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload=result_data)
+                await self._emit_result(
+                    False,
+                    time.time() - start_time,
+                    error=error_msg,
+                    message_id=None,
+                    response=result.get("response"),
+                )
                 return False
 
         except asyncio.CancelledError:
@@ -435,9 +433,5 @@ class TelegramSenderNode(NodeBase):
             await self.persist_log(error_msg, "ERROR")
             await self.persist_log(traceback.format_exc(), "DEBUG")
             await self.set_status(NodeStatus.FAILED, error_msg)
-            await self.send_signal(RESULT_OUTPUT_HANDLE, SignalType.DATASET, payload={
-                "success": False,
-                "error": error_msg,
-                "timestamp": time.time()
-            })
+            await self._emit_result(False, time.time() - start_time, error=error_msg)
             return False
