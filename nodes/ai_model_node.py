@@ -112,10 +112,23 @@ class AIModelNode(NodeBase):
         # Default output signal type (can be overridden via kwargs if needed)
         self.output_signal_type = kwargs.get("output_signal_type", SignalType.JSON_DATA)
 
-        # Process model parameters
-        self.parameters = parameters or {}
-        self.temperature = self.parameters.get("temperature", max(0.0, min(2.0, temperature)))
-        self.max_tokens = self.parameters.get("max_tokens", max(1, min(max_tokens, 4000)))
+        # Process model parameters (support dict, list, or JSON string)
+        self.raw_parameters = parameters
+        self.parameters = self._normalize_parameters(parameters)
+        self.temperature = self._coerce_numeric(
+            self.parameters.get("temperature"),
+            max(0.0, min(2.0, temperature)),
+            min_value=0.0,
+            max_value=2.0,
+            integer=False,
+        )
+        self.max_tokens = self._coerce_numeric(
+            self.parameters.get("max_tokens"),
+            max(1, min(max_tokens, 4000)),
+            min_value=1,
+            max_value=4000,
+            integer=True,
+        )
 
         # Results
         self.ai_response = None
@@ -124,6 +137,71 @@ class AIModelNode(NodeBase):
         self.ai_model_credits = self._calculate_model_credits()
 
         # Logging will be handled by persist_log method
+
+    def _normalize_parameters(self, parameters: Any) -> Dict[str, Any]:
+        """
+        Normalize parameters supplied from frontend/backends.
+
+        Supports:
+          - dict: used directly
+          - list[paramMatrix items]: convert to {name: value}
+          - JSON string: parsed into dict if possible
+        """
+        if not parameters:
+            return {}
+
+        if isinstance(parameters, dict):
+            return parameters
+
+        if isinstance(parameters, str):
+            try:
+                parsed = json.loads(parameters)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+
+        if isinstance(parameters, list):
+            normalized: Dict[str, Any] = {}
+            for entry in parameters:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name") or entry.get("id")
+                if not name:
+                    continue
+                value = entry.get("value")
+                if value is None:
+                    # fall back to remaining fields so we don't lose contextual data
+                    value = {k: v for k, v in entry.items() if k not in {"name", "id"}}
+                normalized[name] = value
+            return normalized
+
+        return {}
+
+    def _coerce_numeric(
+        self,
+        value: Any,
+        default: float,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        integer: bool = False,
+    ) -> Any:
+        """Safely convert numeric parameter values with optional bounds."""
+        if value is None:
+            numeric = float(default)
+        else:
+            try:
+                if isinstance(value, str):
+                    value = value.strip()
+                numeric = float(value)
+            except (TypeError, ValueError):
+                numeric = float(default)
+
+        if min_value is not None:
+            numeric = max(min_value, numeric)
+        if max_value is not None:
+            numeric = min(max_value, numeric)
+
+        return int(numeric) if integer else numeric
 
     def _calculate_model_credits(self) -> int:
         """
@@ -334,16 +412,25 @@ class AIModelNode(NodeBase):
 
         # Iterate over all output edges to analyze target node input formats
         for i, edge in enumerate(self._output_edges):
-            target_handle = edge.target_node_handle
-            target_node = edge.target_node
-            source_handle = edge.source_node_handle
+            if isinstance(edge, dict):
+                target_handle = edge.get("target_handle") or edge.get("target_node_handle")
+                target_node = edge.get("target") or edge.get("target_node")
+                source_handle = edge.get("source_handle") or edge.get("source_node_handle")
+                source_node = edge.get("source") or edge.get("source_node")
+            else:
+                target_handle = getattr(edge, "target_node_handle", None)
+                target_node = getattr(edge, "target_node", None)
+                source_handle = getattr(edge, "source_node_handle", None)
+                source_node = getattr(edge, "source_node", None)
 
             await self.persist_log(
-                f"Edge {i}: source={edge.get('source_node')} -> target={edge.get('target_node')}, "
-                f"source_handle={edge.get('source_handle')}, target_handle={edge.get('target_handle')}", "DEBUG"
+                f"Edge {i}: source={source_node} -> target={target_node}, "
+                f"source_handle={source_handle}, target_handle={target_handle}",
+                "DEBUG",
             )
 
-            # Add target_handle to required fields
+            if not target_handle:
+                continue
             required_fields.add(target_handle)
 
             # Add descriptions and examples based on common handle names
@@ -427,7 +514,7 @@ class AIModelNode(NodeBase):
 
             # 如果都没有找到，尝试基于输出连接的字段名从文本中提取信息
             if self._output_edges:
-                format_requirements = self._analyze_output_format_requirements()
+                format_requirements = await self._analyze_output_format_requirements()
                 extracted_data = {}
 
                 for field in format_requirements["required_fields"]:
@@ -545,7 +632,7 @@ class AIModelNode(NodeBase):
 
         # 如果启用了自动输出格式，根据输出连接生成JSON格式要求
         if self.auto_format_output and self._output_edges:
-            format_requirements = self._analyze_output_format_requirements()
+            format_requirements = await self._analyze_output_format_requirements()
 
             if format_requirements["required_fields"]:
                 context += "\n输出格式要求:\n"
@@ -797,15 +884,11 @@ class AIModelNode(NodeBase):
             # 发送AI响应信号
             output_handle = AI_RESPONSE_OUTPUT_HANDLE
 
-            # 创建信号并发送
-            signal = Signal(
-                type=SignalType.JSON_DATA,
+            if await self.send_signal(
+                source_handle=output_handle,
+                signal_type=SignalType.JSON_DATA,
                 payload=payload,
-                source_node_id=self.node_id,
-                source_node_handle=output_handle,
-            )
-
-            if await self.send_signal_to_outputs(signal, output_handle):
+            ):
                 await self.persist_log(
                     f"Successfully sent AI response signal via handle {output_handle}", "INFO"
                 )

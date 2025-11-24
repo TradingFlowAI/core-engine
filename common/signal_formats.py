@@ -69,6 +69,9 @@ class SignalFormats:
         SignalFormatField("reason", str, False, "交易理由", "突破阻力位后的追涨信号"),
     ]
 
+    # JSON_DATA 信号格式（通用 JSON 载荷，暂不强制字段）
+    JSON_DATA = []
+
     @classmethod
     def get_format(cls, signal_type: str) -> List[SignalFormatField]:
         """获取指定信号类型的格式定义"""

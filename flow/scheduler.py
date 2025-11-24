@@ -654,22 +654,24 @@ class FlowScheduler:
             # 🔄 Flow 状态计算逻辑（优先使用存储的终态状态）
             # 优先使用 Redis 中存储的 flow status（如果是终态：completed/stopped）
             stored_status = flow_data.get("status")
+            terminal_flow_statuses = {"completed", "stopped", "failed", "error", "terminated", "timeout"}
 
-            if stored_status in ["completed", "stopped"]:
-                # Run once (interval=0) 完成后或手动停止的 flow，使用存储的状态
+            if stored_status in terminal_flow_statuses:
+                # Run once (interval=0) 或手动停止的 flow，直接返回存储的终态
                 flow_status = stored_status
             else:
-                # 否则根据节点状态动态计算
-                # 1. 如果有节点在运行或等待 -> flow 状态为 running
-                if running_nodes > 0 or pending_nodes > 0:
+                if failed_nodes > 0:
+                    # 任何节点失败都立即将 flow 视为失败，避免前端继续显示运行中
+                    flow_status = "failed"
+                elif stored_status == "monitoring" and (running_nodes > 0 or pending_nodes > 0):
+                    # 监控阶段保持 monitoring 状态，直到所有节点结束
+                    flow_status = "monitoring"
+                elif running_nodes > 0 or pending_nodes > 0:
                     flow_status = "running"
-                # 2. 如果所有节点已完成执行（无论成功、失败或终止）-> flow 状态为 completed
-                # 这符合 Run once 的语义：Flow 层面已跑完，节点错误单独显示
                 elif (completed_nodes + failed_nodes + terminated_nodes) == total_flow_nodes and total_flow_nodes > 0:
                     flow_status = "completed"
-                # 3. 默认状态
                 else:
-                    flow_status = "running"
+                    flow_status = stored_status or "running"
 
             return {
                 "flow_id": flow_id,

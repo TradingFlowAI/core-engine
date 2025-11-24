@@ -30,6 +30,7 @@ class SignalType(Enum):
     TEXT = "text"  # 文本信号，用于标准输出和错误输出
     VAULT_INFO = "vault_info"  # 金库信息信号
     CODE_OUTPUT = "code_output"  # 代码执行输出信号
+    JSON_DATA = "json_data"  # 通用 JSON 结构信号（AI 输出使用）
 
     # 通用信号类型
     ANY = "any"  # 通用信号类型，表示可以接收任何类型的信号
