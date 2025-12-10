@@ -1354,15 +1354,15 @@ class FlowScheduler:
                     self.running_flows.remove(flow_id)
                     break
 
-        # Check flow status
-        flow_status = flow_data.get("status")
-        # 运行中或等待下个周期都继续调度
-        if flow_status not in {"running", self.waiting_status}:
-            logger.info(
-                "Flow %s status is %s, pausing scheduling", flow_id, flow_status
-            )
-            self.running_flows.remove(flow_id)
-            break
+                # Check flow status
+                flow_status = flow_data.get("status")
+                # 运行中或等待下个周期都继续调度
+                if flow_status not in {"running", self.waiting_status}:
+                    logger.info(
+                        "Flow %s status is %s, pausing scheduling", flow_id, flow_status
+                    )
+                    self.running_flows.remove(flow_id)
+                    break
 
                 # Check if next execution time has been reached
                 next_execution = float(flow_data.get("next_execution", 0))
@@ -1430,42 +1430,44 @@ class FlowScheduler:
                     interval_seconds = self._parse_interval(
                         flow_config.get("interval", "0")
                     )
-
-                # 如果 interval_seconds 为 0，表示只执行一次
-                if interval_seconds == 0:
-                    logger.info(
-                        "Flow %s has interval=0, executing once and stopping scheduling",
-                        flow_id
-                    )
-                    # 从运行中的流程列表中移除
-                    if flow_id in self.running_flows:
-                        self.running_flows.remove(flow_id)
-                    # 更新状态为 running（保持一致命名），等待异步监控完成后再写最终结果
-                    await self.redis.hset(
-                        f"flow:{flow_id}",
-                        mapping={
-                            "status": "running",
-                            "last_cycle": str(new_cycle),
-                        },
-                    )
-                    # 退出循环
-                    break
+                    # 如果 interval_seconds 为 0，表示只执行一次
+                    if interval_seconds == 0:
+                        logger.info(
+                            "Flow %s has interval=0, executing once and stopping scheduling",
+                            flow_id
+                        )
+                        # 从运行中的流程列表中移除
+                        if flow_id in self.running_flows:
+                            self.running_flows.remove(flow_id)
+                        # 更新状态为 running（保持一致命名），等待异步监控完成后再写最终结果
+                        await self.redis.hset(
+                            f"flow:{flow_id}",
+                            mapping={
+                                "status": "running",
+                                "last_cycle": str(new_cycle),
+                            },
+                        )
+                        # 退出循环
+                        break
+                    else:
+                        # 正常情况，计算下次执行时间并进入等待态
+                        next_execution = current_time + interval_seconds
+                        await self.redis.hset(
+                            f"flow:{flow_id}",
+                            mapping={
+                                "next_execution": str(next_execution),
+                                "last_cycle": str(new_cycle),
+                                # 写等待状态，便于前端显示
+                                "status": self.waiting_status,
+                                "last_cycle_duration_ms": (
+                                    int((datetime.now().timestamp() - current_time) * 1000)
+                                ),
+                                "next_cycle_eta": datetime.fromtimestamp(next_execution).isoformat(),
+                            },
+                        )
                 else:
-                    # 正常情况，计算下次执行时间并进入等待态
-                    next_execution = current_time + interval_seconds
-                    await self.redis.hset(
-                        f"flow:{flow_id}",
-                        mapping={
-                            "next_execution": str(next_execution),
-                            "last_cycle": str(new_cycle),
-                            # 写等待状态，便于前端显示
-                            "status": self.waiting_status,
-                            "last_cycle_duration_ms": (
-                                int((datetime.now().timestamp() - current_time) * 1000)
-                            ),
-                            "next_cycle_eta": datetime.fromtimestamp(next_execution).isoformat(),
-                        },
-                    )
+                    # 未到执行时间，等待剩余时间（至少 0.1 秒防止忙轮询）
+                    interval_seconds = max(next_execution - current_time, 0.1)
 
                 await asyncio.sleep(interval_seconds)
                 # 周期间隔等待期结束后，回到 running
