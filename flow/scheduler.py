@@ -47,6 +47,9 @@ class FlowScheduler:
             CONFIG.get("FLOW_MONITOR_MAX_WAIT_SECONDS", 300), default=300
         )
 
+        # 等待下一周期的状态标记
+        self.waiting_status = "waiting_next_cycle"
+
     async def initialize(self):
         """Initialize scheduler, connect to Redis"""
         # Connect to Redis
@@ -249,7 +252,7 @@ class FlowScheduler:
             await self._handle_stale_run_once_flow(flow_id, flow_data)
             return
 
-        if flow_status in {"running", "monitoring"}:
+        if flow_status in {"running", self.waiting_status}:
             await self._resume_flow_scheduler(flow_id)
 
         last_cycle = int(flow_data.get("last_cycle", -1))
@@ -267,7 +270,7 @@ class FlowScheduler:
     async def _handle_stale_run_once_flow(self, flow_id: str, flow_data: Dict[str, Any]) -> None:
         """Mark orphaned run-once flows as expired."""
         status = flow_data.get("status", "registered")
-        if status not in {"running", "monitoring"}:
+        if status not in {"running", self.waiting_status}:
             return
 
         await self.redis.hset(
@@ -663,14 +666,12 @@ class FlowScheduler:
                 if failed_nodes > 0:
                     # 任何节点失败都立即将 flow 视为失败，避免前端继续显示运行中
                     flow_status = "failed"
-                elif stored_status == "monitoring" and (running_nodes > 0 or pending_nodes > 0):
-                    # 监控阶段保持 monitoring 状态，直到所有节点结束
-                    flow_status = "monitoring"
                 elif running_nodes > 0 or pending_nodes > 0:
                     flow_status = "running"
                 elif (completed_nodes + failed_nodes + terminated_nodes) == total_flow_nodes and total_flow_nodes > 0:
                     flow_status = "completed"
                 else:
+                    # 保留等待态
                     flow_status = stored_status or "running"
 
             return {
@@ -679,6 +680,9 @@ class FlowScheduler:
                 "flow_status": flow_status,
                 "start_time": cycle_data.get("start_time"),
                 "end_time": cycle_data.get("end_time"),
+                "next_execution": flow_data.get("next_execution"),
+                "next_cycle_eta": flow_data.get("next_cycle_eta"),
+                "last_cycle_duration_ms": flow_data.get("last_cycle_duration_ms"),
                 "nodes": comprehensive_nodes,
                 "statistics": {
                     "total_nodes": total_nodes,
@@ -1350,14 +1354,15 @@ class FlowScheduler:
                     self.running_flows.remove(flow_id)
                     break
 
-                # Check flow status
-                flow_status = flow_data.get("status")
-                if flow_status != "running":
-                    logger.info(
-                        "Flow %s status is %s, pausing scheduling", flow_id, flow_status
-                    )
-                    self.running_flows.remove(flow_id)
-                    break
+        # Check flow status
+        flow_status = flow_data.get("status")
+        # 运行中或等待下个周期都继续调度
+        if flow_status not in {"running", self.waiting_status}:
+            logger.info(
+                "Flow %s status is %s, pausing scheduling", flow_id, flow_status
+            )
+            self.running_flows.remove(flow_id)
+            break
 
                 # Check if next execution time has been reached
                 next_execution = float(flow_data.get("next_execution", 0))
@@ -1435,27 +1440,36 @@ class FlowScheduler:
                     # 从运行中的流程列表中移除
                     if flow_id in self.running_flows:
                         self.running_flows.remove(flow_id)
-                    # 更新状态为监控中，等待异步监控完成后再写最终结果
+                    # 更新状态为 running（保持一致命名），等待异步监控完成后再写最终结果
                     await self.redis.hset(
                         f"flow:{flow_id}",
                         mapping={
-                            "status": "monitoring",
+                            "status": "running",
                             "last_cycle": str(new_cycle),
                         },
                     )
                     # 退出循环
                     break
                 else:
-                    # 正常情况，计算下次执行时间
+                    # 正常情况，计算下次执行时间并进入等待态
                     next_execution = current_time + interval_seconds
                     await self.redis.hset(
-                        f"flow:{flow_id}", "next_execution", str(next_execution)
-                    )
-                    await self.redis.hset(
-                        f"flow:{flow_id}", "last_cycle", str(new_cycle)
+                        f"flow:{flow_id}",
+                        mapping={
+                            "next_execution": str(next_execution),
+                            "last_cycle": str(new_cycle),
+                            # 写等待状态，便于前端显示
+                            "status": self.waiting_status,
+                            "last_cycle_duration_ms": (
+                                int((datetime.now().timestamp() - current_time) * 1000)
+                            ),
+                            "next_cycle_eta": datetime.fromtimestamp(next_execution).isoformat(),
+                        },
                     )
 
                 await asyncio.sleep(interval_seconds)
+                # 周期间隔等待期结束后，回到 running
+                await self.redis.hset(f"flow:{flow_id}", "status", "running")
                 tried += 1
 
         except Exception as e:
@@ -2116,12 +2130,25 @@ class FlowScheduler:
     ) -> None:
         """Persist final cycle status and publish events/logs."""
         cycle_key = f"flow:{flow_id}:cycle:{cycle}"
+        # 计算耗时
+        cycle_data = await self.redis.hgetall(cycle_key)
+        start_time_str = cycle_data.get("start_time")
+        end_time_dt = datetime.now()
+        duration_ms = None
+        if start_time_str:
+            try:
+                start_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+                duration_ms = int((end_time_dt - start_dt).total_seconds() * 1000)
+            except Exception:
+                duration_ms = None
+
         await self.redis.hset(
             cycle_key,
             mapping={
                 "status": final_status,
-                "end_time": datetime.now().isoformat(),
+                "end_time": end_time_dt.isoformat(),
                 "result_summary": json.dumps(summary),
+                "duration_ms": duration_ms if duration_ms is not None else "",
             },
         )
 
@@ -2144,7 +2171,11 @@ class FlowScheduler:
             error_message=error_message,
         )
 
-        await self._update_flow_completion_status(flow_id, final_status)
+        # 将耗时加入 summary，便于后续流级别状态使用
+        if duration_ms is not None:
+            summary["duration_ms"] = duration_ms
+
+        await self._update_flow_completion_status(flow_id, final_status, summary)
 
         if user_id:
             try:
@@ -2191,7 +2222,7 @@ class FlowScheduler:
         except Exception as exc:
             logger.warning(f"Failed to publish completion event for flow {flow_id}: {exc}")
 
-    async def _update_flow_completion_status(self, flow_id: str, final_status: str) -> None:
+    async def _update_flow_completion_status(self, flow_id: str, final_status: str, summary: Dict[str, Any]) -> None:
         """Update flow level status fields when a cycle ends."""
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
         if not flow_data:
@@ -2213,6 +2244,27 @@ class FlowScheduler:
         interval_seconds = self._parse_interval(flow_config.get("interval", "0"))
         if interval_seconds == 0:
             await self.redis.hset(f"flow:{flow_id}", "status", final_status)
+        else:
+            # 周期性任务进入等待下周期
+            next_execution = flow_data.get("next_execution")
+            try:
+                next_eta = (
+                    datetime.fromtimestamp(float(next_execution)).isoformat()
+                    if next_execution
+                    else ""
+                )
+            except Exception:
+                next_eta = next_execution or ""
+
+            await self.redis.hset(
+                f"flow:{flow_id}",
+                mapping={
+                    "status": self.waiting_status,
+                    # 统计信息存入 flow 级别，便于前端展示
+                    "last_cycle_duration_ms": summary.get("duration_ms"),
+                    "next_cycle_eta": next_eta,
+                },
+            )
 
     def _parse_int_config(self, value, default: int) -> int:
         """Safely parse integer configuration values."""
