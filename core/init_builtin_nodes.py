@@ -131,6 +131,17 @@ def init_all_builtin_nodes():
             }
         },
         {
+            'node_type': 'rootdata_node',
+            'version': '0.0.1',
+            'module': 'nodes.rootdata_node',
+            'class': 'RootDataNode',
+            'metadata': {
+                'display_name': 'RootData Node',
+                'category': 'data',
+                'description': 'Query RootData APIs with optional Redis cache'
+            }
+        },
+        {
             'node_type': 'x_listener_node',
             'version': '0.0.1',
             'module': 'nodes.x_listener_node',
