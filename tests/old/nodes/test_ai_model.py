@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from nodes.ai_model_node import AIModelNode
+from nodes.ai_model_node_v0_0_1 import AIModelNode
 
 # 配置日志
 logging.basicConfig(

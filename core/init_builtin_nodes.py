@@ -18,12 +18,12 @@ def init_all_builtin_nodes():
     为每个节点注册到版本控制系统
     """
 
-    # 注册所有内置节点（v0.0.1）
+    # 注册所有内置节点（按各节点当前版本）
     node_registrations = [
         {
             'node_type': 'vault_node',
             'version': '0.0.1',
-            'module': 'nodes.vault_node',
+            'module': 'nodes.vault_node_v0_0_1',
             'class': 'VaultNode',
             'metadata': {
                 'display_name': 'Vault Node',
@@ -34,7 +34,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'swap_node',
             'version': '0.0.1',
-            'module': 'nodes.swap_node',
+            'module': 'nodes.swap_node_v0_0_1',
             'class': 'SwapNode',
             'metadata': {
                 'display_name': 'Swap Node',
@@ -45,7 +45,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'ai_model_node',
             'version': '0.0.1',
-            'module': 'nodes.ai_model_node',
+            'module': 'nodes.ai_model_node_v0_0_1',
             'class': 'AIModelNode',
             'metadata': {
                 'display_name': 'AI Model Node',
@@ -56,7 +56,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'code_node',
             'version': '0.0.1',
-            'module': 'nodes.code_node',
+            'module': 'nodes.code_node_v0_0_1',
             'class': 'CodeNode',
             'metadata': {
                 'display_name': 'Code Node',
@@ -66,8 +66,8 @@ def init_all_builtin_nodes():
         },
         {
             'node_type': 'dataset_node',
-            'version': '0.0.1',
-            'module': 'nodes.dataset_node',
+            'version': '0.0.2',
+            'module': 'nodes.dataset_node_v0_0_2',
             'class': 'DatasetNode',
             'metadata': {
                 'display_name': 'Dataset Node',
@@ -78,7 +78,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'price_node',
             'version': '0.0.1',
-            'module': 'nodes.price_node',
+            'module': 'nodes.price_node_v0_0_1',
             'class': 'PriceNode',
             'metadata': {
                 'display_name': 'Price Node',
@@ -111,7 +111,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'telegram_sender_node',
             'version': '0.0.1',
-            'module': 'nodes.telegram_sender_node',
+            'module': 'nodes.telegram_sender_node_v0_0_1',
             'class': 'TelegramSenderNode',
             'metadata': {
                 'display_name': 'Telegram Sender Node',
@@ -122,7 +122,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'rsshub_node',
             'version': '0.0.1',
-            'module': 'nodes.rsshub_node',
+            'module': 'nodes.rsshub_node_v0_0_1',
             'class': 'RSSHubNode',
             'metadata': {
                 'display_name': 'RSS Hub Node',
@@ -133,7 +133,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'rootdata_node',
             'version': '0.0.1',
-            'module': 'nodes.rootdata_node',
+            'module': 'nodes.rootdata_node_v0_0_1',
             'class': 'RootDataNode',
             'metadata': {
                 'display_name': 'RootData Node',
@@ -144,7 +144,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'x_listener_node',
             'version': '0.0.1',
-            'module': 'nodes.x_listener_node',
+            'module': 'nodes.x_listener_node_v0_0_1',
             'class': 'XListenerNode',
             'metadata': {
                 'display_name': 'X (Twitter) Listener Node',

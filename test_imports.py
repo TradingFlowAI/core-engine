@@ -20,8 +20,8 @@ def test_imports():
         # 2. 测试 nodes 模块
         print("\nTesting nodes modules...")
         from nodes.node_base import NodeBase, NodeStatus
-        from nodes.ai_model_node import AIModelNode
-        from nodes.code_node import CodeNode
+        from nodes.ai_model_node_v0_0_1 import AIModelNode
+        from nodes.code_node_v0_0_1 import CodeNode
         print("✅ Nodes modules imported successfully")
         
         # 3. 测试 common 模块

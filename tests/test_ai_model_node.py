@@ -10,7 +10,7 @@ PROJECT_ROOT = os.path.join(CURRENT_DIR, "..")
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from nodes.ai_model_node import AIModelNode  # noqa: E402
+from nodes.ai_model_node_v0_0_1 import AIModelNode  # noqa: E402
 
 
 def _create_ai_node_stub():

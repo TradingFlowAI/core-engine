@@ -340,7 +340,7 @@ Durable: true
 
 ```python
 import asyncio
-from nodes.ai_model_node import AIModelNode
+from nodes.ai_model_node_v0_0_1 import AIModelNode
 
 async def test_credits():
     node = AIModelNode(
