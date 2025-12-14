@@ -19,6 +19,7 @@ from weather_depot.mq.node_signal_publisher import NodeSignalPublisher
 from common.edge import Edge
 from common.signal_types import Signal, SignalType
 from common.state_store import StateStoreFactory
+from core.redis_signal_publisher_async import publish_signal_async
 
 if TYPE_CHECKING:
     from common.state_store import StateStore
@@ -1044,6 +1045,27 @@ class NodeBase(abc.ABC):
                     'signal_type': str(signal_type)
                 }
             )
+
+            # 🔥 发布 Signal 到 Redis，供前端实时展示
+            try:
+                # 获取目标节点信息
+                target_node_ids = []
+                for edge in self._output_edges:
+                    if edge.source_node_handle == source_handle:
+                        target_node_ids.append(edge.target_node_id)
+                
+                await publish_signal_async(
+                    flow_id=self.flow_id,
+                    cycle=self.cycle,
+                    source_node_id=self.node_id,
+                    source_handle=source_handle,
+                    target_node_ids=target_node_ids,
+                    signal_type=signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                    payload=payload,
+                )
+            except Exception as redis_err:
+                # Redis 发布失败不影响主流程
+                self.logger.warning("Failed to publish signal to Redis: %s", str(redis_err))
 
             return True
         except Exception as e:

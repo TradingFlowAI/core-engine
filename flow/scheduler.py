@@ -654,6 +654,89 @@ class FlowScheduler:
             # 保留 error 作为向后兼容（可能有些节点使用 'error' 而非 'failed'）
             error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
 
+            # 💳 Credits 使用量（粗略估算：按节点类型固定扣费规则）
+            # NOTE: Station 目前扣费发生在节点执行前（见 NodeBase._charge_credits_sync），
+            # 因此这里将“已开始/已结束”的节点都计入使用量。
+            credits_used = 0
+            for node in comprehensive_nodes.values():
+                status_value = (node or {}).get("status")
+                if status_value in {"pending"}:
+                    continue
+                meta = (node or {}).get("metadata") or {}
+                node_type_value = str(
+                    meta.get("node_type")
+                    or meta.get("nodeType")
+                    or meta.get("type")
+                    or ""
+                ).lower()
+                is_code_node = "code" in node_type_value
+                credits_used += 20 if is_code_node else 10
+
+            # 🏦 Vault metrics（现金流校正：principal / current value / net profit）
+            vault_total_value_usd = None
+            vault_principal_usd = None
+            net_profit_usd = None
+            net_profit_pct = None
+            vaults_summary = []
+
+            try:
+                flow_config = json.loads(flow_data.get("config", "{}")) if flow_data.get("config") else {}
+                nodes_cfg = flow_config.get("nodes", []) or []
+                monitor_url = CONFIG.get("MONITOR_URL", "http://localhost:3000").rstrip("/")
+
+                def _extract_input_value(node_cfg: dict, key: str):
+                    for inp in node_cfg.get("inputs", []) or []:
+                        if inp.get("id") == key:
+                            return inp.get("value")
+                    return None
+
+                vault_nodes = []
+                for n in nodes_cfg:
+                    node_type = n.get("nodeType") or n.get("node_type") or n.get("type")
+                    title = (n.get("title") or "").lower()
+                    if node_type == "vault_node" or title == "vault":
+                        chain = _extract_input_value(n, "chain") or "aptos"
+                        addr = _extract_input_value(n, "vault_address") or _extract_input_value(n, "investor_address")
+                        if addr:
+                            vault_nodes.append({"chain": chain, "address": addr})
+
+                if vault_nodes:
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        for v in vault_nodes:
+                            chain = str(v.get("chain") or "aptos").lower()
+                            addr = str(v.get("address"))
+                            if chain == "aptos":
+                                resp = await client.get(f"{monitor_url}/aptos/vault/performance/{addr}")
+                                if resp.status_code == 200:
+                                    payload = resp.json() or {}
+                                    perf = payload.get("performance") or {}
+                                    current_val = float(perf.get("currentValueUsd") or perf.get("totalVaultValue") or 0)
+                                    principal = float(perf.get("principalUsd") or 0)
+                                    profit = float(perf.get("netProfitUsd") or perf.get("userYieldAmount") or 0)
+                                    pct = float(perf.get("netProfitPct") or perf.get("userYieldRate") or 0)
+                                    vaults_summary.append(
+                                        {
+                                            "chain": chain,
+                                            "address": addr,
+                                            "current_value_usd": current_val,
+                                            "principal_usd": principal,
+                                            "net_profit_usd": profit,
+                                            "net_profit_pct": pct,
+                                        }
+                                    )
+
+                    if vaults_summary:
+                        vault_total_value_usd = sum(v.get("current_value_usd", 0) for v in vaults_summary)
+                        vault_principal_usd = sum(v.get("principal_usd", 0) for v in vaults_summary)
+                        net_profit_usd = sum(v.get("net_profit_usd", 0) for v in vaults_summary)
+                        if vault_principal_usd and vault_principal_usd > 0:
+                            net_profit_pct = (net_profit_usd / vault_principal_usd) * 100
+                        else:
+                            net_profit_pct = 0.0
+            except Exception:
+                # 不影响 comprehensive status 主流程
+                pass
+
             # 🔄 Flow 状态计算逻辑（优先使用存储的终态状态）
             # 优先使用 Redis 中存储的 flow status（如果是终态：completed/stopped）
             stored_status = flow_data.get("status")
@@ -683,6 +766,14 @@ class FlowScheduler:
                 "next_execution": flow_data.get("next_execution"),
                 "next_cycle_eta": flow_data.get("next_cycle_eta"),
                 "last_cycle_duration_ms": flow_data.get("last_cycle_duration_ms"),
+                # 新增：Runtime metrics（前端 RuntimePanel 使用）
+                "credits_used": credits_used,
+                # ✅ 现金流校正后的净收益/收益率（来自 04_monitor）
+                "net_profit_usd": net_profit_usd if net_profit_usd is not None else flow_data.get("net_profit_usd"),
+                "net_profit_pct": net_profit_pct if net_profit_pct is not None else flow_data.get("net_profit_pct"),
+                "vault_total_value_usd": vault_total_value_usd,
+                "vault_principal_usd": vault_principal_usd,
+                "vaults": vaults_summary,
                 "nodes": comprehensive_nodes,
                 "statistics": {
                     "total_nodes": total_nodes,
