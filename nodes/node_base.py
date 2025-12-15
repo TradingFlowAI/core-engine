@@ -1124,12 +1124,6 @@ class NodeBase(abc.ABC):
                     elif isinstance(payload, dict):
                         data_type = "object"
                 
-                # 🔧 DEBUG: 添加日志追踪 Signal 发布
-                self.logger.info(
-                    "📤 [SIGNAL DEBUG] Publishing output signal: flow=%s, node=%s, handle=%s, targets=%s, type=%s",
-                    self.flow_id, self.node_id, source_handle, target_node_ids, data_type
-                )
-                
                 publish_result = await publish_signal_async(
                     flow_id=self.flow_id,
                     cycle=self.cycle,
@@ -1142,13 +1136,7 @@ class NodeBase(abc.ABC):
                     data_type=data_type,
                 )
                 
-                # 🔧 DEBUG: 日志记录发布结果
-                self.logger.info(
-                    "📤 [SIGNAL DEBUG] Publish result: %s (flow=%s, node=%s)",
-                    publish_result, self.flow_id, self.node_id
-                )
-                
-                # 🔥 持久化 Output Signal 到数据库（为每个目标节点创建记录）
+                # 持久化 Output Signal 到数据库（为每个目标节点创建记录）
                 for target_node_id in target_node_ids:
                     await persist_signal(
                         flow_id=self.flow_id,
