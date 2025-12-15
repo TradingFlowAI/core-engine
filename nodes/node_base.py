@@ -1106,7 +1106,7 @@ class NodeBase(abc.ABC):
                 target_node_ids = []
                 for edge in self._output_edges:
                     if edge.source_node_handle == source_handle:
-                        target_node_ids.append(edge.target_node_id)
+                        target_node_ids.append(edge.target_node)  # 🔧 修复：使用 target_node 而非 target_node_id
                 
                 # 推断数据类型
                 data_type = "unknown"
@@ -1124,7 +1124,13 @@ class NodeBase(abc.ABC):
                     elif isinstance(payload, dict):
                         data_type = "object"
                 
-                await publish_signal_async(
+                # 🔧 DEBUG: 添加日志追踪 Signal 发布
+                self.logger.info(
+                    "📤 [SIGNAL DEBUG] Publishing output signal: flow=%s, node=%s, handle=%s, targets=%s, type=%s",
+                    self.flow_id, self.node_id, source_handle, target_node_ids, data_type
+                )
+                
+                publish_result = await publish_signal_async(
                     flow_id=self.flow_id,
                     cycle=self.cycle,
                     source_node_id=self.node_id,
@@ -1134,6 +1140,12 @@ class NodeBase(abc.ABC):
                     payload=payload,
                     direction="output",  # 发送的信号是 output
                     data_type=data_type,
+                )
+                
+                # 🔧 DEBUG: 日志记录发布结果
+                self.logger.info(
+                    "📤 [SIGNAL DEBUG] Publish result: %s (flow=%s, node=%s)",
+                    publish_result, self.flow_id, self.node_id
                 )
                 
                 # 🔥 持久化 Output Signal 到数据库（为每个目标节点创建记录）
