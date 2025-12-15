@@ -2295,9 +2295,24 @@ class FlowScheduler:
         summary: Dict[str, Any],
         error_message: Optional[str] = None,
     ) -> None:
-        """Publish completion event to Redis."""
+        """Publish completion event to Redis with runtime metrics."""
         if not self.redis:
             return
+
+        # 🔥 获取收益数据（调用 04 API）
+        net_profit_usd = None
+        net_profit_pct = None
+        credits_used = None
+
+        try:
+            # 使用 get_comprehensive_flow_status 获取完整状态（包含收益数据）
+            comprehensive_status = await self.get_comprehensive_flow_status(flow_id, cycle)
+            if comprehensive_status:
+                net_profit_usd = comprehensive_status.get("net_profit_usd")
+                net_profit_pct = comprehensive_status.get("net_profit_pct")
+                credits_used = comprehensive_status.get("credits_used")
+        except Exception as exc:
+            logger.warning(f"Failed to get comprehensive status for completion event: {exc}")
 
         event_payload = {
             "flow_id": flow_id,
@@ -2306,11 +2321,19 @@ class FlowScheduler:
             "error": error_message,
             "summary": summary,
             "timestamp": datetime.now().isoformat(),
+            # 🔥 新增：Runtime metrics（前端 RuntimePanel 需要）
+            "net_profit_usd": net_profit_usd,
+            "net_profit_pct": net_profit_pct,
+            "credits_used": credits_used,
         }
 
         try:
             await self.redis.publish(
                 f"execution_complete:flow:{flow_id}", json.dumps(event_payload)
+            )
+            logger.info(
+                f"Published execution complete: flow={flow_id} cycle={cycle} "
+                f"profit=${net_profit_usd} ({net_profit_pct}%) credits={credits_used}"
             )
         except Exception as exc:
             logger.warning(f"Failed to publish completion event for flow {flow_id}: {exc}")

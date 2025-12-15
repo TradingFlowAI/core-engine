@@ -289,8 +289,12 @@ async def publish_signal_async(
         
         # 兼容旧版参数
         actual_from_node = source_node_id or from_node_id or ""
-        actual_handle = source_handle or handle_id or ""
         actual_targets = target_node_ids or ([to_node_id] if to_node_id else [])
+        
+        # 确定 handle_id：优先使用显式传入的 handle_id，否则使用 source_handle
+        # 对于 input 信号，handle_id 应该是目标 handle（接收方）
+        # 对于 output 信号，handle_id 应该是源 handle（发送方）
+        actual_handle = handle_id or source_handle or ""
         
         signal_data = {
             "direction": direction,

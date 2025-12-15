@@ -4,7 +4,7 @@
 from .ai_model_node_v0_0_1 import AIModelNode
 from .price_node_v0_0_1 import PriceNode
 from .code_node_v0_0_1 import CodeNode
-from .dataset_node_v0_0_2 import DatasetNode
+from .gsheet_node_v0_0_1 import GSheetNode  # Google Sheet Input/Output 节点
 # from .hyperion_dex_trade_node import HyperionDEXTradeNode
 from .rsshub_node_v0_0_1 import RSSHubNode
 from .telegram_sender_node_v0_0_1 import TelegramSenderNode

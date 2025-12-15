@@ -515,6 +515,40 @@ class NodeBase(abc.ABC):
                                 'signal_type': str(signal.type)
                             }
                         )
+                        
+                        # 🔥 发布 Input Signal 到 Redis，供前端实时展示
+                        try:
+                            # 推断数据类型
+                            input_payload = signal.payload
+                            input_data_type = "unknown"
+                            if input_payload is not None:
+                                if isinstance(input_payload, bool):
+                                    input_data_type = "boolean"
+                                elif isinstance(input_payload, int):
+                                    input_data_type = "integer"
+                                elif isinstance(input_payload, float):
+                                    input_data_type = "float"
+                                elif isinstance(input_payload, str):
+                                    input_data_type = "string"
+                                elif isinstance(input_payload, list):
+                                    input_data_type = "array"
+                                elif isinstance(input_payload, dict):
+                                    input_data_type = "object"
+                            
+                            await publish_signal_async(
+                                flow_id=self.flow_id,
+                                cycle=self.cycle,
+                                source_node_id=source_node,
+                                source_handle=source_handle,
+                                target_node_ids=[self.node_id],
+                                signal_type=signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                payload=input_payload,
+                                direction="input",  # 接收的信号是 input
+                                data_type=input_data_type,
+                                handle_id=handle,  # 使用目标 handle
+                            )
+                        except Exception as redis_err:
+                            self.logger.warning("Failed to publish input signal to Redis: %s", str(redis_err))
                     else:
                         self.logger.warning(
                             "Edge key not found in input signals: %s", edge_key
@@ -1054,6 +1088,22 @@ class NodeBase(abc.ABC):
                     if edge.source_node_handle == source_handle:
                         target_node_ids.append(edge.target_node_id)
                 
+                # 推断数据类型
+                data_type = "unknown"
+                if payload is not None:
+                    if isinstance(payload, bool):
+                        data_type = "boolean"
+                    elif isinstance(payload, int):
+                        data_type = "integer"
+                    elif isinstance(payload, float):
+                        data_type = "float"
+                    elif isinstance(payload, str):
+                        data_type = "string"
+                    elif isinstance(payload, list):
+                        data_type = "array"
+                    elif isinstance(payload, dict):
+                        data_type = "object"
+                
                 await publish_signal_async(
                     flow_id=self.flow_id,
                     cycle=self.cycle,
@@ -1062,6 +1112,8 @@ class NodeBase(abc.ABC):
                     target_node_ids=target_node_ids,
                     signal_type=signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
                     payload=payload,
+                    direction="output",  # 发送的信号是 output
+                    data_type=data_type,
                 )
             except Exception as redis_err:
                 # Redis 发布失败不影响主流程
