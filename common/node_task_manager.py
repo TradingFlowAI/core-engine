@@ -485,6 +485,16 @@ class NodeTaskManager:
 
             comprehensive_status = {}
             log_service = FlowExecutionLogService()
+            
+            # 尝试获取 Signal 服务
+            signal_service = None
+            try:
+                from weather_depot.db.services.flow_execution_signal_service import (
+                    FlowExecutionSignalService,
+                )
+                signal_service = FlowExecutionSignalService()
+            except Exception as e:
+                self.logger.debug(f"Signal service not available, will extract from logs: {e}")
 
             for node_id, task_info in flow_tasks.items():
                 try:
@@ -498,8 +508,26 @@ class NodeTaskManager:
                         order_direction="desc"
                     )
 
-                    # Extract signals from log metadata
-                    signals = self._extract_signals_from_logs(logs_data)
+                    # 优先从 Signal 表查询，fallback 到从日志提取
+                    signals = {'input': [], 'output': [], 'handles': {}}
+                    if signal_service:
+                        try:
+                            node_signals = await signal_service.get_signals_by_node(
+                                flow_id=flow_id,
+                                cycle=cycle,
+                                node_id=node_id,
+                                limit=50
+                            )
+                            signals = {
+                                'input': node_signals.get('input', []),
+                                'output': node_signals.get('output', []),
+                                'handles': {}  # 兼容旧格式
+                            }
+                        except Exception as sig_err:
+                            self.logger.debug(f"Failed to query signals from DB: {sig_err}")
+                            signals = self._extract_signals_from_logs(logs_data)
+                    else:
+                        signals = self._extract_signals_from_logs(logs_data)
 
                     # Calculate execution time if available
                     execution_time = None
@@ -539,7 +567,7 @@ class NodeTaskManager:
                     comprehensive_status[node_id] = {
                         'status': task_info.get('status', 'unknown'),
                         'logs': [],
-                        'signals': {},
+                        'signals': {'input': [], 'output': [], 'handles': {}},
                         'metadata': {
                             'task_id': task_info.get('task_id'),
                             'node_type': task_info.get('node_type'),
@@ -556,30 +584,76 @@ class NodeTaskManager:
 
     def _extract_signals_from_logs(self, logs_data: list) -> dict:
         """
-        Extract signal data from log metadata
+        DEPRECATED: Legacy fallback for extracting signal data from log metadata.
         
+        Since signal data is now stored in the dedicated `flow_execution_signals` table,
+        this function will typically return empty results. It remains as a fallback for
+        historical data that may still have `signal_data` in log_metadata.
+
         Args:
             logs_data: List of log dictionaries
-            
+
         Returns:
-            dict: Extracted signals with handle as key
+            dict: Extracted signals with structure:
+                {
+                    'input': [list of input signals],
+                    'output': [list of output signals],
+                    'handles': {handle: signal_data}  # Legacy format for compatibility
+                }
         """
-        signals = {}
-        
+        result = {
+            'input': [],
+            'output': [],
+            'handles': {}  # Legacy format
+        }
+
         for log_dict in logs_data:
-            # Extract signal data from log metadata
+            # Extract signal routing info from log metadata (simplified, no payload)
             log_metadata = log_dict.get('log_metadata') or {}
-            if 'signal_data' in log_metadata:
-                signal_data = log_metadata['signal_data']
-                if isinstance(signal_data, dict):
-                    for handle, value in signal_data.items():
-                        signals[handle] = {
-                            'value': value,
-                            'timestamp': log_dict.get('created_at'),
-                            'log_level': log_dict.get('log_level')
-                        }
-        
-        return signals
+            event = log_metadata.get('event')
+            
+            # Only process signal events
+            if event not in ('signal_sent', 'signal_received'):
+                # Legacy fallback: check for old signal_data format
+                if 'signal_data' not in log_metadata:
+                    continue
+                signal_data = log_metadata.get('signal_data')
+                if not isinstance(signal_data, dict):
+                    continue
+            else:
+                # New format: no payload, just routing info
+                signal_data = {}
+            
+            target_handle = log_metadata.get('target_handle')
+            source_handle = log_metadata.get('source_handle')
+            source_node = log_metadata.get('source_node')
+            signal_type = log_metadata.get('signal_type')
+            
+            # Construct signal entry from routing info
+            handle_id = target_handle or source_handle or 'unknown'
+            signal_entry = {
+                'timestamp': log_dict.get('created_at'),
+                'log_level': log_dict.get('log_level'),
+                'handle_id': handle_id,
+                'source_node': source_node,
+                'source_handle': source_handle,
+                'target_handle': target_handle,
+                'signal_type': signal_type,
+                # Note: payload not available in new format, query Signal table for full data
+            }
+            
+            # Legacy format
+            result['handles'][handle_id] = signal_entry
+            
+            # Determine direction
+            if event == 'signal_received' or target_handle:
+                signal_entry['direction'] = 'input'
+                result['input'].append(signal_entry)
+            else:
+                signal_entry['direction'] = 'output'
+                result['output'].append(signal_entry)
+
+        return result
 
     async def close(self):
         """关闭节点任务管理器和状态存储"""

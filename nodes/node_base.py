@@ -20,6 +20,7 @@ from common.edge import Edge
 from common.signal_types import Signal, SignalType
 from common.state_store import StateStoreFactory
 from core.redis_signal_publisher_async import publish_signal_async
+from core.signal_persistence import persist_signal
 
 if TYPE_CHECKING:
     from common.state_store import StateStore
@@ -508,7 +509,8 @@ class NodeBase(abc.ABC):
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                                'event': 'signal_received',
                                 'target_handle': handle,
                                 'source_node': source_node,
                                 'source_handle': source_handle,
@@ -547,8 +549,22 @@ class NodeBase(abc.ABC):
                                 data_type=input_data_type,
                                 handle_id=handle,  # 使用目标 handle
                             )
+                            
+                            # 🔥 持久化 Input Signal 到数据库
+                            await persist_signal(
+                                flow_id=self.flow_id,
+                                cycle=self.cycle,
+                                direction="input",
+                                from_node_id=source_node,
+                                to_node_id=self.node_id,
+                                source_handle=source_handle,
+                                target_handle=handle,
+                                signal_type=signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                data_type=input_data_type,
+                                payload=input_payload,
+                            )
                         except Exception as redis_err:
-                            self.logger.warning("Failed to publish input signal to Redis: %s", str(redis_err))
+                            self.logger.warning("Failed to publish/persist input signal: %s", str(redis_err))
                     else:
                         self.logger.warning(
                             "Edge key not found in input signals: %s", edge_key
@@ -586,7 +602,8 @@ class NodeBase(abc.ABC):
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                                'event': 'signal_received',
                                 'target_handle': handle,
                                 'source_node': edge.source_node,
                                 'source_handle': edge.source_node_handle,
@@ -640,7 +657,9 @@ class NodeBase(abc.ABC):
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留数量和类型，payload 存在 Signal 表
+                                'event': 'signal_received',
+                                'handle_count': len(signal_data),
                                 'signal_type': str(signal.type),
                                 'wildcard': True
                             }
@@ -1074,7 +1093,8 @@ class NodeBase(abc.ABC):
                 log_level="INFO",
                 log_source="node",
                 log_metadata={
-                    'signal_data': signal_data,
+                    # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                    'event': 'signal_sent',
                     'source_handle': source_handle,
                     'signal_type': str(signal_type)
                 }
@@ -1115,9 +1135,24 @@ class NodeBase(abc.ABC):
                     direction="output",  # 发送的信号是 output
                     data_type=data_type,
                 )
+                
+                # 🔥 持久化 Output Signal 到数据库（为每个目标节点创建记录）
+                for target_node_id in target_node_ids:
+                    await persist_signal(
+                        flow_id=self.flow_id,
+                        cycle=self.cycle,
+                        direction="output",
+                        from_node_id=self.node_id,
+                        to_node_id=target_node_id,
+                        source_handle=source_handle,
+                        target_handle=None,  # Output 信号的 target_handle 在接收时确定
+                        signal_type=signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                        data_type=data_type,
+                        payload=payload,
+                    )
             except Exception as redis_err:
-                # Redis 发布失败不影响主流程
-                self.logger.warning("Failed to publish signal to Redis: %s", str(redis_err))
+                # Redis 发布/持久化失败不影响主流程
+                self.logger.warning("Failed to publish/persist signal: %s", str(redis_err))
 
             return True
         except Exception as e:
