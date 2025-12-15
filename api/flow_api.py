@@ -104,7 +104,14 @@ async def get_flow_status(request, flow_id):
 
 @flow_bp.get("/flows/<flow_id>/comprehensive-status")
 async def get_comprehensive_flow_status(request, flow_id):
-    """获取Flow综合状态的接口，包含所有节点状态、日志和信号"""
+    """
+    获取Flow综合状态的接口，包含所有节点状态、日志和信号
+    
+    Query params:
+        cycle: Optional cycle number
+        include_node_logs: Whether to include logs per node (default: true, set to 'false' to reduce payload)
+        include_node_signals: Whether to include signals per node (default: true)
+    """
     try:
         scheduler = get_scheduler_instance()
 
@@ -120,7 +127,17 @@ async def get_comprehensive_flow_status(request, flow_id):
             except ValueError:
                 return sanic_json({"error": "Invalid cycle parameter"}, status=400)
 
-        status = await scheduler.get_comprehensive_flow_status(flow_id, cycle)
+        # 获取可选的 include_node_logs 参数（默认 true）
+        include_node_logs = request.args.get("include_node_logs", "true").lower() != "false"
+        # 获取可选的 include_node_signals 参数（默认 true）
+        include_node_signals = request.args.get("include_node_signals", "true").lower() != "false"
+
+        status = await scheduler.get_comprehensive_flow_status(
+            flow_id,
+            cycle,
+            include_node_logs=include_node_logs,
+            include_node_signals=include_node_signals
+        )
         return sanic_json(status)
     except ValueError as e:
         return sanic_json({"error": str(e)}, status=404)

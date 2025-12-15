@@ -608,13 +608,21 @@ class FlowScheduler:
             "node_count": len(node_ids),
         }
 
-    async def get_comprehensive_flow_status(self, flow_id: str, cycle: int = None) -> Dict:
+    async def get_comprehensive_flow_status(
+        self,
+        flow_id: str,
+        cycle: int = None,
+        include_node_logs: bool = True,
+        include_node_signals: bool = True
+    ) -> Dict:
         """
         Get comprehensive flow status including all node statuses, logs, and signals
 
         Args:
             flow_id: Flow identifier
             cycle: Optional cycle number (defaults to latest)
+            include_node_logs: Whether to include logs per node (default True, set False to reduce payload)
+            include_node_signals: Whether to include signals per node (default True)
 
         Returns:
             Dict containing flow info and comprehensive node status data
@@ -638,7 +646,9 @@ class FlowScheduler:
 
             comprehensive_nodes = await node_manager.get_comprehensive_node_status(
                 flow_id=flow_id,
-                cycle=cycle
+                cycle=cycle,
+                include_logs=include_node_logs,
+                include_signals=include_node_signals
             )
 
             # Get total nodes in the flow from Redis set

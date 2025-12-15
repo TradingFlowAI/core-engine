@@ -428,7 +428,9 @@ class NodeTaskManager:
         self,
         flow_id: str,
         cycle: int,
-        node_ids: List[str] = None
+        node_ids: List[str] = None,
+        include_logs: bool = True,
+        include_signals: bool = True
     ) -> Dict[str, Dict]:
         """
         Get comprehensive status for all nodes in a flow/cycle including logs and signals
@@ -437,12 +439,14 @@ class NodeTaskManager:
             flow_id: Flow identifier
             cycle: Cycle number
             node_ids: Optional list of specific node IDs to query
+            include_logs: Whether to include logs in the response (default True)
+            include_signals: Whether to include signals in the response (default True)
 
         Returns:
             Dict mapping node_id to comprehensive status info including:
             - status: execution status
-            - logs: recent logs
-            - signals: signal data from logs
+            - logs: recent logs (if include_logs=True)
+            - signals: signal data (if include_signals=True)
             - metadata: additional execution info
         """
         try:
@@ -484,50 +488,110 @@ class NodeTaskManager:
                     continue
 
             comprehensive_status = {}
-            log_service = FlowExecutionLogService()
             
-            # 尝试获取 Signal 服务
+            # 只有需要时才初始化服务
+            log_service = None
             signal_service = None
-            try:
-                from weather_depot.db.services.flow_execution_signal_service import (
-                    FlowExecutionSignalService,
-                )
-                signal_service = FlowExecutionSignalService()
-            except Exception as e:
-                self.logger.debug(f"Signal service not available, will extract from logs: {e}")
+            
+            if include_logs:
+                log_service = FlowExecutionLogService()
+            
+            if include_signals:
+                try:
+                    from weather_depot.db.services.flow_execution_signal_service import (
+                        FlowExecutionSignalService,
+                    )
+                    signal_service = FlowExecutionSignalService()
+                except Exception as e:
+                    self.logger.debug(f"Signal service not available: {e}")
 
             for node_id, task_info in flow_tasks.items():
                 try:
-                    # Get recent logs for this node (already converted to dict format)
-                    logs_data = await log_service.get_logs_by_flow_cycle_node(
-                        flow_id=flow_id,
-                        cycle=cycle,
-                        node_id=node_id,
-                        limit=50,
-                        order_by="created_at",
-                        order_direction="desc"
-                    )
+                    # 只在需要时获取日志
+                    logs_data = []
+                    if include_logs and log_service:
+                        logs_data = await log_service.get_logs_by_flow_cycle_node(
+                            flow_id=flow_id,
+                            cycle=cycle,
+                            node_id=node_id,
+                            limit=50,
+                            order_by="created_at",
+                            order_direction="desc"
+                        )
 
-                    # 优先从 Signal 表查询，fallback 到从日志提取
+                    # 只在需要时获取信号
                     signals = {'input': [], 'output': [], 'handles': {}}
-                    if signal_service:
-                        try:
-                            node_signals = await signal_service.get_signals_by_node(
-                                flow_id=flow_id,
-                                cycle=cycle,
-                                node_id=node_id,
-                                limit=50
-                            )
-                            signals = {
-                                'input': node_signals.get('input', []),
-                                'output': node_signals.get('output', []),
-                                'handles': {}  # 兼容旧格式
-                            }
-                        except Exception as sig_err:
-                            self.logger.debug(f"Failed to query signals from DB: {sig_err}")
-                            signals = self._extract_signals_from_logs(logs_data)
-                    else:
-                        signals = self._extract_signals_from_logs(logs_data)
+                    if include_signals:
+                        # 首先尝试从信号表查询
+                        signal_from_db = False
+                        if signal_service:
+                            try:
+                                node_signals = await signal_service.get_signals_by_node(
+                                    flow_id=flow_id,
+                                    cycle=cycle,
+                                    node_id=node_id,
+                                    limit=50
+                                )
+                                if node_signals.get('input') or node_signals.get('output'):
+                                    # 转换数据库格式为前端期望的格式（与 WebSocket 格式对齐）
+                                    def convert_db_signal(db_sig: dict) -> dict:
+                                        """将数据库 signal 格式转换为前端期望的格式"""
+                                        direction = db_sig.get('direction', 'output')
+                                        # handleId: input 用 target_handle, output 用 source_handle
+                                        handle_id = db_sig.get('target_handle') if direction == 'input' else db_sig.get('source_handle')
+                                        return {
+                                            'timestamp': db_sig.get('created_at'),
+                                            'cycle': db_sig.get('cycle'),
+                                            'direction': direction,
+                                            'fromNodeId': db_sig.get('from_node_id'),
+                                            'toNodeId': db_sig.get('to_node_id'),
+                                            'handleId': handle_id or db_sig.get('source_handle') or db_sig.get('target_handle'),
+                                            'sourceHandle': db_sig.get('source_handle'),
+                                            'targetHandle': db_sig.get('target_handle'),
+                                            'dataType': (db_sig.get('signal_type') or 'unknown').replace('SignalType.', ''),
+                                            'payload': db_sig.get('payload'),
+                                        }
+                                    
+                                    input_signals = [convert_db_signal(s) for s in node_signals.get('input', [])]
+                                    output_signals = [convert_db_signal(s) for s in node_signals.get('output', [])]
+                                    
+                                    # 构建 handles 兼容格式
+                                    handles = {}
+                                    for sig in input_signals + output_signals:
+                                        if sig.get('handleId'):
+                                            handles[sig['handleId']] = sig
+                                    
+                                    signals = {
+                                        'input': input_signals,
+                                        'output': output_signals,
+                                        'handles': handles
+                                    }
+                                    signal_from_db = True
+                            except Exception as sig_err:
+                                self.logger.debug(f"Failed to query signals from DB: {sig_err}")
+                        
+                        # 如果信号表中没有数据，fallback 到从日志中提取
+                        if not signal_from_db:
+                            # 如果日志已经加载，直接使用
+                            fallback_logs = logs_data
+                            # 如果没有加载日志，临时获取（仅用于信号提取）
+                            if not fallback_logs:
+                                try:
+                                    if not log_service:
+                                        log_service = FlowExecutionLogService()
+                                    fallback_logs = await log_service.get_logs_by_flow_cycle_node(
+                                        flow_id=flow_id,
+                                        cycle=cycle,
+                                        node_id=node_id,
+                                        limit=50,
+                                        order_by="created_at",
+                                        order_direction="desc"
+                                    )
+                                except Exception as log_err:
+                                    self.logger.debug(f"Failed to get logs for signal fallback: {log_err}")
+                            
+                            if fallback_logs:
+                                signals = self._extract_signals_from_logs(fallback_logs)
 
                     # Calculate execution time if available
                     execution_time = None
@@ -609,7 +673,8 @@ class NodeTaskManager:
 
         for log_dict in logs_data:
             # Extract signal routing info from log metadata (simplified, no payload)
-            log_metadata = log_dict.get('log_metadata') or {}
+            # 兼容两种字段名：log_metadata 和 metadata
+            log_metadata = log_dict.get('log_metadata') or log_dict.get('metadata') or {}
             event = log_metadata.get('event')
             
             # Only process signal events

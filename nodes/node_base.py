@@ -1136,17 +1136,34 @@ class NodeBase(abc.ABC):
                     data_type=data_type,
                 )
                 
-                # 持久化 Output Signal 到数据库（为每个目标节点创建记录）
-                for target_node_id in target_node_ids:
+                # 持久化 Output Signal 到数据库
+                signal_type_str = signal_type.value if hasattr(signal_type, 'value') else str(signal_type)
+                if target_node_ids:
+                    # 为每个目标节点创建记录
+                    for target_node_id in target_node_ids:
+                        await persist_signal(
+                            flow_id=self.flow_id,
+                            cycle=self.cycle,
+                            direction="output",
+                            from_node_id=self.node_id,
+                            to_node_id=target_node_id,
+                            source_handle=source_handle,
+                            target_handle=None,  # Output 信号的 target_handle 在接收时确定
+                            signal_type=signal_type_str,
+                            data_type=data_type,
+                            payload=payload,
+                        )
+                else:
+                    # 即使没有目标节点，也持久化 output 信号（用于调试和历史查询）
                     await persist_signal(
                         flow_id=self.flow_id,
                         cycle=self.cycle,
                         direction="output",
                         from_node_id=self.node_id,
-                        to_node_id=target_node_id,
+                        to_node_id=None,
                         source_handle=source_handle,
-                        target_handle=None,  # Output 信号的 target_handle 在接收时确定
-                        signal_type=signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                        target_handle=None,
+                        signal_type=signal_type_str,
                         data_type=data_type,
                         payload=payload,
                     )
