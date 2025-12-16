@@ -779,63 +779,60 @@ class CodeNode(NodeBase):
 
                 # 计算执行时间和最终Gas消耗
                 self.execution_time = time.time() - start_time
-                await self.persist_log(
-                    f"Code execution total time: {self.execution_time:.4f}s, total Gas consumed: {self.gas_used}", "INFO"
-                )
-
+                
                 # 根据执行时间额外增加Gas
-                await self.persist_log("Calculating final gas usage based on execution time", "INFO")
                 time_gas = int(self.execution_time * 10)  # 每秒10个Gas
                 self.gas_used += time_gas
-                await self.persist_log(
-                    f"Final resource usage: Gas={self.gas_used}/{self.max_gas}", "INFO"
-                )
 
                 # 获取输出
-                await self.persist_log("Getting captured stdout, stderr and debug output", "INFO")
                 stdout_output = stdout_capture.getvalue()
                 stderr_output = stderr_capture.getvalue()
                 debug_output = debug_capture.getvalue()  # 获取调试输出
+                
+                # 🔥 将 print 输出按行拆分，每行作为单独的 INFO 日志持久化
                 if stdout_output:
-                    await self.persist_log(f"Captured stdout content: {stdout_output}", "INFO")
+                    stdout_lines = stdout_output.strip().split('\n')
+                    for line in stdout_lines:
+                        if line.strip():  # 跳过空行
+                            await self.persist_log(
+                                f"[print] {line}",
+                                log_level="INFO",
+                                log_metadata={
+                                    "source": "user_print",
+                                    "raw_output": line
+                                }
+                            )
+                
+                # stderr 作为 WARNING 日志（用户代码的警告/错误输出）
                 if stderr_output:
-                    await self.persist_log(f"Captured stderr content: {stderr_output}", "ERROR")
+                    stderr_lines = stderr_output.strip().split('\n')
+                    for line in stderr_lines:
+                        if line.strip():
+                            await self.persist_log(
+                                f"[stderr] {line}",
+                                log_level="WARNING",
+                                log_metadata={
+                                    "source": "user_stderr",
+                                    "raw_output": line
+                                }
+                            )
+                
+                # debug 输出保持 DEBUG 级别
                 if debug_output:
-                    await self.persist_log(f"Captured debug content: {debug_output}", "DEBUG")
+                    await self.persist_log(f"Debug output: {debug_output}", "DEBUG")
 
-                await self.persist_log(
-                    f"Captured stdout length: {len(stdout_output)}, stderr length: {len(stderr_output)}, debug length: {len(debug_output)}", "INFO"
-                )
-
-            # 添加详细的执行统计信息
-            gas_info = (
-                f"\n--- Execution Stats ---\n"
-                f"Gas used: {self.gas_used}/{self.max_gas}\n"
-                f"Execution time: {self.execution_time:.3f}s\n"
-                f"Memory limit: {self.max_memory_mb}MB\n"
-            )
-            debug_output += gas_info
-
-            # Standard output and error are logged but not sent as signal outputs
-            # (logs are accessible via node execution logs)
+            # 如果有 stderr 输出且执行失败，记录错误
             if stderr_output and not success:
                 error_msg = f"Code execution failed: {stderr_output}"
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
-            # Debug output is logged but not sent as a signal output
-            if debug_output:
-                await self.persist_log(f"Debug output captured: {len(debug_output)} characters", "DEBUG")
-
             # 获取代码执行结果
-            await self.persist_log("Getting execution result from local variables", "INFO")
             output_data = local_vars.get("output_data")
-            await self.persist_log(f"Output data present: {output_data is not None}", "INFO")
 
             if output_data is not None:
-                # 在输出中添加Gas和Credits信息
-                await self.persist_log("Adding execution stats to output data", "INFO")
+                # 在输出中添加Gas和执行统计信息
                 if isinstance(output_data, dict):
                     output_data["_execution_stats"] = {
                         "gas_used": self.gas_used,
@@ -845,14 +842,12 @@ class CodeNode(NodeBase):
                     }
 
                 await self.persist_log(
-                    f"Code execution successful, generated output data (type: {type(output_data).__name__})",
+                    f"Code execution completed (time: {self.execution_time:.3f}s, gas: {self.gas_used})",
                     log_level="INFO",
                     log_metadata={
                         "output_type": type(output_data).__name__,
-                        "output_size": len(str(output_data)) if output_data else 0,
-                        "final_gas_used": self.gas_used,
+                        "gas_used": self.gas_used,
                         "execution_time": self.execution_time,
-                        "custom_outputs": len(self.output_handles)
                     }
                 )
 
@@ -862,25 +857,12 @@ class CodeNode(NodeBase):
                 )
 
                 # 发送自定义输出
-                custom_outputs_sent = 0
                 for handle in self.output_handles:
                     if handle in local_vars:
                         await self.send_signal(
                             handle, SignalType.DATASET, payload=local_vars[handle]
                         )
-                        custom_outputs_sent += 1
 
-                if custom_outputs_sent > 0:
-                    await self.persist_log(
-                        f"Sent {custom_outputs_sent} custom output signals",
-                        log_level="INFO",
-                        log_metadata={
-                            "custom_outputs_sent": custom_outputs_sent,
-                            "output_handles": self.output_handles
-                        }
-                    )
-
-                await self.persist_log("Successfully executed code and sent output signals", "INFO")
                 await self.set_status(NodeStatus.COMPLETED)
                 return True
             else:

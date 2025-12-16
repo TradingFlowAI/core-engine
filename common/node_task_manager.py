@@ -13,7 +13,7 @@ class NodeTaskManager:
     实现为单例模式，确保在一个进程中共享同一个实例
 
     Attributes:
-        state_store_type: 状态存储类型（如 Redis）
+        state_store_type: 状态存储类型(如 Redis)
         state_store_config: 状态存储配置
         worker_id: 当前工作进程的唯一标识符
         state_store: 状态存储实例, 是单例模式的实例
