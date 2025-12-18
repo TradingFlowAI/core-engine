@@ -15,7 +15,6 @@ from weather_depot.config import CONFIG
 
 # input handles
 CHAIN_HANDLE = "chain"
-CHAIN_ID_HANDLE = "chain_id"
 VAULT_ADDRESS_HANDLE = "vault_address"
 # output handles
 VAULT_OUTPUT_HANDLE = "vault"
@@ -23,12 +22,23 @@ VAULT_OUTPUT_HANDLE = "vault"
 # Monitor service URL
 MONITOR_URL = CONFIG.get("MONITOR_URL", "http://localhost:3000")
 
+# Chain configuration table - chain_id is auto-determined, no user input needed
+CHAIN_CONFIG = {
+    "aptos": {
+        "chain_id": None,  # Aptos doesn't use chain_id
+        "description": "Aptos Mainnet",
+    },
+    "flow_evm": {
+        "chain_id": 545,  # Flow EVM Testnet (747 for mainnet when ready)
+        "description": "Flow EVM Testnet",
+    },
+}
+
 
 @register_node_type(
     "vault_node",
     default_params={
         "chain": "aptos",  # Supports "aptos" or "flow_evm"
-        "chain_id": None,  # Flow EVM chain ID, such as 545 (Flow testnet)
         "vault_address": None,  # User address, required parameter
     },
 )
@@ -41,11 +51,12 @@ class VaultNode(NodeBase):
 
     Input parameters:
     - chain: Blockchain network name (supports "aptos" or "flow_evm")
-    - chain_id: Flow EVM chain ID (only required for Flow EVM, default 545)
     - vault_address: User's wallet address or vault address
 
+    Note: chain_id is automatically determined from CHAIN_CONFIG table based on chain selection.
+
     Output signals:
-    - VAULT_HOLDINGS: Signal containing complete user holdings information
+    - VAULT_INFO: Signal containing complete user holdings information
 
     Holdings information includes:
     - holdings: List of held tokens, each containing token address, amount, value and other information
@@ -61,17 +72,10 @@ class VaultNode(NodeBase):
         vault_address="0x6a1a233..."
     )
 
-    # Flow EVM configuration
+    # Flow EVM configuration (chain_id is auto-determined from config)
     node = VaultNode(
         chain="flow_evm",
-        chain_id=545,  # Flow testnet
         vault_address="0x1234..."
-    )
-
-    # Receive parameters through signals
-    node = VaultNode(
-        chain="flow_evm"
-        # chain_id and vault_address will be received through signals
     )
     ```
 
@@ -107,7 +111,6 @@ class VaultNode(NodeBase):
         node_id: str,
         name: str,
         chain: str = "aptos",
-        chain_id: Optional[int] = None,
         vault_address: Optional[str] = None,
         **kwargs,
     ):
@@ -124,21 +127,16 @@ class VaultNode(NodeBase):
 
         # Configuration
         self.chain = chain
-        self.chain_id = chain_id
         self.vault_address = vault_address
 
-        # Validate chain
-        if self.chain not in ["aptos", "flow_evm"]:
-            # Cannot use await in __init__, validation error will be logged in execute method
+        # Validate chain and get chain_id from config table
+        if self.chain not in CHAIN_CONFIG:
             raise ValueError(
-                f"Unsupported chain: {self.chain}. Supported chains: 'aptos', 'flow_evm'"
+                f"Unsupported chain: {self.chain}. Supported chains: {list(CHAIN_CONFIG.keys())}"
             )
 
-        # Validate chain_id for flow_evm
-        if self.chain == "flow_evm" and self.chain_id is None:
-            # Get vault information to Flow testnet
-            self.chain_id = 545
-            # Warning log will be handled in execute method
+        # Get chain_id from fixed config table (no user input needed)
+        self.chain_id = CHAIN_CONFIG[self.chain]["chain_id"]
 
         # Query result
         self.holdings_result = None
@@ -557,14 +555,6 @@ class VaultNode(NodeBase):
             description="区块链网络名称（支持 'aptos' 或 'flow_evm'）",
             example="aptos",
             auto_update_attr="chain",
-        )
-        # 注册链ID输入句柄（Flow EVM 使用）
-        self.register_input_handle(
-            name=CHAIN_ID_HANDLE,
-            data_type=int,
-            description="Flow EVM 链ID，如 545 (Flow测试网)",
-            example=545,
-            auto_update_attr="chain_id",
         )
         # 注册用户地址输入句柄
         self.register_input_handle(
