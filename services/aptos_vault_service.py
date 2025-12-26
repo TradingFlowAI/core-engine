@@ -7,8 +7,8 @@ from typing import Dict, List, Optional
 
 import httpx
 
-from weather_depot.logging_config import setup_logging  # noqa: F401, E402
-from weather_depot.config import CONFIG
+from infra.logging_config import setup_logging  # noqa: F401, E402
+from infra.config import CONFIG
 
 # Setup logging
 setup_logging(CONFIG)
@@ -225,9 +225,9 @@ class AptosVaultService:
         }
         """
         try:
-            from weather_depot.db import db_session
-            from weather_depot.db.services.vault_operation_history_service import VaultOperationHistoryService
-            from weather_depot.db.models.vault_operation_history import OperationType
+            from infra.db import db_session
+            from infra.db.services.vault_operation_history_service import VaultOperationHistoryService
+            from infra.db.models.vault_operation_history import OperationType
 
             # 处理事件类型过滤
             operation_types = None
@@ -716,8 +716,8 @@ class AptosVaultService:
             from utils.token_price_util import (
                 get_aptos_monitored_token_info,
             )
-            from weather_depot.db import db_session
-            from weather_depot.db.services.token_price_history_service import (
+            from infra.db import db_session
+            from infra.db.services.token_price_history_service import (
                 TokenPriceHistoryService,
             )
 
@@ -790,7 +790,7 @@ class AptosVaultService:
         from utils.token_price_util import (
             get_aptos_monitored_token_info,
         )
-        from weather_depot.db.services.token_price_history_service import (
+        from infra.db.services.token_price_history_service import (
             TokenPriceHistoryService,
         )
 

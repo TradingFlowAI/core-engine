@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import redis.asyncio as aioredis
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 if TYPE_CHECKING:
     from nodes.node_base import NodeBase
@@ -142,6 +142,7 @@ class NodeRegistry:
             or f"{node_class_type}-{node_id}",
             "input_edges": input_edges,
             "output_edges": output_edges,
+            "node_type": node_class_type,  # Add node_type parameter
         }
 
         # Update default parameters
@@ -255,12 +256,12 @@ class NodeRegistry:
             for node_type in supported_types:
                 await self._register_node_type_mapping(node_type)
 
-            # logger.info(
-            #     "Worker %s has been registered, supported node types: %s, api_url: %s",
-            #     self.worker_id,
-            #     ", ".join(supported_types),
-            #     self.api_url,
-            # )
+            logger.info(
+                "Worker %s has been registered, supported node types: %s, api_url: %s",
+                self.worker_id,
+                ", ".join(supported_types),
+                self.api_url,
+            )
             return True
         except Exception as e:
             logger.error("Failed to register Worker %s: %s", self.worker_id, str(e))

@@ -1,4 +1,4 @@
-"""节点装饰器，用于自动注册节点类型（支持版本管理）"""
+"""Node decorators for automatic node type registration (with version management)"""
 
 import logging
 from functools import wraps
@@ -16,24 +16,24 @@ def register_node_type(
     default_params: Dict[str, Any] = None
 ):
     """
-    节点类型注册装饰器（支持版本管理）
+    Node type registration decorator (with version management).
     
     Args:
-        node_class_type: 节点类型标识符（如 'code_node'）
-        version: 版本号（如 '1.0.0'，'1.2.3-beta.1'）
-                如果未指定，将从类元数据中获取，默认为 '0.0.1'
-        default_params: 默认参数配置
+        node_class_type: Node type identifier (e.g., 'code_node')
+        version: Version number (e.g., '1.0.0', '1.2.3-beta.1')
+                If not specified, will get from class metadata, defaults to '0.0.1'
+        default_params: Default parameter configuration
     
     Returns:
-        装饰器函数
+        Decorator function
         
     Examples:
-        # 显式指定版本
+        # Explicitly specify version
         @register_node_type("code_node", version="1.0.0", default_params={...})
         class CodeNode(NodeBase):
             pass
         
-        # 从类元数据自动获取版本
+        # Automatically get version from class metadata
         @register_node_type("code_node", default_params={...})
         class CodeNode(NodeBase):
             def __init__(self, **kwargs):
@@ -42,10 +42,10 @@ def register_node_type(
     local_registry = LocalNodeRegistry.get_instance()
 
     def decorator(cls):
-        # 1. 确定版本号
+        # 1. Determine version number
         node_version = version
         if node_version is None:
-            # 尝试从类元数据获取版本
+            # Try to get version from class metadata
             if hasattr(cls, 'get_class_metadata'):
                 try:
                     metadata = cls.get_class_metadata()
@@ -53,17 +53,17 @@ def register_node_type(
                 except:
                     node_version = '0.0.1'
             else:
-                # 从 default_params 获取版本
+                # Get version from default_params
                 node_version = (default_params or {}).get('version', '0.0.1')
         
         logger.info(
-            f"注册节点类型: {node_class_type} v{node_version}, 类: {cls.__name__}"
+            f"Registering node type: {node_class_type} v{node_version}, class: {cls.__name__}"
         )
 
-        # 2. 注册到本地 Worker Registry（用于运行时实例化）
+        # 2. Register to local Worker Registry (for runtime instantiation)
         local_registry.register_node(node_class_type, cls, default_params)
 
-        # 3. 注册到版本化 Registry（用于版本管理）
+        # 3. Register to versioned Registry (for version management)
         try:
             VersionedNodeRegistry.register(
                 node_type=node_class_type,
@@ -72,19 +72,19 @@ def register_node_type(
                 metadata=default_params
             )
             logger.debug(
-                f"✓ 注册到版本系统: {node_class_type} v{node_version}"
+                f"✓ Registered to version system: {node_class_type} v{node_version}"
             )
         except Exception as e:
-            # 如果版本已存在或其他错误，记录警告但不中断注册
+            # If version exists or other error, log warning but don't interrupt registration
             logger.warning(
-                f"版本注册警告: {node_class_type} v{node_version} - {str(e)}"
+                f"Version registration warning: {node_class_type} v{node_version} - {str(e)}"
             )
 
-        # 4. 添加类属性，便于反射
+        # 4. Add class attributes for reflection
         cls.NODE_CLASS_TYPE = node_class_type
         cls.NODE_VERSION = node_version
 
-        # 5. 直接返回类，不要包装，以支持类继承
+        # 5. Return class directly, don't wrap, to support class inheritance
         return cls
 
     return decorator

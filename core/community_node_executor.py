@@ -14,14 +14,14 @@ import time
 
 class CommunityNodeExecutor:
     """
-    社区节点执行器
+    Community Node Executor
     
-    支持两种执行方式：
-    1. Python 代码执行（受限环境）
-    2. HTTP API 调用
+    Supports two execution methods:
+    1. Python code execution (restricted environment)
+    2. HTTP API calls
     """
     
-    # Python 代码执行的安全限制
+    # Security restrictions for Python code execution
     ALLOWED_BUILTINS = {
         'abs', 'all', 'any', 'bool', 'dict', 'enumerate', 'filter',
         'float', 'int', 'len', 'list', 'map', 'max', 'min', 'print',
@@ -29,36 +29,36 @@ class CommunityNodeExecutor:
         'True', 'False', 'None'
     }
     
-    # 允许的模块（白名单）
+    # Allowed modules (whitelist)
     ALLOWED_MODULES = {
         'json', 'math', 'datetime', 'decimal', 'statistics'
     }
     
-    # HTTP 调用的默认配置
-    DEFAULT_HTTP_TIMEOUT = 30  # 秒
-    MAX_HTTP_TIMEOUT = 120  # 最大超时时间
+    # HTTP call default config
+    DEFAULT_HTTP_TIMEOUT = 30  # seconds
+    MAX_HTTP_TIMEOUT = 120  # max timeout
     MAX_RESPONSE_SIZE = 10 * 1024 * 1024  # 10MB
     
     @staticmethod
     def execute_python(code: str, inputs: Dict[str, Any], 
                       timeout: int = 10) -> Dict[str, Any]:
         """
-        在受限环境中执行 Python 代码
+        Execute Python code in restricted environment.
         
         Args:
-            code: Python 代码字符串
-            inputs: 输入数据字典
-            timeout: 超时时间（秒）
+            code: Python code string
+            inputs: Input data dictionary
+            timeout: Timeout (seconds)
             
         Returns:
-            包含 outputs 和 logs 的字典
+            Dictionary containing outputs and logs
             
         Raises:
-            TimeoutError: 执行超时
-            Exception: 代码执行错误
+            TimeoutError: Execution timeout
+            Exception: Code execution error
         """
         try:
-            # 创建受限的全局命名空间
+            # Create restricted global namespace
             restricted_globals = {
                 '__builtins__': {
                     name: getattr(__builtins__, name)
@@ -67,7 +67,7 @@ class CommunityNodeExecutor:
                 }
             }
             
-            # 添加允许的模块
+            # Add allowed modules
             for module_name in CommunityNodeExecutor.ALLOWED_MODULES:
                 try:
                     module = __import__(module_name)
@@ -75,32 +75,32 @@ class CommunityNodeExecutor:
                 except ImportError:
                     pass
             
-            # 准备局部命名空间
+            # Prepare local namespace
             local_namespace = {
                 'inputs': inputs,
                 'outputs': {}
             }
             
-            # 捕获标准输出和错误
+            # Capture stdout and stderr
             stdout_capture = io.StringIO()
             stderr_capture = io.StringIO()
             
             start_time = time.time()
             
-            # 执行代码
+            # Execute code
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 exec(code, restricted_globals, local_namespace)
             
             execution_time = time.time() - start_time
             
-            # 检查超时
+            # Check timeout
             if execution_time > timeout:
                 raise TimeoutError(f"Execution exceeded {timeout} seconds")
             
-            # 获取输出
+            # Get outputs
             outputs = local_namespace.get('outputs', {})
             
-            # 获取日志
+            # Get logs
             stdout_text = stdout_capture.getvalue()
             stderr_text = stderr_capture.getvalue()
             
@@ -134,25 +134,25 @@ class CommunityNodeExecutor:
     @staticmethod
     def execute_http(config: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行 HTTP API 调用
+        Execute HTTP API call.
         
         Args:
-            config: HTTP 配置
+            config: HTTP config
                 - url: API URL (required)
-                - method: HTTP 方法 (GET, POST, etc)
-                - headers: 请求头
-                - timeout: 超时时间
-            inputs: 输入数据（作为请求体或查询参数）
+                - method: HTTP method (GET, POST, etc)
+                - headers: Request headers
+                - timeout: Timeout
+            inputs: Input data (as request body or query params)
             
         Returns:
-            包含 outputs 和元数据的字典
+            Dictionary containing outputs and metadata
             
         Raises:
-            ValueError: 配置错误
-            requests.RequestException: HTTP 请求错误
+            ValueError: Config error
+            requests.RequestException: HTTP request error
         """
         try:
-            # 验证配置
+            # Validate config
             url = config.get('url')
             if not url:
                 raise ValueError("URL is required in HTTP config")
@@ -164,11 +164,11 @@ class CommunityNodeExecutor:
                 CommunityNodeExecutor.MAX_HTTP_TIMEOUT
             )
             
-            # 设置默认 Content-Type
+            # Set default Content-Type
             if 'Content-Type' not in headers:
                 headers['Content-Type'] = 'application/json'
             
-            # 准备请求
+            # Prepare request
             request_kwargs = {
                 'headers': headers,
                 'timeout': timeout
@@ -176,30 +176,30 @@ class CommunityNodeExecutor:
             
             start_time = time.time()
             
-            # 根据方法发送请求
+            # Send request based on method
             if method in ['GET', 'DELETE']:
-                # GET/DELETE 使用查询参数
+                # GET/DELETE use query params
                 request_kwargs['params'] = inputs
                 response = requests.request(method, url, **request_kwargs)
             else:
-                # POST/PUT/PATCH 使用请求体
+                # POST/PUT/PATCH use request body
                 request_kwargs['json'] = inputs
                 response = requests.request(method, url, **request_kwargs)
             
             execution_time = time.time() - start_time
             
-            # 检查响应大小
+            # Check response size
             content_length = len(response.content)
             if content_length > CommunityNodeExecutor.MAX_RESPONSE_SIZE:
                 raise ValueError(f"Response too large: {content_length} bytes")
             
-            # 解析响应
+            # Parse response
             try:
                 response_data = response.json()
             except json.JSONDecodeError:
                 response_data = {'raw': response.text}
             
-            # 检查 HTTP 状态码
+            # Check HTTP status code
             response.raise_for_status()
             
             return {
@@ -236,15 +236,15 @@ class CommunityNodeExecutor:
     def execute(execution_type: str, execution_config: Dict[str, Any], 
                 inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        统一的执行接口
+        Unified execution interface.
         
         Args:
-            execution_type: 'python' 或 'http'
-            execution_config: 执行配置
-            inputs: 输入数据
+            execution_type: 'python' or 'http'
+            execution_config: Execution config
+            inputs: Input data
             
         Returns:
-            执行结果字典
+            Execution result dictionary
         """
         if execution_type == 'python':
             code = execution_config.get('pythonCode', '')
@@ -264,17 +264,17 @@ class CommunityNodeExecutor:
     @staticmethod
     def validate_python_code(code: str) -> Dict[str, Any]:
         """
-        验证 Python 代码是否安全
+        Validate if Python code is safe.
         
         Args:
-            code: Python 代码
+            code: Python code
             
         Returns:
-            验证结果
+            Validation result
         """
         issues = []
         
-        # 检查危险关键字
+        # Check dangerous keywords
         dangerous_keywords = [
             'import os', 'import sys', '__import__',
             'eval', 'exec', 'compile',
@@ -288,7 +288,7 @@ class CommunityNodeExecutor:
             if keyword in code:
                 issues.append(f"Dangerous keyword detected: {keyword}")
         
-        # 检查代码是否可以编译
+        # Check if code can compile
         try:
             compile(code, '<string>', 'exec')
         except SyntaxError as e:
@@ -302,32 +302,32 @@ class CommunityNodeExecutor:
     @staticmethod
     def validate_http_config(config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        验证 HTTP 配置
+        Validate HTTP config.
         
         Args:
-            config: HTTP 配置
+            config: HTTP config
             
         Returns:
-            验证结果
+            Validation result
         """
         issues = []
         
-        # 检查必需字段
+        # Check required fields
         if 'url' not in config:
             issues.append("URL is required")
         else:
             url = config['url']
-            # 检查 URL 协议
+            # Check URL protocol
             if not url.startswith('http://') and not url.startswith('https://'):
                 issues.append("URL must start with http:// or https://")
         
-        # 检查 HTTP 方法
+        # Check HTTP method
         if 'method' in config:
             method = config['method'].upper()
             if method not in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
                 issues.append(f"Unsupported HTTP method: {method}")
         
-        # 检查超时设置
+        # Check timeout setting
         if 'timeout' in config:
             timeout = config['timeout']
             if not isinstance(timeout, (int, float)) or timeout <= 0:

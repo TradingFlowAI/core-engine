@@ -6,20 +6,25 @@ import logging
 from sanic import Sanic
 
 
-from weather_depot.config import get_station_config
-from weather_depot.logging_config import setup_logging  # noqa: F401, E402
-from weather_depot.mq.pool_manager import pool_manager
+from infra.config import get_station_config
+from infra.logging_config import setup_logging  # noqa: F401, E402
+from infra.mq.pool_manager import pool_manager
 from api import flow_bp, health_bp, node_bp
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
 from services import setup_services  # noqa: F401, E402
-from mq.activity_publisher import init_activity_publisher, get_activity_publisher
+from publishers.activity_publisher import init_activity_publisher, get_activity_publisher
 
 pool_manager.register_shutdown_handler()
 
 CONFIG = get_station_config()
 setup_logging(CONFIG, "station")
 logger = logging.getLogger(__name__)
+
+# Reduce log level for pika and asyncio to minimize DEBUG noise
+logging.getLogger('pika').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
+
 # Read configuration from config file
 WORKER_HOST = CONFIG["WORKER_HOST"]
 WORKER_PORT = CONFIG["WORKER_PORT"]
@@ -73,20 +78,9 @@ async def setup_node_registry(app, loop):
     # 2. Initialize Activity Publisher for Quest System
     try:
         import pika
-        from weather_depot.config import CONFIG
         
-        # Create blocking connection for ActivityPublisher
-        rabbitmq_host = CONFIG.get("RABBITMQ_HOST", "localhost")
-        rabbitmq_port = CONFIG.get("RABBITMQ_PORT", 5672)
-        rabbitmq_user = CONFIG.get("RABBITMQ_USER", "guest")
-        rabbitmq_password = CONFIG.get("RABBITMQ_PASSWORD", "guest")
-        
-        credentials = pika.PlainCredentials(rabbitmq_user, rabbitmq_password)
-        parameters = pika.ConnectionParameters(
-            host=rabbitmq_host,
-            port=rabbitmq_port,
-            credentials=credentials
-        )
+        rabbitmq_url = CONFIG.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+        parameters = pika.URLParameters(rabbitmq_url)
         connection = pika.BlockingConnection(parameters)
         
         publisher = init_activity_publisher(connection)
@@ -95,6 +89,14 @@ async def setup_node_registry(app, loop):
     except Exception as e:
         logger.warning(f"Failed to initialize Activity Publisher: {e}")
         logger.warning("Quest activity events will not be published from Station")
+
+
+@app.listener("after_server_start")
+async def server_ready(app, loop):
+    """Log when server is ready to accept requests"""
+    logger.info(f"🚀 Station Server is ready at http://{WORKER_HOST}:{WORKER_PORT}")
+    logger.info(f"Worker ID: {WORKER_ID}")
+    logger.info("Server is running and accepting requests...")
 
 
 @app.listener("after_server_stop")

@@ -6,7 +6,7 @@
 
 # from web3 import Web3
 
-# from weather_depot.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
+# from infra.mq.dex_trade_signal_publisher import DexTradeSignalPublisher
 # from common.node_decorators import register_node_type
 # from common.signal_types import SignalType
 # from nodes.node_base import NodeBase, NodeStatus

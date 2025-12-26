@@ -4,73 +4,73 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-# Redis客户端依赖
+# Redis client dependency
 import redis.asyncio as aioredis
 
 
 class StateStore(abc.ABC):
-    """状态存储抽象基类，作为防腐层隔离底层存储实现"""
+    """State store abstract base class, serves as anti-corruption layer to isolate storage implementation"""
 
     @abc.abstractmethod
     async def initialize(self) -> bool:
-        """初始化存储连接"""
+        """Initialize storage connection."""
 
     @abc.abstractmethod
     async def close(self) -> None:
-        """关闭存储连接"""
+        """Close storage connection."""
 
     @abc.abstractmethod
     async def set_node_task_status(
         self, node_task_id: str, status: str, error_message: Optional[str] = None
     ) -> bool:
-        """设置节点状态"""
+        """Set node status."""
 
     @abc.abstractmethod
     async def get_node_task_status(self, node_task_id: str) -> Dict[str, Any]:
-        """获取节点状态"""
+        """Get node status."""
 
     @abc.abstractmethod
     async def set_termination_flag(
         self, node_task_id: str, reason: Optional[str] = None
     ) -> bool:
-        """设置节点终止标志"""
+        """Set node termination flag."""
 
     @abc.abstractmethod
     async def get_termination_flag(self, node_task_id: str) -> Optional[Dict[str, Any]]:
-        """获取节点终止标志"""
+        """Get node termination flag."""
 
     @abc.abstractmethod
     async def clear_termination_flag(self, node_task_id: str) -> bool:
-        """清除节点终止标志"""
+        """Clear node termination flag."""
 
-    # 新增：通用键值存储方法，用于NodeManager
+    # Generic key-value store methods for NodeManager
     @abc.abstractmethod
     async def set_value(self, key: str, value: Any) -> bool:
-        """设置键值"""
+        """Set key-value."""
 
     @abc.abstractmethod
     async def get_value(self, key: str) -> Any:
-        """获取键值"""
+        """Get key-value."""
 
     @abc.abstractmethod
     async def delete_value(self, key: str) -> bool:
-        """删除键值"""
+        """Delete key-value."""
 
     @abc.abstractmethod
     async def add_to_set(self, key: str, value: Any) -> bool:
-        """添加值到集合"""
+        """Add value to set."""
 
     @abc.abstractmethod
     async def remove_from_set(self, key: str, value: Any) -> bool:
-        """从集合中移除值"""
+        """Remove value from set."""
 
     @abc.abstractmethod
     async def get_set_members(self, key: str) -> List[Any]:
-        """获取集合中的所有成员"""
+        """Get all members of set."""
 
 
 class RedisStateStore(StateStore):
-    """Redis实现的状态存储"""
+    """Redis implementation of state store"""
 
     def __init__(
         self,
@@ -78,11 +78,11 @@ class RedisStateStore(StateStore):
         key_prefix: str = "trading_flow:",
     ):
         """
-        初始化Redis状态存储
+        Initialize Redis state store.
 
         Args:
-            redis_url: Redis连接URL
-            key_prefix: Redis键前缀
+            redis_url: Redis connection URL
+            key_prefix: Redis key prefix
         """
         self.redis_url = redis_url
         self.key_prefix = key_prefix
@@ -91,10 +91,10 @@ class RedisStateStore(StateStore):
 
     async def initialize(self) -> bool:
         """
-        初始化Redis连接
+        Initialize Redis connection.
 
         Returns:
-            bool: 是否初始化成功
+            bool: Whether initialization was successful
         """
         try:
             self.redis_client = await aioredis.from_url(self.redis_url)
@@ -105,7 +105,7 @@ class RedisStateStore(StateStore):
             return False
 
     async def close(self) -> None:
-        """关闭Redis连接"""
+        """Close Redis connection."""
         if self.redis_client:
             await self.redis_client.close()
             self.logger.info("Redis state store connection closed")
@@ -114,22 +114,22 @@ class RedisStateStore(StateStore):
         self, node_task_id: str, status: str, error_message: Optional[str] = None
     ) -> bool:
         """
-        设置节点状态
+        Set node status.
 
         Args:
-            node_task_id: 节点ID
-            status: 状态值
-            error_message: 错误信息（如果有）
+            node_task_id: Node ID
+            status: Status value
+            error_message: Error message (if any)
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
                 self.logger.error("Redis client not initialized")
                 return False
 
-            # 更新Redis中的节点状态
+            # Update node status in Redis
             node_key = f"{self.key_prefix}node:{node_task_id}"
             node_data = {
                 "status": status,
@@ -139,9 +139,9 @@ class RedisStateStore(StateStore):
             if error_message:
                 node_data["error_message"] = error_message
 
-            # 使用哈希存储节点数据
+            # Use hash to store node data
             await self.redis_client.hset(node_key, mapping=node_data)
-            # 设置适当的过期时间，例如24小时
+            # Set appropriate expiration time, e.g., 24 hours
             await self.redis_client.expire(node_key, 86400)
             return True
         except Exception as e:
@@ -150,13 +150,13 @@ class RedisStateStore(StateStore):
 
     async def get_node_task_status(self, node_task_id: str) -> Dict[str, Any]:
         """
-        获取节点状态
+        Get node status.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            Dict[str, Any]: 节点状态数据
+            Dict[str, Any]: Node status data
         """
         try:
             if not self.redis_client:
@@ -166,7 +166,7 @@ class RedisStateStore(StateStore):
             node_key = f"{self.key_prefix}node:{node_task_id}"
             node_data = await self.redis_client.hgetall(node_key)
 
-            # 将字节转换为字符串
+            # Convert bytes to string
             result = {}
             for k, v in node_data.items():
                 key = k.decode("utf-8") if isinstance(k, bytes) else k
@@ -182,14 +182,14 @@ class RedisStateStore(StateStore):
         self, node_task_id: str, reason: Optional[str] = None
     ) -> bool:
         """
-        设置节点终止标志
+        Set node termination flag.
 
         Args:
-            node_task_id: 节点ID
-            reason: 终止原因
+            node_task_id: Node ID
+            reason: Termination reason
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
@@ -203,7 +203,7 @@ class RedisStateStore(StateStore):
             }
 
             await self.redis_client.set(
-                terminate_key, json.dumps(terminate_data), ex=3600  # 设置1小时过期时间
+                terminate_key, json.dumps(terminate_data), ex=3600  # Set 1 hour expiration
             )
             return True
         except Exception as e:
@@ -212,13 +212,13 @@ class RedisStateStore(StateStore):
 
     async def get_termination_flag(self, node_task_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取节点终止标志
+        Get node termination flag.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            Optional[Dict[str, Any]]: 终止标志数据，如果不存在则返回None
+            Optional[Dict[str, Any]]: Termination flag data, None if not exists
         """
         try:
             if not self.redis_client:
@@ -237,13 +237,13 @@ class RedisStateStore(StateStore):
 
     async def clear_termination_flag(self, node_task_id: str) -> bool:
         """
-        清除节点终止标志
+        Clear node termination flag.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
@@ -259,21 +259,21 @@ class RedisStateStore(StateStore):
 
     async def set_value(self, key: str, value: Any) -> bool:
         """
-        设置键值
+        Set key-value.
 
         Args:
-            key: 键名
-            value: 值（会被JSON序列化）
+            key: Key name
+            value: Value (will be JSON serialized)
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
                 self.logger.error("Redis client not initialized")
                 return False
 
-            # 将值序列化为JSON
+            # Serialize value to JSON
             value_str = json.dumps(value)
             await self.redis_client.set(key, value_str)
             return True
@@ -283,13 +283,13 @@ class RedisStateStore(StateStore):
 
     async def get_value(self, key: str) -> Any:
         """
-        获取键值
+        Get key-value.
 
         Args:
-            key: 键名
+            key: Key name
 
         Returns:
-            Any: 值（JSON反序列化后的对象）
+            Any: Value (JSON deserialized object)
         """
         try:
             if not self.redis_client:
@@ -306,13 +306,13 @@ class RedisStateStore(StateStore):
 
     async def delete_value(self, key: str) -> bool:
         """
-        删除键值
+        Delete key-value.
 
         Args:
-            key: 键名
+            key: Key name
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
@@ -327,21 +327,21 @@ class RedisStateStore(StateStore):
 
     async def add_to_set(self, key: str, value: Any) -> bool:
         """
-        添加值到集合
+        Add value to set.
 
         Args:
-            key: 集合键名
-            value: 要添加的值
+            key: Set key name
+            value: Value to add
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
                 self.logger.error("Redis client not initialized")
                 return False
 
-            # Redis SADD命令
+            # Redis SADD command
             await self.redis_client.sadd(key, str(value))
             return True
         except Exception as e:
@@ -350,21 +350,21 @@ class RedisStateStore(StateStore):
 
     async def remove_from_set(self, key: str, value: Any) -> bool:
         """
-        从集合中移除值
+        Remove value from set.
 
         Args:
-            key: 集合键名
-            value: 要移除的值
+            key: Set key name
+            value: Value to remove
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if not self.redis_client:
                 self.logger.error("Redis client not initialized")
                 return False
 
-            # Redis SREM命令
+            # Redis SREM command
             await self.redis_client.srem(key, str(value))
             return True
         except Exception as e:
@@ -373,22 +373,22 @@ class RedisStateStore(StateStore):
 
     async def get_set_members(self, key: str) -> List[Any]:
         """
-        获取集合中的所有成员
+        Get all members of set.
 
         Args:
-            key: 集合键名
+            key: Set key name
 
         Returns:
-            List[Any]: 集合成员列表
+            List[Any]: List of set members
         """
         try:
             if not self.redis_client:
                 self.logger.error("Redis client not initialized")
                 return []
 
-            # Redis SMEMBERS命令
+            # Redis SMEMBERS command
             members = await self.redis_client.smembers(key)
-            # 将字节转换为字符串
+            # Convert bytes to string
             return [
                 member.decode("utf-8") if isinstance(member, bytes) else member
                 for member in members
@@ -399,43 +399,43 @@ class RedisStateStore(StateStore):
 
 
 class InMemoryStateStore(StateStore):
-    """内存实现的状态存储，适用于测试和单进程环境"""
+    """In-memory implementation of state store, suitable for testing and single-process environments"""
 
     def __init__(self):
-        """初始化内存状态存储"""
-        self.node_status = {}  # 存储节点状态
-        self.termination_flags = {}  # 存储终止标志
-        self.key_values = {}  # 存储普通键值对
-        self.sets = {}  # 存储集合
+        """Initialize in-memory state store."""
+        self.node_status = {}  # Store node status
+        self.termination_flags = {}  # Store termination flags
+        self.key_values = {}  # Store key-value pairs
+        self.sets = {}  # Store sets
         self.logger = logging.getLogger("InMemoryStateStore")
 
     async def initialize(self) -> bool:
         """
-        初始化存储连接
+        Initialize storage connection.
 
         Returns:
-            bool: 始终返回True
+            bool: Always returns True
         """
         self.logger.info("In-memory state store initialized")
         return True
 
     async def close(self) -> None:
-        """关闭存储连接"""
+        """Close storage connection."""
         self.logger.info("In-memory state store closed")
 
     async def set_node_task_status(
         self, node_task_id: str, status: str, error_message: Optional[str] = None
     ) -> bool:
         """
-        设置节点状态
+        Set node status.
 
         Args:
-            node_task_id: 节点ID
-            status: 状态值
-            error_message: 错误信息（如果有）
+            node_task_id: Node ID
+            status: Status value
+            error_message: Error message (if any)
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             self.node_status[node_task_id] = {
@@ -453,13 +453,13 @@ class InMemoryStateStore(StateStore):
 
     async def get_node_task_status(self, node_task_id: str) -> Dict[str, Any]:
         """
-        获取节点状态
+        Get node status.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            Dict[str, Any]: 节点状态数据
+            Dict[str, Any]: Node status data
         """
         return self.node_status.get(node_task_id, {})
 
@@ -467,14 +467,14 @@ class InMemoryStateStore(StateStore):
         self, node_task_id: str, reason: Optional[str] = None
     ) -> bool:
         """
-        设置节点终止标志
+        Set node termination flag.
 
         Args:
-            node_task_id: 节点ID
-            reason: 终止原因
+            node_task_id: Node ID
+            reason: Termination reason
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             self.termination_flags[node_task_id] = {
@@ -488,25 +488,25 @@ class InMemoryStateStore(StateStore):
 
     async def get_termination_flag(self, node_task_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取节点终止标志
+        Get node termination flag.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            Optional[Dict[str, Any]]: 终止标志数据，如果不存在则返回None
+            Optional[Dict[str, Any]]: Termination flag data, None if not exists
         """
         return self.termination_flags.get(node_task_id)
 
     async def clear_termination_flag(self, node_task_id: str) -> bool:
         """
-        清除节点终止标志
+        Clear node termination flag.
 
         Args:
-            node_task_id: 节点ID
+            node_task_id: Node ID
 
         Returns:
-            bool: 操作是否成功
+            bool: Whether operation was successful
         """
         try:
             if node_task_id in self.termination_flags:
@@ -517,7 +517,7 @@ class InMemoryStateStore(StateStore):
             return False
 
     async def set_value(self, key: str, value: Any) -> bool:
-        """设置键值"""
+        """Set key-value."""
         try:
             self.key_values[key] = value
             return True
@@ -526,11 +526,11 @@ class InMemoryStateStore(StateStore):
             return False
 
     async def get_value(self, key: str) -> Any:
-        """获取键值"""
+        """Get key-value."""
         return self.key_values.get(key)
 
     async def delete_value(self, key: str) -> bool:
-        """删除键值"""
+        """Delete key-value."""
         try:
             if key in self.key_values:
                 del self.key_values[key]
@@ -540,7 +540,7 @@ class InMemoryStateStore(StateStore):
             return False
 
     async def add_to_set(self, key: str, value: Any) -> bool:
-        """添加值到集合"""
+        """Add value to set."""
         try:
             if key not in self.sets:
                 self.sets[key] = set()
@@ -551,7 +551,7 @@ class InMemoryStateStore(StateStore):
             return False
 
     async def remove_from_set(self, key: str, value: Any) -> bool:
-        """从集合中移除值"""
+        """Remove value from set."""
         try:
             if key in self.sets and str(value) in self.sets[key]:
                 self.sets[key].remove(str(value))
@@ -561,7 +561,7 @@ class InMemoryStateStore(StateStore):
             return False
 
     async def get_set_members(self, key: str) -> List[Any]:
-        """获取集合中的所有成员"""
+        """Get all members of set."""
         try:
             return list(self.sets.get(key, set()))
         except Exception as e:
@@ -569,30 +569,30 @@ class InMemoryStateStore(StateStore):
             return []
 
 
-# 工厂类创建合适的存储实现
+# Factory class to create appropriate storage implementation
 class StateStoreFactory:
-    """状态存储工厂类"""
+    """State store factory class"""
 
     @staticmethod
     def create(store_type: str = "redis", config: Dict[str, Any] = None) -> StateStore:
         """
-        创建状态存储实例
+        Create state store instance.
 
         Args:
-            store_type: 存储类型，支持"redis"和"memory"，如果为None则从CONFIG读取
-            config: 配置参数，如果为None则从CONFIG读取
+            store_type: Storage type, supports "redis" and "memory", reads from CONFIG if None
+            config: Configuration params, reads from CONFIG if None
 
         Returns:
-            StateStore: 状态存储实例
+            StateStore: State store instance
         """
-        # 导入CONFIG
-        from weather_depot.config import CONFIG
+        # Import CONFIG
+        from infra.config import CONFIG
 
-        # 如果没有提供store_type，从CONFIG读取
+        # If store_type not provided, read from CONFIG
         if store_type is None:
             store_type = CONFIG.get("STATE_STORE_TYPE", "redis")
 
-        # 如果没有提供config，从CONFIG读取
+        # If config not provided, read from CONFIG
         if config is None:
             config = {
                 "redis_url": CONFIG.get("REDIS_URL", "redis://127.0.0.1:6379/0"),

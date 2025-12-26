@@ -1,29 +1,29 @@
 """
 Initialize Built-in Nodes with Versioning
-为所有内置节点注册版本信息
+
+This file registers version information for all built-in nodes.
+All built-in nodes start from version 0.0.1.
+
+Usage:
+1. Add @register_node decorator before each node class definition
+2. Or import and register here uniformly
 """
 
 from core.node_registry import register_node
 
-# 这个文件用于为所有内置节点添加版本信息
-# 所有内置节点从 0.0.1 开始
-
-# 使用方式：
-# 1. 在每个节点类定义前添加 @register_node 装饰器
-# 2. 或者在这里统一导入和注册
 
 def init_all_builtin_nodes():
     """
-    初始化所有内置节点
-    为每个节点注册到版本控制系统
+    Initialize all built-in nodes.
+    Register each node to the version control system.
     """
-    
-    # 注册所有内置节点（v0.0.1）
+
+    # Register all built-in nodes (using their current versions)
     node_registrations = [
         {
             'node_type': 'vault_node',
             'version': '0.0.1',
-            'module': 'nodes.vault_node',
+            'module': 'nodes.vault_node_v0_0_1',
             'class': 'VaultNode',
             'metadata': {
                 'display_name': 'Vault Node',
@@ -34,7 +34,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'swap_node',
             'version': '0.0.1',
-            'module': 'nodes.swap_node',
+            'module': 'nodes.swap_node_v0_0_1',
             'class': 'SwapNode',
             'metadata': {
                 'display_name': 'Swap Node',
@@ -45,7 +45,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'ai_model_node',
             'version': '0.0.1',
-            'module': 'nodes.ai_model_node',
+            'module': 'nodes.ai_model_node_v0_0_1',
             'class': 'AIModelNode',
             'metadata': {
                 'display_name': 'AI Model Node',
@@ -56,7 +56,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'code_node',
             'version': '0.0.1',
-            'module': 'nodes.code_node',
+            'module': 'nodes.code_node_v0_0_1',
             'class': 'CodeNode',
             'metadata': {
                 'display_name': 'Code Node',
@@ -66,8 +66,8 @@ def init_all_builtin_nodes():
         },
         {
             'node_type': 'dataset_node',
-            'version': '0.0.1',
-            'module': 'nodes.dataset_node',
+            'version': '0.0.2',
+            'module': 'nodes.dataset_node_v0_0_2',
             'class': 'DatasetNode',
             'metadata': {
                 'display_name': 'Dataset Node',
@@ -76,14 +76,14 @@ def init_all_builtin_nodes():
             }
         },
         {
-            'node_type': 'binance_price_node',
+            'node_type': 'price_node',
             'version': '0.0.1',
-            'module': 'nodes.binance_price_node',
-            'class': 'BinancePriceNode',
+            'module': 'nodes.price_node_v0_0_1',
+            'class': 'PriceNode',
             'metadata': {
-                'display_name': 'Binance Price Node',
+                'display_name': 'Price Node',
                 'category': 'data',
-                'description': 'Fetch prices from Binance'
+                'description': 'Fetch cryptocurrency prices from CoinGecko'
             }
         },
         {
@@ -111,7 +111,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'telegram_sender_node',
             'version': '0.0.1',
-            'module': 'nodes.telegram_sender_node',
+            'module': 'nodes.telegram_sender_node_v0_0_1',
             'class': 'TelegramSenderNode',
             'metadata': {
                 'display_name': 'Telegram Sender Node',
@@ -122,7 +122,7 @@ def init_all_builtin_nodes():
         {
             'node_type': 'rsshub_node',
             'version': '0.0.1',
-            'module': 'nodes.rsshub_node',
+            'module': 'nodes.rsshub_node_v0_0_1',
             'class': 'RSSHubNode',
             'metadata': {
                 'display_name': 'RSS Hub Node',
@@ -131,9 +131,20 @@ def init_all_builtin_nodes():
             }
         },
         {
+            'node_type': 'rootdata_node',
+            'version': '0.0.1',
+            'module': 'nodes.rootdata_node_v0_0_1',
+            'class': 'RootDataNode',
+            'metadata': {
+                'display_name': 'RootData Node',
+                'category': 'data',
+                'description': 'Query RootData APIs with optional Redis cache'
+            }
+        },
+        {
             'node_type': 'x_listener_node',
             'version': '0.0.1',
-            'module': 'nodes.x_listener_node',
+            'module': 'nodes.x_listener_node_v0_0_1',
             'class': 'XListenerNode',
             'metadata': {
                 'display_name': 'X (Twitter) Listener Node',
@@ -142,36 +153,36 @@ def init_all_builtin_nodes():
             }
         }
     ]
-    
-    # 动态导入和注册
+
+    # Dynamic import and registration
     for registration in node_registrations:
         try:
-            # 动态导入模块
+            # Dynamically import module
             module = __import__(registration['module'], fromlist=[registration['class']])
             node_class = getattr(module, registration['class'])
-            
-            # 使用装饰器注册
+
+            # Register using decorator
             decorated_class = register_node(
                 registration['node_type'],
                 version=registration['version'],
                 **registration['metadata']
             )(node_class)
-            
+
             print(f"✓ Registered: {registration['node_type']} v{registration['version']}")
-            
+
         except Exception as e:
             print(f"✗ Failed to register {registration['node_type']}: {e}")
-    
+
     print(f"\nTotal nodes registered: {len(node_registrations)}")
 
 
 if __name__ == '__main__':
-    # 运行注册
+    # Run registration
     init_all_builtin_nodes()
-    
-    # 打印注册信息
+
+    # Print registration info
     from core.node_registry import NodeRegistry
-    
+
     print("\n=== Registered Nodes ===")
     for node_type in NodeRegistry.get_all_node_types():
         versions = NodeRegistry.get_all_versions(node_type)

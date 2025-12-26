@@ -18,7 +18,7 @@ class Edge:
 
     @staticmethod
     def from_dict(data: dict) -> "Edge":
-        """从字典创建边对象"""
+        """Create Edge object from dictionary."""
         return Edge(
             source_node=data["source"],
             source_node_handle=data["source_handle"],
@@ -27,7 +27,7 @@ class Edge:
         )
 
     def to_dict(self) -> dict:
-        """将边对象转换为字典"""
+        """Convert Edge object to dictionary."""
         return {
             "source": self.source_node,
             "source_handle": self.source_node_handle,

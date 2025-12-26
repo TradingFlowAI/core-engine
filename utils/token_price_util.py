@@ -4,10 +4,10 @@ import aiohttp
 import asyncio
 from typing import Dict, List, Optional
 
-from weather_depot.db import db_session
-from weather_depot.db.services.monitored_token_service import MonitoredTokenService
-from weather_depot.utils.redis_manager import RedisManager
-from weather_depot.config import CONFIG
+from infra.db import db_session
+from infra.db.services.monitored_token_service import MonitoredTokenService
+from infra.utils.redis_manager import RedisManager
+from infra.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +86,12 @@ MONITOR_API_BASE_URL = f"{MONITOR_URL}/api/v1/price"
 async def _fetch_price_from_monitor_api(platform: str, identifier: str, is_contract: bool = False) -> Optional[float]:
     """
     从monitor API获取代币价格
-    
+
     Args:
-        platform: 平台名称 ('aptos', 'ethereum', 'flow')  
+        platform: 平台名称 ('aptos', 'ethereum', 'flow')
         identifier: 代币标识符 (coin ID或合约地址)
         is_contract: 是否为合约地址查询
-        
+
     Returns:
         成功时返回USD价格，失败时返回None
     """
@@ -104,9 +104,9 @@ async def _fetch_price_from_monitor_api(platform: str, identifier: str, is_contr
         else:
             # 对于coin ID，直接使用/{coinId}端点
             url = f"{MONITOR_API_BASE_URL}/{identifier}"
-            
+
         logger.debug(f"调用monitor API: {url}")
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status == 200:
@@ -116,10 +116,10 @@ async def _fetch_price_from_monitor_api(platform: str, identifier: str, is_contr
                         if price is not None:
                             logger.info(f"Monitor API获取到价格: {identifier} = ${price}")
                             return float(price)
-                
+
                 logger.warning(f"Monitor API返回失败: {response.status}, {await response.text()}")
                 return None
-                
+
     except Exception as e:
         logger.exception(f"调用monitor API获取价格失败: {e}")
         return None
@@ -130,10 +130,10 @@ async def _fetch_price_from_monitor_api(platform: str, identifier: str, is_contr
 def _fetch_aptos_price_from_monitor_api(token_address: str) -> Optional[float]:
     """
     从monitor API获取Aptos代币价格的同步包装函数
-    
+
     Args:
         token_address: Aptos代币地址
-        
+
     Returns:
         成功时返回USD价格，失败时返回None
     """
@@ -145,10 +145,19 @@ def _fetch_aptos_price_from_monitor_api(token_address: str) -> Optional[float]:
         else:
             # 使用合约地址查询
             return asyncio.run(_fetch_price_from_monitor_api("aptos", token_address, True))
-            
+
     except Exception as e:
         logger.exception(f"获取Aptos代币价格失败: {e}")
         return None
+
+
+APTOS_SYMBOL_ALIASES = {
+    "BTC": "xBTC",  # Generic BTC should map to wrapped xBTC on Aptos
+    "WBTC": "xBTC",
+    "BTCB": "xBTC",
+    "BTC.B": "xBTC",
+    "BTC-APT": "xBTC",
+}
 
 
 def get_aptos_token_address_by_symbol(symbol: str) -> Optional[str]:
@@ -161,7 +170,33 @@ def get_aptos_token_address_by_symbol(symbol: str) -> Optional[str]:
     Returns:
         成功时返回代币地址，失败时返回None
     """
-    return _aptos_token_symbol_to_address.get(symbol, None)
+    if not symbol:
+        return None
+
+    normalized = symbol.strip()
+    if not normalized:
+        return None
+
+    # Direct lookup (case sensitive)
+    if normalized in _aptos_token_symbol_to_address:
+        return _aptos_token_symbol_to_address[normalized]
+
+    # Alias mapping (e.g. BTC -> xBTC)
+    alias_key = APTOS_SYMBOL_ALIASES.get(normalized) or APTOS_SYMBOL_ALIASES.get(normalized.upper())
+    if alias_key and alias_key in _aptos_token_symbol_to_address:
+        return _aptos_token_symbol_to_address[alias_key]
+
+    # Case-insensitive fallback
+    upper_key = normalized.upper()
+    if upper_key in _aptos_token_symbol_to_address:
+        return _aptos_token_symbol_to_address[upper_key]
+
+    lower_key = normalized.lower()
+    for token_symbol, address in _aptos_token_symbol_to_address.items():
+        if token_symbol.lower() == lower_key:
+            return address
+
+    return None
 
 
 def _get_token_info_cache_key(
@@ -498,18 +533,18 @@ def get_multiple_token_prices_usd_by_chain(
 async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_contract_address: bool = True) -> Optional[float]:
     """
     从monitor API获取代币价格
-    
+
     Args:
         network: 网络名称 (如 'aptos', 'flow_evm')
         token_identifier: 代币标识符（合约地址或coin ID）
         is_contract_address: 是否为合约地址
-    
+
     Returns:
         USD价格或None
     """
     try:
         monitor_url = CONFIG.get('MONITOR_URL', 'http://localhost:3000')
-        
+
         if network == "aptos":
             if is_contract_address:
                 # 使用合约地址API端点
@@ -523,7 +558,7 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
         else:
             logger.error(f"不支持的网络: {network}")
             return None
-            
+
         logger.info(f"正在请求monitor API: {url}")
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -541,12 +576,12 @@ async def _fetch_price_from_monitor_api(network: str, token_identifier: str, is_
                         logger.warning(f"Monitor API返回失败: {data.get('message', 'Unknown error')}")
                 else:
                     logger.warning(f"Monitor API请求失败: HTTP {response.status}")
-                    
+
     except asyncio.TimeoutError:
         logger.warning(f"Monitor API请求超时: {network}/{token_identifier}")
     except Exception as e:
         logger.exception(f"Monitor API请求异常: {network}/{token_identifier}: {e}")
-    
+
     return None
 
 
@@ -564,13 +599,13 @@ async def get_aptos_token_price_usd_async(token_address: str) -> Optional[float]
     price = get_token_price_usd(
         token_address=token_address, network="aptos", network_type="aptos"
     )
-    
+
     if price is not None:
         return price
-    
+
     # 缓存中没有，调用monitor API获取价格
     logger.info(f"Redis缓存中没有Aptos代币价格，调用monitor API: {token_address}")
-    
+
     try:
         if token_address.lower() == "0xa":
             # APT使用coin ID
@@ -597,10 +632,10 @@ def get_aptos_token_price_usd(token_address: str) -> Optional[float]:
     price = get_token_price_usd(
         token_address=token_address, network="aptos", network_type="aptos"
     )
-    
+
     if price is None:
         logger.warning(f"Redis缓存中没有Aptos代币价格，请确保monitor服务正在运行: {token_address}")
-    
+
     return price
 
 
@@ -620,15 +655,15 @@ def get_multiple_aptos_token_prices_usd(
     cached_prices = get_multiple_token_prices_usd(
         token_addresses=token_addresses, network="aptos", network_type="aptos"
     )
-    
+
     # 检查哪些代币需要从API获取
     missing_tokens = [addr for addr, price in cached_prices.items() if price is None]
-    
+
     if not missing_tokens:
         return cached_prices
-    
+
     logger.info(f"需要从monitor API获取{len(missing_tokens)}个Aptos代币价格")
-    
+
     # 异步获取缺失的价格
     try:
         async def fetch_missing_prices():
@@ -641,9 +676,9 @@ def get_multiple_aptos_token_prices_usd(
                     # 其他代币使用合约地址
                     task = _fetch_price_from_monitor_api("aptos", addr, True)
                 tasks.append((addr, task))
-            
+
             results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
-            
+
             # 更新结果
             for i, (addr, _) in enumerate(tasks):
                 result = results[i]
@@ -652,9 +687,9 @@ def get_multiple_aptos_token_prices_usd(
                     cached_prices[addr] = None
                 else:
                     cached_prices[addr] = result
-                    
+
             return cached_prices
-        
+
         # 使用同步方式调用异步函数
         loop = None
         try:
@@ -662,9 +697,9 @@ def get_multiple_aptos_token_prices_usd(
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
         return loop.run_until_complete(fetch_missing_prices())
-        
+
     except Exception as e:
         logger.exception(f"批量获取Aptos代币价格失败: {e}")
         return cached_prices
@@ -685,24 +720,24 @@ async def get_flow_evm_token_prices_usd(token_addresses: List[str]) -> Dict[str,
     cached_prices = get_multiple_token_prices_usd(
         token_addresses=token_addresses, chain_id=747, network_type="evm"
     )
-    
+
     # 检查哪些代币需要从API获取
     missing_tokens = [addr for addr, price in cached_prices.items() if price is None]
-    
+
     if not missing_tokens:
         return cached_prices
-    
+
     logger.info(f"需要从monitor API获取{len(missing_tokens)}个Flow EVM代币价格")
-    
+
     # 异步获取缺失的价格
     try:
         tasks = []
         for addr in missing_tokens:
             task = _fetch_price_from_monitor_api("flow_evm", addr, True)
             tasks.append((addr, task))
-        
+
         results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
-        
+
         # 更新结果
         for i, (addr, _) in enumerate(tasks):
             result = results[i]
@@ -711,9 +746,9 @@ async def get_flow_evm_token_prices_usd(token_addresses: List[str]) -> Dict[str,
                 cached_prices[addr] = None
             else:
                 cached_prices[addr] = result
-                
+
         return cached_prices
-        
+
     except Exception as e:
         logger.exception(f"批量获取Flow EVM代币价格失败: {e}")
         return cached_prices

@@ -1,4 +1,4 @@
-"""系统资源统计功能"""
+"""System Resource Statistics"""
 
 import platform
 from typing import Any, Dict
@@ -7,7 +7,7 @@ import psutil
 
 
 def get_system_stats() -> Dict[str, Any]:
-    """获取系统资源使用情况"""
+    """Get system resource usage."""
     cpu_percent = psutil.cpu_percent(interval=1)
     memory = psutil.virtual_memory()
 

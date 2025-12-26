@@ -1,11 +1,11 @@
-"""节点执行核心功能"""
+"""Node Execution Core Functionality"""
 
 import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from weather_depot.config import CONFIG
-from weather_depot.exceptions.tf_exception import (
+from infra.config import CONFIG
+from infra.exceptions.tf_exception import (
     InsufficientCreditsException,
     NodeExecutionException,
     NodeResourceException,
@@ -21,14 +21,14 @@ from utils.result_extractor import extract_node_result
 
 logger = logging.getLogger(__name__)
 
-# 获取配置
+# Get configuration
 WORKER_ID = CONFIG["WORKER_ID"]
 
-# 获取共享实例
+# Get shared instances
 node_manager = NodeTaskManager.get_instance()
 node_registry = NodeRegistry.get_instance()
 
-# 导入所有注册的节点类型，确保装饰器被执行
+# Import all registered node types to ensure decorators are executed
 import nodes  # noqa: F401, E402
 
 
@@ -41,20 +41,20 @@ async def execute_node_task(
     node_type: str,
     node_data: Dict[str, Any],
 ):
-    """执行节点的具体逻辑"""
+    """Execute specific node logic."""
     node_instance = None
 
     try:
-        # 初始化状态
+        # Initialize status
         await _update_node_status(node_task_id, NodeStatus.PENDING, "Task created")
 
-        # 确保node_manager的状态存储已初始化
+        # Ensure node_manager's state store is initialized
         if not node_manager._initialized:
             await node_manager.initialize()
 
         await _update_node_status(node_task_id, NodeStatus.RUNNING, "Initializing node")
 
-        # 创建节点实例
+        # Create node instance
         node_instance = await _create_node_instance(
             node_type, node_data, flow_id, component_id, cycle, node_id
         )
@@ -66,10 +66,10 @@ async def execute_node_task(
             {"created_at": datetime.now().isoformat()},
         )
 
-        # 执行节点逻辑
+        # Execute node logic
         success = await node_instance.start()
 
-        # 处理执行结果
+        # Process execution result
         if success:
             await _update_node_status(
                 node_task_id,
@@ -88,7 +88,7 @@ async def execute_node_task(
             logger.error("Node task %s execution returned False", node_task_id)
 
     except NodeStopExecutionException as e:
-        # 处理停止执行异常
+        # Handle stop execution exception
         await _update_node_status(
             node_task_id,
             NodeStatus.TERMINATED,
@@ -102,7 +102,7 @@ async def execute_node_task(
         logger.warning(f"Node {node_id} terminated by stop signal: {e.reason}")
 
     except NodeTimeoutException as e:
-        # 处理超时异常
+        # Handle timeout exception
         await _update_node_status(
             node_task_id,
             NodeStatus.FAILED,
@@ -115,7 +115,7 @@ async def execute_node_task(
         logger.error(f"Node {node_id} execution timeout: {e.message}")
 
     except NodeValidationException as e:
-        # 处理验证异常
+        # Handle validation exception
         await _update_node_status(
             node_task_id,
             NodeStatus.FAILED,
@@ -128,7 +128,7 @@ async def execute_node_task(
         logger.error(f"Node {node_id} validation failed: {e.message}")
 
     except NodeResourceException as e:
-        # 处理资源异常
+        # Handle resource exception
         await _update_node_status(
             node_task_id,
             NodeStatus.FAILED,
@@ -138,7 +138,7 @@ async def execute_node_task(
         logger.error(f"Node {node_id} resource error: {e.message}")
 
     except InsufficientCreditsException as e:
-        # 处理余额不足异常 - 标记为 TERMINATED 并停止整个 component
+        # Handle insufficient credits exception - mark as TERMINATED and stop entire component
         await _update_node_status(
             node_task_id,
             NodeStatus.TERMINATED,
@@ -155,7 +155,7 @@ async def execute_node_task(
             f"required={e.required_credits}, balance={e.current_balance}"
         )
         
-        # 发送停止信号到整个 component（如果 node_instance 可用）
+        # Send stop signal to entire component (if node_instance is available)
         if node_instance:
             try:
                 await node_instance.send_stop_execution_signal(
@@ -171,7 +171,7 @@ async def execute_node_task(
                 logger.error(f"Failed to send stop signal: {stop_error}")
 
     except NodeExecutionException as e:
-        # 处理通用节点执行异常
+        # Handle generic node execution exception
         status = (
             NodeStatus.FAILED if e.status != "terminated" else NodeStatus.TERMINATED
         )
@@ -184,7 +184,7 @@ async def execute_node_task(
         logger.error(f"Node {node_id} execution error: {e.message}")
 
     except Exception as e:
-        # 处理未知异常
+        # Handle unknown exception
         await _update_node_status(
             node_task_id,
             NodeStatus.FAILED,
@@ -194,14 +194,14 @@ async def execute_node_task(
         logger.exception(f"Unexpected error executing node {node_id}: {str(e)}")
 
     finally:
-        # 清理资源
+        # Cleanup resources
         if node_instance:
             try:
                 await node_instance.cleanup()
             except Exception as e:
                 logger.error(f"Error cleaning up node {node_id}: {str(e)}")
 
-        # 通知server节点执行完成
+        # Notify server of node execution completion
         await _notify_server_completion(node_task_id, node_instance)
 
 
@@ -213,7 +213,7 @@ async def _create_node_instance(
     cycle: int,
     node_id: str,
 ):
-    """创建节点实例（支持版本管理）"""
+    """Create node instance (with version management support)."""
     try:
         if node_type == "python":
             node_class_type = node_data.get("config", {}).get("node_class_type")
@@ -228,31 +228,31 @@ async def _create_node_instance(
 
         config = node_data.get("config", {})
         
-        # 提取版本信息（支持多个位置）
+        # Extract version info (supports multiple locations)
         version_spec = None
         if "version" in node_data:
             version_spec = node_data["version"]
         elif "version" in config:
             version_spec = config["version"]
         else:
-            version_spec = "latest"  # 默认使用最新版本
+            version_spec = "latest"  # Default to latest version
         
         logger.info(
             "Creating node instance: type=%s, version=%s, config=%s", 
             node_class_type, version_spec, config
         )
         
-        # 注意：当前实现使用本地 Worker Registry (common.node_registry)
-        # 它不支持版本解析，因为装饰器已经注册了节点类到本地 Registry
-        # 版本信息被记录但不影响实例化（所有版本使用同一个类）
+        # Note: Current implementation uses local Worker Registry (common.node_registry)
+        # It doesn't support version resolution as decorators already registered node classes to local Registry
+        # Version info is logged but doesn't affect instantiation (all versions use same class)
         #
-        # TODO: 完整的版本支持需要以下改进：
-        # 1. 在 Flow 调度时使用 core.node_registry.NodeRegistry.resolve_version()
-        # 2. 将解析后的具体版本号传递到这里
-        # 3. 动态加载对应版本的节点类文件
-        # 4. 或者实现多版本文件加载机制（nodes/{node_type}/v{X}_{Y}_{Z}.py）
+        # TODO: Full version support requires the following improvements:
+        # 1. Use core.node_registry.NodeRegistry.resolve_version() during Flow scheduling
+        # 2. Pass resolved specific version number here
+        # 3. Dynamically load corresponding version's node class file
+        # 4. Or implement multi-version file loading mechanism (nodes/{node_type}/v{X}_{Y}_{Z}.py)
         #
-        # 当前行为：记录版本信息用于日志和调试，实际使用最新注册的类
+        # Current behavior: Log version info for debugging, actually use latest registered class
 
         input_edges = [
             Edge.from_dict(edge) for edge in node_data.get("input_edges") or []
@@ -272,7 +272,7 @@ async def _create_node_instance(
             config={
                 **config,
                 "state_store": node_manager.state_store,
-                "_version_spec": version_spec,  # 保存版本信息到配置中
+                "_version_spec": version_spec,  # Save version info to config
             },
         )
 
@@ -293,7 +293,7 @@ async def _update_node_status(
     message: str = None,
     additional_info: Dict[str, Any] = None,
 ):
-    """更新节点状态"""
+    """Update node status."""
     try:
         info = additional_info or {}
         if message:
@@ -306,7 +306,7 @@ async def _update_node_status(
 
 
 async def _notify_server_completion(node_task_id: str, node_instance):
-    """通知服务器节点执行完成"""
+    """Notify server of node execution completion."""
     try:
         node_info = await node_manager.get_task(node_task_id)
         if not node_info:
@@ -330,7 +330,7 @@ async def _notify_server_completion(node_task_id: str, node_instance):
         if node_info.get("status") in ["failed", "terminated"]:
             result_data["error"] = node_info.get("message", "Unknown error")
 
-        # TODO: 取消注释以启用服务器通知
+        # TODO: Uncomment to enable server notification
         # async with httpx.AsyncClient() as client:
         #     await client.post(
         #         f"{SERVER_URL}/api/nodes/{node_task_id}/callback",

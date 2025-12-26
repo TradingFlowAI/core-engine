@@ -9,16 +9,18 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import httpx
 
-from weather_depot.config import CONFIG
-from weather_depot.exceptions.tf_exception import (
+from infra.config import CONFIG
+from infra.exceptions.tf_exception import (
     InsufficientCreditsException,
     NodeStopExecutionException,
 )
-from weather_depot.mq.node_signal_consumer import NodeSignalConsumer
-from weather_depot.mq.node_signal_publisher import NodeSignalPublisher
+from infra.mq.node_signal_consumer import NodeSignalConsumer
+from infra.mq.node_signal_publisher import NodeSignalPublisher
 from common.edge import Edge
 from common.signal_types import Signal, SignalType
 from common.state_store import StateStoreFactory
+from core.redis_signal_publisher_async import publish_signal_async
+from core.signal_persistence import persist_signal
 
 if TYPE_CHECKING:
     from common.state_store import StateStore
@@ -102,6 +104,7 @@ class NodeBase(abc.ABC):
         input_edges: List[Edge] = None,
         output_edges: List[Edge] = None,
         state_store: "StateStore" = None,
+        node_type: str = None,  # 节点类型，用于日志和状态发布
         # 添加元数据相关参数
         version: str = None,
         display_name: str = None,
@@ -127,6 +130,7 @@ class NodeBase(abc.ABC):
             input_edges: List of input edges
             output_edges: List of output edges
             state_store: Initialized state store instance (used if provided)
+            node_type: Node type identifier (e.g., 'vault_node', 'buy_node')
             version: Node version
             display_name: Display name for UI
             node_category: Node category (base/instance/variant)
@@ -144,9 +148,10 @@ class NodeBase(abc.ABC):
         self.cycle = cycle
         self.node_id = node_id
         self.name = name
+        self.node_type = node_type or self.__class__.__name__.lower().replace('node', '_node')  # 保存节点类型
         self._input_edges = input_edges or []
         self._output_edges = output_edges or []
-        
+
         # Credits tracking
         self.user_id = user_id
         self.enable_credits = enable_credits
@@ -233,7 +238,7 @@ class NodeBase(abc.ABC):
         """Initialize flow execution log service lazily"""
         if self._log_service is None:
             try:
-                from weather_depot.db.services.flow_execution_log_service import (
+                from infra.db.services.flow_execution_log_service import (
                     FlowExecutionLogService,
                 )
                 self._log_service = FlowExecutionLogService()
@@ -292,7 +297,7 @@ class NodeBase(abc.ABC):
         try:
             from core.redis_log_publisher_async import publish_log_async
             from datetime import datetime
-            
+
             log_entry = {
                 "node_id": self.node_id,
                 "node_type": self.node_type,
@@ -300,14 +305,14 @@ class NodeBase(abc.ABC):
                 "message": message,
                 "log_source": log_source,
             }
-            
+
             # Add metadata if provided
             if log_metadata:
                 log_entry["metadata"] = log_metadata
-            
+
             # Publish to Redis asynchronously (with automatic retry)
             await publish_log_async(self.flow_id, self.cycle, log_entry, max_retries=3)
-            
+
         except Exception as e:
             # Don't fail if Redis publish fails - just log the error
             self.logger.debug("Failed to publish log to Redis: %s", str(e))
@@ -483,11 +488,11 @@ class NodeBase(abc.ABC):
                         # Update signal
                         self._input_signals[edge_key] = signal
                         self.logger.debug("Updated signal for edge: %s", edge_key)
-                        
+
                         # Attach source_handle to signal object for aggregation logic
                         signal.source_handle = source_handle
                         signal.source_node = source_node
-                        
+
                         # Persist received signal data to database for comprehensive status API
                         signal_data = {
                             handle: {
@@ -498,19 +503,68 @@ class NodeBase(abc.ABC):
                                 'source_handle': source_handle
                             }
                         }
-                        
+
                         await self.persist_log(
                             message=f"Signal received at {handle} from {source_node}:{source_handle}",
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                                'event': 'signal_received',
                                 'target_handle': handle,
                                 'source_node': source_node,
                                 'source_handle': source_handle,
                                 'signal_type': str(signal.type)
                             }
                         )
+                        
+                        # 🔥 发布 Input Signal 到 Redis，供前端实时展示
+                        try:
+                            # 推断数据类型
+                            input_payload = signal.payload
+                            input_data_type = "unknown"
+                            if input_payload is not None:
+                                if isinstance(input_payload, bool):
+                                    input_data_type = "boolean"
+                                elif isinstance(input_payload, int):
+                                    input_data_type = "integer"
+                                elif isinstance(input_payload, float):
+                                    input_data_type = "float"
+                                elif isinstance(input_payload, str):
+                                    input_data_type = "string"
+                                elif isinstance(input_payload, list):
+                                    input_data_type = "array"
+                                elif isinstance(input_payload, dict):
+                                    input_data_type = "object"
+                            
+                            await publish_signal_async(
+                                flow_id=self.flow_id,
+                                cycle=self.cycle,
+                                source_node_id=source_node,
+                                source_handle=source_handle,
+                                target_node_ids=[self.node_id],
+                                signal_type=signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                payload=input_payload,
+                                direction="input",  # 接收的信号是 input
+                                data_type=input_data_type,
+                                handle_id=handle,  # 使用目标 handle
+                            )
+                            
+                            # 🔥 持久化 Input Signal 到数据库
+                            await persist_signal(
+                                flow_id=self.flow_id,
+                                cycle=self.cycle,
+                                direction="input",
+                                from_node_id=source_node,
+                                to_node_id=self.node_id,
+                                source_handle=source_handle,
+                                target_handle=handle,
+                                signal_type=signal.type.value if hasattr(signal.type, 'value') else str(signal.type),
+                                data_type=input_data_type,
+                                payload=input_payload,
+                            )
+                        except Exception as redis_err:
+                            self.logger.warning("Failed to publish/persist input signal: %s", str(redis_err))
                     else:
                         self.logger.warning(
                             "Edge key not found in input signals: %s", edge_key
@@ -527,11 +581,11 @@ class NodeBase(abc.ABC):
                         self.logger.debug(
                             f"Updated signal for edge (inferred): {edge_key}"
                         )
-                        
+
                         # Attach source_handle to signal object for aggregation logic (inferred case)
                         signal.source_handle = edge.source_node_handle
                         signal.source_node = edge.source_node
-                        
+
                         # Persist received signal data to database (inferred case)
                         signal_data = {
                             handle: {
@@ -542,13 +596,14 @@ class NodeBase(abc.ABC):
                                 'source_handle': edge.source_node_handle
                             }
                         }
-                        
+
                         await self.persist_log(
                             message=f"Signal received at {handle} from {edge.source_node}:{edge.source_node_handle} (inferred)",
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                                'event': 'signal_received',
                                 'target_handle': handle,
                                 'source_node': edge.source_node,
                                 'source_handle': edge.source_node_handle,
@@ -595,19 +650,21 @@ class NodeBase(abc.ABC):
                                 'timestamp': signal.timestamp,
                                 'wildcard': True
                             }
-                    
+
                     if signal_data:
                         await self.persist_log(
                             message=f"Wildcard signal received with {len(signal_data)} handles",
                             log_level="INFO",
                             log_source="node",
                             log_metadata={
-                                'signal_data': signal_data,
+                                # 简化元数据：只保留数量和类型，payload 存在 Signal 表
+                                'event': 'signal_received',
+                                'handle_count': len(signal_data),
                                 'signal_type': str(signal.type),
                                 'wildcard': True
                             }
                         )
-                    
+
                     # Process each handle if it exists in the payload
                     for handle_name, handle_obj in input_handles.items():
                         if handle_name in payload:
@@ -717,10 +774,10 @@ class NodeBase(abc.ABC):
                     current_value = getattr(self, handle_obj.auto_update_attr)
                     if not isinstance(current_value, dict):
                         current_value = {}
-                    
+
                     # 创建新的聚合字典，基于当前最新状态
                     new_aggregated_value = current_value.copy()
-                    
+
                     # 如果接收到的是字典，合并所有键值
                     if isinstance(final_value, dict):
                         new_aggregated_value.update(final_value)
@@ -738,7 +795,7 @@ class NodeBase(abc.ABC):
                             signal_source_handle,
                             final_value,
                         )
-                    
+
                     # 更新聚合状态
                     setattr(self, handle_obj.auto_update_attr, new_aggregated_value)
                     self.logger.info(
@@ -869,7 +926,7 @@ class NodeBase(abc.ABC):
                     handle_name,
                     parsed_json,
                 )
-                
+
                 # 如果解析出来是字典，尝试从中提取字段
                 if isinstance(parsed_json, dict):
                     if handle_name in parsed_json:
@@ -879,7 +936,7 @@ class NodeBase(abc.ABC):
                             extracted_value,
                             handle_name,
                         )
-                        
+
                         # 对提取的值进行类型转换
                         try:
                             if expected_type == str:
@@ -905,7 +962,7 @@ class NodeBase(abc.ABC):
                             handle_name,
                             list(parsed_json.keys()),
                         )
-                
+
                 # 如果解析出来直接是期望的类型，尝试转换
                 else:
                     try:
@@ -926,7 +983,7 @@ class NodeBase(abc.ABC):
                             str(e),
                         )
                         return parsed_json
-                        
+
             except json.JSONDecodeError:
                 # JSON解析失败，继续尝试直接类型转换
                 self.logger.debug(
@@ -1021,7 +1078,7 @@ class NodeBase(abc.ABC):
                 timestamp=None,
             )
             await self.node_signal_publisher.send_signal(source_handle, signal)
-            
+
             # Persist signal data to database for comprehensive status API
             signal_data = {
                 source_handle: {
@@ -1030,18 +1087,90 @@ class NodeBase(abc.ABC):
                     'timestamp': signal.timestamp
                 }
             }
-            
+
             await self.persist_log(
                 message=f"Signal sent from {source_handle}: {signal_type}",
                 log_level="INFO",
                 log_source="node",
                 log_metadata={
-                    'signal_data': signal_data,
+                    # 简化元数据：只保留路由信息，payload 存在 Signal 表
+                    'event': 'signal_sent',
                     'source_handle': source_handle,
                     'signal_type': str(signal_type)
                 }
             )
-            
+
+            # 🔥 发布 Signal 到 Redis，供前端实时展示
+            try:
+                # 获取目标节点信息
+                target_node_ids = []
+                for edge in self._output_edges:
+                    if edge.source_node_handle == source_handle:
+                        target_node_ids.append(edge.target_node)  # 🔧 修复：使用 target_node 而非 target_node_id
+                
+                # 推断数据类型
+                data_type = "unknown"
+                if payload is not None:
+                    if isinstance(payload, bool):
+                        data_type = "boolean"
+                    elif isinstance(payload, int):
+                        data_type = "integer"
+                    elif isinstance(payload, float):
+                        data_type = "float"
+                    elif isinstance(payload, str):
+                        data_type = "string"
+                    elif isinstance(payload, list):
+                        data_type = "array"
+                    elif isinstance(payload, dict):
+                        data_type = "object"
+                
+                publish_result = await publish_signal_async(
+                    flow_id=self.flow_id,
+                    cycle=self.cycle,
+                    source_node_id=self.node_id,
+                    source_handle=source_handle,
+                    target_node_ids=target_node_ids,
+                    signal_type=signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                    payload=payload,
+                    direction="output",  # 发送的信号是 output
+                    data_type=data_type,
+                )
+                
+                # 持久化 Output Signal 到数据库
+                signal_type_str = signal_type.value if hasattr(signal_type, 'value') else str(signal_type)
+                if target_node_ids:
+                    # 为每个目标节点创建记录
+                    for target_node_id in target_node_ids:
+                        await persist_signal(
+                            flow_id=self.flow_id,
+                            cycle=self.cycle,
+                            direction="output",
+                            from_node_id=self.node_id,
+                            to_node_id=target_node_id,
+                            source_handle=source_handle,
+                            target_handle=None,  # Output 信号的 target_handle 在接收时确定
+                            signal_type=signal_type_str,
+                            data_type=data_type,
+                            payload=payload,
+                        )
+                else:
+                    # 即使没有目标节点，也持久化 output 信号（用于调试和历史查询）
+                    await persist_signal(
+                        flow_id=self.flow_id,
+                        cycle=self.cycle,
+                        direction="output",
+                        from_node_id=self.node_id,
+                        to_node_id=None,
+                        source_handle=source_handle,
+                        target_handle=None,
+                        signal_type=signal_type_str,
+                        data_type=data_type,
+                        payload=payload,
+                    )
+            except Exception as redis_err:
+                # Redis 发布/持久化失败不影响主流程
+                self.logger.warning("Failed to publish/persist signal: %s", str(redis_err))
+
             return True
         except Exception as e:
             self.logger.error("Failed to send signal: %s", str(e))
@@ -1061,46 +1190,51 @@ class NodeBase(abc.ABC):
             bool: 是否发送成功
         """
         try:
+            # 添加小延迟，等待下游节点初始化消息队列（解决race condition）
+            # 从日志看下游节点需要约150-400ms完成队列绑定，这里等待1秒确保安全
+            await asyncio.sleep(1.0)
+
             await self.node_signal_publisher.send_stop_execution_signal(reason)
-            self.logger.info("Stop execution signal sent, reason: %s", reason)
+
+            self.logger.info("Stop execution signal sent successfully, reason: %s", reason)
             return True
         except Exception as e:
-            self.logger.error("Failed to send stop execution signal: %s", str(e))
+            self.logger.error("Failed to send stop execution signal: %s", str(e), exc_info=True)
             return False
-    
+
     async def _charge_credits_sync(self) -> None:
         """
         同步扣费 - 调用 weather_control HTTP API
-        
+
         根据节点类型自动判断扣费标准：
         - code_node: 20 credits
         - 普通 node: 10 credits
-        
+
         Raises:
             InsufficientCreditsException: 余额不足时抛出
         """
         if not self.enable_credits:
             self.logger.debug("Credits tracking is disabled for node %s", self.node_id)
             return
-            
+
         if not self.user_id:
             self.logger.warning("No user_id provided, skipping credits charge")
             return
-        
+
         try:
             # 判断节点类型：code_node 或普通 node
             node_type = self.__class__.__name__.lower()
-            
+
             # 如果类名包含 'code' 或者 type 属性是 'code_node'，则视为 code_node
             is_code_node = 'code' in node_type or getattr(self, 'type', None) == 'code_node'
             credits_cost = 20 if is_code_node else 10
-            
+
             # 获取 weather_control URL
             weather_control_url = CONFIG.get(
                 "WEATHER_CONTROL_URL",
                 "http://localhost:8000"
             )
-            
+
             # 调用同步扣费 API
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
@@ -1119,17 +1253,17 @@ class NodeBase(abc.ABC):
                         }
                     }
                 )
-                
+
                 # 检查余额不足
                 if response.status_code == 402:
                     data = response.json()
                     balance = data.get("balance", 0)
-                    
+
                     self.logger.error(
                         f"Insufficient credits: user={self.user_id}, "
                         f"required={credits_cost}, balance={balance}"
                     )
-                    
+
                     raise InsufficientCreditsException(
                         message=f"Insufficient credits to execute node {self.node_id}",
                         node_id=self.node_id,
@@ -1137,20 +1271,20 @@ class NodeBase(abc.ABC):
                         required_credits=credits_cost,
                         current_balance=balance,
                     )
-                
+
                 # 检查其他错误
                 response.raise_for_status()
-                
+
                 # 扣费成功
                 result = response.json()
                 remaining_balance = result.get("data", {}).get("balance", 0)
-                
+
                 self.logger.info(
                     f"Credits charged successfully: user={self.user_id}, "
                     f"node={self.node_id}, cost={credits_cost}, "
                     f"remaining={remaining_balance}"
                 )
-                
+
         except InsufficientCreditsException:
             # 重新抛出余额不足异常
             raise
@@ -1197,6 +1331,16 @@ class NodeBase(abc.ABC):
             status: New status
             error_message: Error message (if any)
         """
+        # 🔒 最终状态保护：COMPLETED, FAILED, TERMINATED 是最终状态，不能被改变
+        final_states = {NodeStatus.COMPLETED, NodeStatus.FAILED, NodeStatus.TERMINATED}
+
+        if self.status in final_states:
+            self.logger.warning(
+                f"Node {self.node_id} is in final state {self.status.value}, "
+                f"cannot change to {status.value}. Ignoring status change."
+            )
+            return
+
         self.status = status
         self.error_message = error_message
 
@@ -1213,11 +1357,11 @@ class NodeBase(abc.ABC):
 
         if status == NodeStatus.FAILED and error_message:
             self.logger.error("Node %s failed: %s", self.node_id, error_message)
-        
+
         # 发布状态变化到 Redis (实时推送到前端)
         try:
             from core.redis_status_publisher import publish_node_status
-            
+
             publish_node_status(
                 flow_id=self.flow_id,
                 cycle=self.cycle,
@@ -1283,11 +1427,29 @@ class NodeBase(abc.ABC):
                         f"Node {self.node_id} received all required signals, starting execution",
                         log_level="INFO",
                     )
-                    await self.node_signal_consumer.close()
+                    # 🔥 关键修改：不要在execute之前关闭consumer，否则收不到STOP_EXECUTION信号
+                    # await self.node_signal_consumer.close()
+
+                    # ✅ 在execute之前检查停止标志，避免不必要的执行
+                    if self._stop_execution_requested:
+                        self.logger.warning(
+                            f"Node {self.node_id} received stop signal before execution, "
+                            f"reason: {self._stop_execution_reason}"
+                        )
+                        await self.set_status(
+                            NodeStatus.TERMINATED,
+                            f"Stopped before execution: {self._stop_execution_reason}"
+                        )
+                        raise NodeStopExecutionException(
+                            f"Node execution stopped before start: {self._stop_execution_reason}",
+                            node_id=self.node_id,
+                            reason=self._stop_execution_reason,
+                            source_node=self._stop_execution_source,
+                        )
 
                     # Charge credits BEFORE execution
                     await self._charge_credits_sync()
-                    
+
                     # Execute node logic
                     success = await self.execute()
                     await self.persist_log(
@@ -1298,7 +1460,7 @@ class NodeBase(abc.ABC):
                     await self.set_status(
                         NodeStatus.COMPLETED if success else NodeStatus.FAILED
                     )
-                    
+
                     # Forward signals if execution was successful
                     if success:
                         await self._auto_forward_input_handles()
@@ -1333,6 +1495,13 @@ class NodeBase(abc.ABC):
                     raise
 
                 finally:
+                    # 🔥 在finally块中关闭consumer，确保无论如何都会清理资源
+                    if self.node_signal_consumer:
+                        try:
+                            await self.node_signal_consumer.close()
+                            self.logger.debug("Node signal consumer closed in finally block")
+                        except Exception as e:
+                            self.logger.error("Error closing node signal consumer: %s", str(e))
                     # Reset Future
                     self._signal_ready_future = None
             else:
@@ -1344,7 +1513,7 @@ class NodeBase(abc.ABC):
 
                 # Charge credits BEFORE execution
                 await self._charge_credits_sync()
-                
+
                 success = await self.execute()
                 await self.persist_log(
                     f"Node {self.node_id} execution completed, success={success}",
@@ -1354,7 +1523,7 @@ class NodeBase(abc.ABC):
                 await self.set_status(
                     NodeStatus.COMPLETED if success else NodeStatus.FAILED
                 )
-                
+
                 # Forward signals if execution was successful
                 if success:
                     await self._auto_forward_input_handles()
@@ -1466,7 +1635,7 @@ class NodeBase(abc.ABC):
         # 【连线优先逻辑】首先检查是否有连接的输入信号
         signal_value = None
         has_signal = False
-        
+
         for edge_key, signal in self._input_signals.items():
             # edge_key 格式: "source_node:source_handle->target_node:target_handle"
             if edge_key.endswith(f"->{target_handle}") or edge_key.endswith(f"->{self.node_id}:{target_handle}"):
@@ -1482,6 +1651,16 @@ class NodeBase(abc.ABC):
 
         # 如果有连接的信号，优先使用信号的值
         if has_signal:
+            # 聚合句柄优先返回聚合后的最新状态，确保节点端能拿到完整数据
+            if handle_obj.is_aggregate and hasattr(self, handle_obj.auto_update_attr):
+                aggregated_value = getattr(self, handle_obj.auto_update_attr)
+                if aggregated_value is not None:
+                    self.logger.debug(
+                        "Using aggregated value for handle '%s' (aggregate handle with edge connected)",
+                        target_handle,
+                    )
+                    return aggregated_value
+
             self.logger.info(
                 "Using signal value for handle '%s' (edge connected, priority over member variable)",
                 target_handle
