@@ -29,8 +29,6 @@ def get_connection_pool(db: int = None) -> ConnectionPool:
     Returns:
         Redis connection pool instance
     """
-    global _connection_pools
-
     # Use default if db not specified
     if db is None:
         db = REDIS_DB
