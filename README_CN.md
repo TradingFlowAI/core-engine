@@ -1,71 +1,100 @@
 <div align="center">
 
-# ⚡ TradingFlow Station
+# ⚡ TradingFlow
 
-### 专为 DeFi 打造的高性能工作流执行引擎
+### 开源的 DeFi 交易工作流引擎
 
 [![License](https://img.shields.io/badge/License-可持续使用-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 
-**构建透明、可组合、极速的去中心化交易工作流**
+**构建透明、可组合、高性能的去中心化交易工作流**
 
-[快速开始](#-快速开始) • [文档](#-文档) • [节点目录](#-内置节点) • [参与贡献](#-参与贡献)
+[快速开始](#-快速开始) • [系统架构](#-系统架构) • [节点目录](#-内置节点) • [参与贡献](#-参与贡献)
 
 </div>
 
 ---
 
-## 🌟 为什么选择 TradingFlow Station？
+## 🌟 为什么选择 TradingFlow？
 
-在快速发展的加密世界中，交易者需要**快速**、**透明**、**可组合**的工具。TradingFlow Station 是 TradingFlow 生态系统的执行核心——一个专为 DeFi 操作设计的 DAG 工作流引擎。
+在快速发展的加密世界中，交易者和开发者需要**透明**、**可扩展**、**易维护**的工具。TradingFlow 是一个开源的 DAG 工作流引擎，专为 DeFi 操作设计——让您完全掌控并清晰了解交易逻辑的每一步。
 
-### ✨ 核心特性
+### ✨ 核心理念
 
-| 特性 | 描述 |
+| 理念 | 描述 |
 |------|------|
-| 🚀 **极致性能** | 异步优先架构，节点执行延迟低于秒级 |
+| 🔍 **透明** | 每个节点执行都有日志可追溯。没有黑箱——清楚看到每一步发生了什么 |
+| 📈 **水平扩展** | 无状态 Worker + Redis 协调。从 1 个实例无缝扩展到 100+ 个 |
+| ⚡ **高性能** | 异步优先架构，节点执行延迟 < 50ms (p99) |
+| 🛠️ **易于维护** | 清晰的关注点分离。模块化节点。完善的日志和监控 |
 | 🔗 **原生多链** | 内置支持 Aptos、Flow EVM 及 EVM 兼容链 |
-| 🧩 **可组合节点** | 15+ 节点类型自由组合，构建复杂交易策略 |
-| 📊 **实时信号** | 基于 Redis Pub/Sub 的即时信号传播 |
-| 🔒 **金库集成** | 无缝对接链上金库智能合约 |
-| 🌐 **透明执行** | 每个操作可追溯，每笔交易可审计 |
+| 🧩 **可组合** | 15+ 节点类型自由组合，构建复杂交易策略 |
 
 ---
 
 ## 🏗️ 系统架构
 
 ```
-                           ┌─────────────────────────────────────┐
-                           │         TradingFlow Station         │
-                           └─────────────────────────────────────┘
-                                            │
-           ┌────────────────────────────────┼────────────────────────────────┐
-           │                                │                                │
-           ▼                                ▼                                ▼
-    ┌─────────────┐                 ┌─────────────┐                 ┌─────────────┐
-    │  价格节点   │                  │   AI节点    │                  │  交易节点   │
-    │  (Binance,  │    ────────►    │  (模型,     │    ────────►    │   (Swap,    │
-    │ GeckoTerm.) │      信号       │   代码)     │      信号       │    Vault)   │
-    └─────────────┘                 └─────────────┘                 └─────────────┘
-           │                                │                                │
-           └────────────────────────────────┼────────────────────────────────┘
-                                            │
-                           ┌────────────────┴────────────────┐
-                           │           消息队列              │
-                           │    (RabbitMQ / Redis Pub/Sub)   │
-                           └─────────────────────────────────┘
+                                    ┌─────────────────────────────────────┐
+                                    │           TradingFlow               │
+                                    │           (核心引擎)                 │
+                                    └─────────────────────────────────────┘
+                                                    │
+                    ┌───────────────────────────────┼───────────────────────────────┐
+                    │                               │                               │
+                    ▼                               ▼                               ▼
+            ┌─────────────┐                 ┌─────────────┐                 ┌─────────────┐
+            │  数据节点   │                  │  处理节点   │                  │  交易节点   │
+            │  (Binance,  │   ──信号──►     │  (AI, 代码, │   ──信号──►     │   (Swap,    │
+            │ GeckoTerm.) │                 │    模型)    │                 │   Vault)    │
+            └─────────────┘                 └─────────────┘                 └─────────────┘
+                    │                               │                               │
+                    └───────────────────────────────┼───────────────────────────────┘
+                                                    │
+        ┌───────────────────────────────────────────┼───────────────────────────────────────────┐
+        │                                           │                                           │
+        ▼                                           ▼                                           ▼
+┌───────────────┐                         ┌─────────────────┐                         ┌─────────────────┐
+│     Redis     │                         │    RabbitMQ     │                         │   PostgreSQL    │
+│ ─────────────  │                         │  ─────────────  │                         │  ─────────────  │
+│ • 状态存储    │                         │ • 任务队列     │                         │ • 执行日志     │
+│ • 发布/订阅   │                         │ • 事件总线     │                         │ • Flow 历史    │
+│ • 信号缓存    │                         │ • 分布式消息   │                         │ • 数据分析     │
+│ • 分布式协调  │                         │                │                         │                │
+└───────────────┘                         └─────────────────┘                         └─────────────────┘
+        │                                           │                                           │
+        └───────────────────────────────────────────┼───────────────────────────────────────────┘
+                                                    │
+                                    ┌───────────────┴───────────────┐
+                                    │                               │
+                                    ▼                               ▼
+                            ┌─────────────┐                 ┌─────────────┐
+                            │  Worker 1   │      ...        │  Worker N   │
+                            │  (无状态)   │                 │  (无状态)   │
+                            └─────────────┘                 └─────────────┘
+
+                            ▲ 水平扩展 - 按需添加 Worker 实例 ▲
 ```
+
+### 为什么采用这个架构？
+
+| 组件 | 角色 | 扩展性优势 |
+|------|------|-----------|
+| **Redis** | 分布式状态、发布/订阅信号、缓存的协调中心 | 实现无状态 Worker；支持 Redis Cluster 高可用 |
+| **RabbitMQ** | 可靠的任务分发和事件消息 | 解耦生产者/消费者；处理反压 |
+| **PostgreSQL** | 执行日志和分析数据的持久化存储 | 查询历史数据；合规与审计 |
+| **Workers** | 处理节点的无状态执行单元 | 水平扩展；零停机部署 |
 
 ### 核心组件
 
 | 组件 | 功能 |
 |------|------|
-| **Flow 调度器** | 编排 DAG 执行，支持周期管理和故障恢复 |
+| **Flow 调度器** | 编排 DAG 执行，支持周期管理、故障恢复和多实例协调 |
 | **节点执行器** | 管理节点生命周期、超时处理和信号路由 |
 | **信号系统** | 类型安全的信号传播，支持 Redis 持久化 |
 | **金库服务** | Aptos、Flow EVM 等链的交易集成 |
-| **任务管理器** | 多进程任务协调与状态持久化 |
+| **任务管理器** | 多进程任务协调与分布式状态管理 |
 
 ---
 
@@ -82,8 +111,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/tradingflow/station.git
-cd station
+git clone https://github.com/TradingFlowAI/core-engine.git
+cd core-engine
 
 # 创建虚拟环境
 python -m venv venv
@@ -99,7 +128,15 @@ pip install -r requirements.txt
 # 启动 Redis
 docker run -d --name redis -p 6379:6379 redis:alpine
 
-# 启动 RabbitMQ（可选）
+# 启动 PostgreSQL
+docker run -d --name postgres \
+  -p 5432:5432 \
+  -e POSTGRES_USER=tradingflow \
+  -e POSTGRES_PASSWORD=tradingflow \
+  -e POSTGRES_DB=tradingflow \
+  postgres:15-alpine
+
+# 启动 RabbitMQ（可选，分布式模式需要）
 docker run -d --name rabbitmq \
   -p 5672:5672 -p 15672:15672 \
   -e RABBITMQ_DEFAULT_USER=guest \
@@ -107,19 +144,19 @@ docker run -d --name rabbitmq \
   rabbitmq:3-management
 ```
 
-### 运行 Station
+### 运行 TradingFlow
 
 ```bash
 python server.py
 ```
 
-Station 将在 `http://localhost:7002` 启动。
+引擎将在 `http://localhost:7002` 启动。
 
 ---
 
 ## 📦 内置节点
 
-TradingFlow Station 提供丰富的生产就绪节点：
+TradingFlow 提供丰富的生产就绪节点：
 
 ### 📈 数据节点
 | 节点 | 描述 |
@@ -205,7 +242,38 @@ curl http://localhost:7002/health
 
 ---
 
-## 🛠️ 扩展 Station
+## 📊 性能与可扩展性
+
+| 指标 | 数值 |
+|------|------|
+| 节点执行延迟 | < 50ms (p99) |
+| 信号传播时间 | < 10ms |
+| 单 Worker 并发 Flow | 100+ |
+| 水平扩展 | 无限 Worker |
+| 单 Worker 内存占用 | ~256MB |
+
+### 扩展指南
+
+```bash
+# 单实例（开发环境）
+python server.py
+
+# 多 Worker（生产环境）
+# Worker 1
+WORKER_ID=worker-1 python server.py --port 7002
+
+# Worker 2
+WORKER_ID=worker-2 python server.py --port 7003
+
+# Worker N...
+WORKER_ID=worker-n python server.py --port 700X
+```
+
+所有 Worker 通过 Redis 共享状态，从 RabbitMQ 接收任务，实现真正的水平扩展。
+
+---
+
+## 🛠️ 扩展 TradingFlow
 
 ### 创建自定义节点
 
@@ -249,17 +317,6 @@ def init_builtin_nodes():
     # ... 现有节点 ...
     NodeRegistry.register("my_custom_node", MyCustomNode)
 ```
-
----
-
-## 📊 性能指标
-
-| 指标 | 数值 |
-|------|------|
-| 节点执行延迟 | < 50ms (p99) |
-| 信号传播时间 | < 10ms |
-| 并发 Flow 数量 | 100+ |
-| 基础内存占用 | ~256MB |
 
 ---
 
@@ -309,6 +366,7 @@ pytest tests/ --cov=. --cov-report=html
 - [ ] 策略回测框架
 - [ ] 可视化流程构建器集成
 - [ ] 社区节点插件市场
+- [ ] Kubernetes Helm Charts 生产部署方案
 
 ---
 
@@ -329,16 +387,25 @@ pytest tests/ --cov=. --cov-report=html
 
 **简而言之**：对个人和小团队免费。企业和服务提供商需要商业许可。
 
-商业许可咨询请联系：[license@tradingflow.xyz](mailto:license@tradingflow.xyz)
+商业许可咨询请联系：[cl@tradingflows.ai](mailto:cl@tradingflows.ai)
 
 ---
 
 ## 🔗 相关链接
 
-- 🌐 [TradingFlow 官网](https://tradingflow.xyz)
-- 📚 [文档中心](https://docs.tradingflow.xyz)
-- 💬 [Discord 社区](https://discord.gg/tradingflow)
-- 🐦 [Twitter](https://twitter.com/tradingflow)
+- 🌐 [官网](https://tradingflows.ai)
+- 📚 [文档中心](https://docs.tradingflows.ai)
+- 💬 [Telegram](https://t.me/tradingflowai)
+- 🐦 [Twitter](https://twitter.com/TradingFlowAI)
+- 📧 [联系我们](mailto:cl@tradingflows.ai)
+- 🐙 [GitHub](https://github.com/TradingFlowAI)
+
+---
+
+## 👥 贡献者
+
+- **[@Morboz](https://github.com/Morboz)** - 核心作者，负责设计并实施初始架构
+- **[@peteryang](https://github.com/peteryang)** - 后续进行了长达半年的维护与收尾工作
 
 ---
 
@@ -346,7 +413,6 @@ pytest tests/ --cov=. --cov-report=html
 
 **由 TradingFlow 团队用 ❤️ 打造**
 
-*赋能去中心化世界的透明交易*
+*赋能去中心化世界的透明、可扩展交易*
 
 </div>
-

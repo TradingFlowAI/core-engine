@@ -1,0 +1,76 @@
+[project]
+name = "tradingflow-core-engine"
+version = "0.1.0"
+description = "TradingFlow - The Open-Source Workflow Engine for DeFi Trading"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+authors = [
+    {name = "TradingFlow Team", email = "cl@tradingflows.ai"}
+]
+keywords = [
+    "trading",
+    "defi",
+    "workflow",
+    "dag",
+    "blockchain",
+    "crypto",
+    "aptos",
+    "ethereum",
+    "automation"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://tradingflows.ai"
+Documentation = "https://docs.tradingflows.ai"
+Repository = "https://github.com/TradingFlowAI/core-engine"
+Issues = "https://github.com/TradingFlowAI/core-engine/issues"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["api", "common", "core", "flow", "infra", "nodes", "publishers", "services", "utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | __pycache__
+  | \.mypy_cache
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+

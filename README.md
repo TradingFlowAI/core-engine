@@ -1,71 +1,100 @@
 <div align="center">
 
-# ⚡ TradingFlow Station
+# ⚡ TradingFlow
 
-### The High-Performance Workflow Execution Engine for DeFi
+### The Open-Source Workflow Engine for DeFi Trading
 
 [![License](https://img.shields.io/badge/License-Sustainable%20Use-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 [![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)]()
 
-**Build transparent, composable, and lightning-fast trading workflows for the decentralized world.**
+**Build transparent, composable, and high-performance trading workflows for the decentralized world.**
 
-[Getting Started](#-quick-start) • [Documentation](#-documentation) • [Node Catalog](#-built-in-nodes) • [Contributing](#-contributing)
+[Getting Started](#-quick-start) • [Architecture](#-architecture) • [Node Catalog](#-built-in-nodes) • [Contributing](#-contributing)
 
 </div>
 
 ---
 
-## 🌟 Why TradingFlow Station?
+## 🌟 Why TradingFlow?
 
-In the rapidly evolving crypto landscape, traders need tools that are **fast**, **transparent**, and **composable**. TradingFlow Station is the execution backbone of the TradingFlow ecosystem—a DAG-based workflow engine designed specifically for DeFi operations.
+In the rapidly evolving crypto landscape, traders and developers need tools that are **transparent**, **scalable**, and **maintainable**. TradingFlow is an open-source DAG-based workflow engine designed specifically for DeFi operations—giving you full control and visibility over your trading logic.
 
-### ✨ Key Features
+### ✨ Core Principles
 
-| Feature | Description |
-|---------|-------------|
-| 🚀 **High Performance** | Async-first architecture with sub-second node execution latency |
+| Principle | Description |
+|-----------|-------------|
+| 🔍 **Transparent** | Every node execution is logged and traceable. No black boxes—see exactly what happens at each step |
+| 📈 **Horizontally Scalable** | Stateless workers with Redis coordination. Scale from 1 to 100+ instances seamlessly |
+| ⚡ **High Performance** | Async-first architecture with sub-50ms node execution latency (p99) |
+| 🛠️ **Easy to Maintain** | Clean separation of concerns. Modular nodes. Comprehensive logging and monitoring |
 | 🔗 **Multi-Chain Native** | Built-in support for Aptos, Flow EVM, and EVM-compatible chains |
-| 🧩 **Composable Nodes** | Mix and match 15+ node types to build complex trading strategies |
-| 📊 **Real-Time Signals** | Redis-powered pub/sub for instant signal propagation between nodes |
-| 🔒 **Vault Integration** | Seamless connection to on-chain vault smart contracts |
-| 🌐 **Transparent Execution** | Every action logged, every trade traceable |
+| 🧩 **Composable** | Mix and match 15+ node types to build complex trading strategies |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-                           ┌─────────────────────────────────────┐
-                           │         TradingFlow Station         │
-                           └─────────────────────────────────────┘
-                                            │
-           ┌────────────────────────────────┼────────────────────────────────┐
-           │                                │                                │
-           ▼                                ▼                                ▼
-    ┌─────────────┐                 ┌─────────────┐                 ┌─────────────┐
-    │ Price Nodes │                 │  AI Nodes   │                 │ Trade Nodes │
-    │  (Binance,  │    ────────►    │  (Models,   │    ────────►    │   (Swap,    │
-    │ GeckoTerm.) │     Signals     │   Code)     │     Signals     │    Vault)   │
-    └─────────────┘                 └─────────────┘                 └─────────────┘
-           │                                │                                │
-           └────────────────────────────────┼────────────────────────────────┘
-                                            │
-                           ┌────────────────┴────────────────┐
-                           │        Message Queue            │
-                           │    (RabbitMQ / Redis Pub/Sub)   │
-                           └─────────────────────────────────┘
+                                    ┌─────────────────────────────────────┐
+                                    │           TradingFlow               │
+                                    │         (Core Engine)               │
+                                    └─────────────────────────────────────┘
+                                                    │
+                    ┌───────────────────────────────┼───────────────────────────────┐
+                    │                               │                               │
+                    ▼                               ▼                               ▼
+            ┌─────────────┐                 ┌─────────────┐                 ┌─────────────┐
+            │ Data Nodes  │                 │Process Nodes│                 │ Trade Nodes │
+            │  (Binance,  │   ──Signals──►  │  (AI, Code, │   ──Signals──►  │   (Swap,    │
+            │ GeckoTerm.) │                 │   Models)   │                 │   Vault)    │
+            └─────────────┘                 └─────────────┘                 └─────────────┘
+                    │                               │                               │
+                    └───────────────────────────────┼───────────────────────────────┘
+                                                    │
+        ┌───────────────────────────────────────────┼───────────────────────────────────────────┐
+        │                                           │                                           │
+        ▼                                           ▼                                           ▼
+┌───────────────┐                         ┌─────────────────┐                         ┌─────────────────┐
+│     Redis     │                         │    RabbitMQ     │                         │   PostgreSQL    │
+│ ─────────────  │                         │  ─────────────  │                         │  ─────────────  │
+│ • State Store │                         │ • Task Queue   │                         │ • Execution    │
+│ • Pub/Sub     │                         │ • Event Bus    │                         │   Logs         │
+│ • Signal Cache│                         │ • Distributed  │                         │ • Flow History │
+│ • Coordination│                         │   Messaging    │                         │ • Analytics    │
+└───────────────┘                         └─────────────────┘                         └─────────────────┘
+        │                                           │                                           │
+        └───────────────────────────────────────────┼───────────────────────────────────────────┘
+                                                    │
+                                    ┌───────────────┴───────────────┐
+                                    │                               │
+                                    ▼                               ▼
+                            ┌─────────────┐                 ┌─────────────┐
+                            │  Worker 1   │      ...        │  Worker N   │
+                            │ (Stateless) │                 │ (Stateless) │
+                            └─────────────┘                 └─────────────┘
+
+                            ▲ Horizontally Scalable - Add workers as needed ▲
 ```
+
+### Why This Architecture?
+
+| Component | Role | Scalability Benefit |
+|-----------|------|---------------------|
+| **Redis** | Coordination hub for distributed state, pub/sub signals, and caching | Enables stateless workers; supports Redis Cluster for HA |
+| **RabbitMQ** | Reliable task distribution and event messaging | Decouples producers/consumers; handles backpressure |
+| **PostgreSQL** | Persistent storage for execution logs and analytics | Query historical data; compliance and auditing |
+| **Workers** | Stateless execution units that process nodes | Scale horizontally; zero-downtime deployments |
 
 ### Core Components
 
 | Component | Purpose |
 |-----------|---------|
-| **Flow Scheduler** | Orchestrates DAG execution with cycle management and recovery |
+| **Flow Scheduler** | Orchestrates DAG execution with cycle management, recovery, and multi-instance coordination |
 | **Node Executor** | Manages node lifecycle, timeout handling, and signal routing |
 | **Signal System** | Type-safe signal propagation with Redis persistence |
 | **Vault Services** | Chain-specific integration for Aptos, Flow EVM trading |
-| **Task Manager** | Multi-process task coordination with state persistence |
+| **Task Manager** | Multi-process task coordination with distributed state |
 
 ---
 
@@ -82,8 +111,8 @@ In the rapidly evolving crypto landscape, traders need tools that are **fast**, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/tradingflow/station.git
-cd station
+git clone https://github.com/TradingFlowAI/core-engine.git
+cd core-engine
 
 # Create virtual environment
 python -m venv venv
@@ -99,7 +128,15 @@ pip install -r requirements.txt
 # Start Redis
 docker run -d --name redis -p 6379:6379 redis:alpine
 
-# Start RabbitMQ (optional)
+# Start PostgreSQL
+docker run -d --name postgres \
+  -p 5432:5432 \
+  -e POSTGRES_USER=tradingflow \
+  -e POSTGRES_PASSWORD=tradingflow \
+  -e POSTGRES_DB=tradingflow \
+  postgres:15-alpine
+
+# Start RabbitMQ (optional, for distributed mode)
 docker run -d --name rabbitmq \
   -p 5672:5672 -p 15672:15672 \
   -e RABBITMQ_DEFAULT_USER=guest \
@@ -107,19 +144,19 @@ docker run -d --name rabbitmq \
   rabbitmq:3-management
 ```
 
-### Run the Station
+### Run TradingFlow
 
 ```bash
 python server.py
 ```
 
-The Station will be available at `http://localhost:7002`.
+The engine will be available at `http://localhost:7002`.
 
 ---
 
 ## 📦 Built-in Nodes
 
-TradingFlow Station ships with a rich collection of production-ready nodes:
+TradingFlow ships with a rich collection of production-ready nodes:
 
 ### 📈 Data Nodes
 | Node | Description |
@@ -205,7 +242,38 @@ curl http://localhost:7002/health
 
 ---
 
-## 🛠️ Extending Station
+## 📊 Performance & Scalability
+
+| Metric | Value |
+|--------|-------|
+| Node Execution Latency | < 50ms (p99) |
+| Signal Propagation | < 10ms |
+| Concurrent Flows | 100+ per worker |
+| Horizontal Scaling | Unlimited workers |
+| Memory Footprint | ~256MB per worker |
+
+### Scaling Guide
+
+```bash
+# Single instance (development)
+python server.py
+
+# Multiple workers (production)
+# Worker 1
+WORKER_ID=worker-1 python server.py --port 7002
+
+# Worker 2
+WORKER_ID=worker-2 python server.py --port 7003
+
+# Worker N...
+WORKER_ID=worker-n python server.py --port 700X
+```
+
+All workers share state via Redis and receive tasks from RabbitMQ, enabling true horizontal scaling.
+
+---
+
+## 🛠️ Extending TradingFlow
 
 ### Creating Custom Nodes
 
@@ -249,17 +317,6 @@ def init_builtin_nodes():
     # ... existing nodes ...
     NodeRegistry.register("my_custom_node", MyCustomNode)
 ```
-
----
-
-## 📊 Performance
-
-| Metric | Value |
-|--------|-------|
-| Node Execution Latency | < 50ms (p99) |
-| Signal Propagation | < 10ms |
-| Concurrent Flows | 100+ |
-| Memory Footprint | ~256MB base |
 
 ---
 
@@ -309,6 +366,7 @@ Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting.
 - [ ] Strategy backtesting framework
 - [ ] Visual flow builder integration
 - [ ] Plugin marketplace for community nodes
+- [ ] Kubernetes Helm charts for production deployment
 
 ---
 
@@ -329,16 +387,25 @@ This project is licensed under the **TradingFlow Sustainable Use License** - see
 
 **TL;DR**: Free for individuals and small teams. Enterprises and service providers need a commercial license.
 
-For commercial licensing, contact us at [license@tradingflow.xyz](mailto:license@tradingflow.xyz).
+For commercial licensing, contact us at [cl@tradingflows.ai](mailto:cl@tradingflows.ai).
 
 ---
 
 ## 🔗 Links
 
-- 🌐 [TradingFlow Website](https://tradingflow.xyz)
-- 📚 [Documentation](https://docs.tradingflow.xyz)
-- 💬 [Discord Community](https://discord.gg/tradingflow)
-- 🐦 [Twitter](https://twitter.com/tradingflow)
+- 🌐 [Website](https://tradingflows.ai)
+- 📚 [Documentation](https://docs.tradingflows.ai)
+- 💬 [Telegram](https://t.me/tradingflowai)
+- 🐦 [Twitter](https://twitter.com/TradingFlowAI)
+- 📧 [Contact](mailto:cl@tradingflows.ai)
+- 🐙 [GitHub](https://github.com/TradingFlowAI)
+
+---
+
+## 👥 Credits
+
+- **[@Morboz](https://github.com/Morboz)** - Core author. Designed and implemented the initial architecture.
+- **[@peteryang](https://github.com/peteryang)** - Maintained and finalized the project over 6+ months of development.
 
 ---
 
@@ -346,6 +413,6 @@ For commercial licensing, contact us at [license@tradingflow.xyz](mailto:license
 
 **Built with ❤️ by the TradingFlow Team**
 
-*Empowering transparent trading in the decentralized world*
+*Empowering transparent and scalable trading in the decentralized world*
 
 </div>

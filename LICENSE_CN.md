@@ -90,8 +90,8 @@
 ## 商业许可
 
 如需商业许可，请联系：
-- 邮箱：license@tradingflow.xyz
-- 网站：https://tradingflow.xyz/license
+- 邮箱：cl@tradingflows.ai
+- 网站：https://tradingflows.ai/license
 
 ---
 
