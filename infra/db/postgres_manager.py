@@ -26,8 +26,6 @@ def get_postgres_manager(name: str = "default") -> 'PostgresManager':
     Returns:
         PostgresManager: PostgreSQL manager instance
     """
-    global _postgres_managers
-
     if name not in _postgres_managers:
         _postgres_managers[name] = PostgresManager()
         logger.debug(f"Created PostgreSQL manager instance: {name}")
