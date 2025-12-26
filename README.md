@@ -405,7 +405,7 @@ For commercial licensing, contact us at [cl@tradingflows.ai](mailto:cl@tradingfl
 ## 👥 Credits
 
 - **[@Morboz](https://github.com/Morboz)** - Core author. Designed and implemented the initial architecture.
-- **[@peteryang](https://github.com/peteryang)** - Maintained and finalized the project over 6+ months of development.
+- **[CL](https://github.com/TheCleopatra)** - Maintained and finalized the project over 6+ months of development.
 
 ---
 

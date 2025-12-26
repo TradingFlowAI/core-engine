@@ -405,7 +405,7 @@ pytest tests/ --cov=. --cov-report=html
 ## 👥 贡献者
 
 - **[@Morboz](https://github.com/Morboz)** - 核心作者，负责设计并实施初始架构
-- **[@peteryang](https://github.com/peteryang)** - 后续进行了长达半年的维护与收尾工作
+- **[CL](https://github.com/TheCleopatra)** - 后续进行了长达半年的维护与收尾工作
 
 ---
 
