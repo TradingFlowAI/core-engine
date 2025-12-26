@@ -1,14 +1,14 @@
-"""健康检查API"""
+"""Health check API"""
 
 from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
 
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 from common.node_task_manager import NodeTaskManager
 from core.system_stats import get_system_stats
 
-# 获取配置项
+# Get configuration items
 WORKER_ID = CONFIG["WORKER_ID"]
 node_manager = NodeTaskManager.get_instance()
 
@@ -18,7 +18,7 @@ health_bp = Blueprint("health_api")
 
 @health_bp.get("/health")
 async def health_check(request: Request):
-    """健康检查接口 - 供server检查worker存活"""
+    """Health check endpoint - for server to check worker liveness"""
     return sanic_json(
         {
             "status": "healthy",

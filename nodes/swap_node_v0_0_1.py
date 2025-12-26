@@ -18,8 +18,8 @@ from utils.token_price_util import (
 from common.node_decorators import register_node_type
 from common.signal_types import Signal, SignalType
 from nodes.node_base import NodeBase, NodeStatus
-from weather_depot.config import CONFIG
-from mq.trading_signal_publisher import publish_trading_signal
+from infra.config import CONFIG
+from publishers.trading_signal_publisher import publish_trading_signal
 
 CO_TRADING_ENABLED = os.getenv("ENABLE_CO_TRADING", "false").lower() == "true"
 
@@ -439,7 +439,7 @@ class SwapNode(NodeBase):
         return required_input_decimal
     async def _resolve_token_addresses(self) -> None:
         """Resolve token addresses from symbols based on chain"""
-        # 注意：空值检查已移至 execute() 方法中，这里假设 token 已经存在
+        # Note: Empty value check has been moved to execute() method, here we assume token already exists
 
         if self.chain == "aptos":
             self.input_token_address = get_aptos_token_address_by_symbol(self.from_token)
@@ -660,31 +660,31 @@ class SwapNode(NodeBase):
             raise ValueError(f"Cannot calculate output from pool data: {str(e)}")
 
     async def get_estimated_min_output_amount_aptos(self, amount_in: int, slippage: float) -> tuple[int, str]:
-        """估算 Aptos 输出金额和 sqrt_price_limit (DEPRECATED: use pool-based calculation)"""
+        """Estimate Aptos output amount and sqrt_price_limit (DEPRECATED: use pool-based calculation)"""
         input_price = await get_aptos_token_price_usd_async(self.input_token_address)
         output_price = await get_aptos_token_price_usd_async(self.output_token_address)
 
         if not input_price or not output_price or output_price <= 0:
             raise ValueError("Cannot get valid token prices for Aptos")
 
-        # 计算输出金额
+        # Calculate output amount
         amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
         input_value_usd = amount_in_decimal * Decimal(str(input_price))
         output_amount_decimal = input_value_usd / Decimal(str(output_price))
 
-        # 应用滑点
+        # Apply slippage
         slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
         output_amount_with_slippage = output_amount_decimal * slippage_factor
         output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
 
-        # 计算 sqrt_price_limit
+        # Calculate sqrt_price_limit
         sqrt_price_limit = calculate_sqrt_price_limit_q64_64(input_price, output_price, slippage)
 
         await self.persist_log(f"Aptos estimation: output={output_amount_raw}, sqrt_limit={sqrt_price_limit}", "INFO")
         return output_amount_raw, sqrt_price_limit
 
     async def get_estimated_min_output_amount_flow_evm(self, amount_in: int, slippage: float) -> int:
-        """估算 Flow EVM 输出金额"""
+        """Estimate Flow EVM output amount"""
         token_addresses = [self.input_token_address, self.output_token_address]
         prices = await get_flow_evm_token_prices_usd(token_addresses)
 
@@ -694,12 +694,12 @@ class SwapNode(NodeBase):
         if not input_price or not output_price or output_price <= 0:
             raise ValueError("Cannot get valid token prices for Flow EVM")
 
-        # 计算输出金额
+        # Calculate output amount
         amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
         input_value_usd = amount_in_decimal * Decimal(str(input_price))
         output_amount_decimal = input_value_usd / Decimal(str(output_price))
 
-        # 应用滑点
+        # Apply slippage
         slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
         output_amount_with_slippage = output_amount_decimal * slippage_factor
         output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
@@ -709,13 +709,13 @@ class SwapNode(NodeBase):
 
     async def _fetch_token_metadata_from_monitor(self, token_address: str) -> Optional[Dict[str, any]]:
         """
-        从monitor服务获取代币元数据
+        Fetch token metadata from monitor service
 
         Args:
-            token_address: 代币地址
+            token_address: Token address
 
         Returns:
-            Optional[Dict[str, any]]: 代币元数据，格式与get_aptos_monitored_token_info兼容
+            Optional[Dict[str, any]]: Token metadata, format compatible with get_aptos_monitored_token_info
         """
         try:
             from services.aptos_vault_service import AptosVaultService
@@ -724,7 +724,7 @@ class SwapNode(NodeBase):
             metadata = await vault_service.get_token_metadata(token_address)
 
             if metadata:
-                # 转换为与数据库查询结果兼容的格式
+                # Convert to format compatible with database query results
                 return {
                     "token_address": metadata.get("address", token_address),
                     "name": metadata.get("name"),
@@ -741,17 +741,17 @@ class SwapNode(NodeBase):
 
     async def find_best_pool(self, token1: str, token2: str) -> Optional[Dict[str, any]]:
         """
-        动态搜索最优的交易池子，使用新版monitor API
+        Dynamically search for optimal trading pool using new monitor API
 
         Args:
-            token1: 第一个代币地址
-            token2: 第二个代币地址
+            token1: First token address
+            token2: Second token address
 
         Returns:
-            Optional[Dict]: 最优池子信息，包含fee_tier
+            Optional[Dict]: Optimal pool info, including fee_tier
         """
         if self.chain != "aptos":
-            # 目前只支持Aptos链的池子搜索
+            # Currently only supports Aptos chain pool search
             return None
 
         try:
@@ -760,7 +760,7 @@ class SwapNode(NodeBase):
                 await self.persist_log("Monitor URL not configured, using default fee tier", "WARNING")
                 return None
 
-            # 费率等级优先级: 0.05%, 0.3%, 0.01%, 1%
+            # Fee tier priority: 0.05%, 0.3%, 0.01%, 1%
             fee_tiers = "1,2,0,3"
 
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -778,12 +778,12 @@ class SwapNode(NodeBase):
                 if response.status_code == 200:
                     pool_data = response.json()
 
-                    # 检查API返回是否成功
+                    # Check if API response is successful
                     if pool_data.get("success") and pool_data.get("pool"):
                         pool_info = pool_data["pool"]
                         fee_tier = pool_info.get("feeTier")
 
-                        # 检查池子是否有足够的流动性
+                        # Check if pool has sufficient liquidity
                         if self._is_pool_suitable(pool_data):
                             best_pool = {
                                 "pool_info": pool_data,
@@ -818,21 +818,21 @@ class SwapNode(NodeBase):
 
     def _is_pool_suitable(self, pool_data: Dict) -> bool:
         """
-        检查池子是否适合交易
+        Check if pool is suitable for trading
 
         Args:
-            pool_data: 池子数据（新版API响应格式）
+            pool_data: Pool data (new API response format)
 
         Returns:
-            bool: 是否适合交易
+            bool: Whether suitable for trading
         """
         try:
-            # 检查基本字段
+            # Check basic fields
             sqrt_price = pool_data.get("sqrtPrice")
             if not sqrt_price:
                 return False
 
-            # 检查流动性：优先使用tvlUSD，其次使用liquidity
+            # Check liquidity: prefer tvlUSD, fallback to liquidity
             liquidity_value = 0
             if pool_data.get("tvlUSD"):
                 try:
@@ -845,11 +845,11 @@ class SwapNode(NodeBase):
                 except (ValueError, TypeError):
                     liquidity_value = 0
 
-            # 最小流动性要求：$1000 USD
+            # Minimum liquidity requirement: $1000 USD
             if liquidity_value < 1000:
                 return False
 
-            # 检查价格是否合理
+            # Check if price is reasonable
             try:
                 sqrt_price_value = float(sqrt_price)
                 if sqrt_price_value <= 0:
@@ -962,12 +962,12 @@ class SwapNode(NodeBase):
                 )
 
             if self.chain == "aptos":
-                # 搜索最优池子
+                # Search for optimal pool
                 await self.persist_log(f"Searching for best pool: {self.input_token_address} -> {self.output_token_address}", "INFO")
                 best_pool = await self.find_best_pool(self.input_token_address, self.output_token_address)
 
-                # 确定使用的fee_tier
-                fee_tier = 1  # 默认值
+                # Determine fee_tier to use
+                fee_tier = 1  # Default value
                 if best_pool:
                     fee_tier = best_pool["fee_tier"]
                     await self.persist_log(f"Using pool with fee_tier={fee_tier}", "INFO")
@@ -998,7 +998,7 @@ class SwapNode(NodeBase):
                     self.input_token_address,
                     self.output_token_address,
                     final_amount_in,
-                    fee_tier=fee_tier,  # 使用动态搜索的fee_tier
+                    fee_tier=fee_tier,  # Use dynamically searched fee_tier
                     sqrt_price_limit=sqrt_price_limit,
                     amount_out_min=estimated_min_output,
                 )
@@ -1141,7 +1141,7 @@ class SwapNode(NodeBase):
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
-            # 🔧 NEW: 支持空值跳过交易 - 用于条件交易控制
+            # 🔧 NEW: Support empty value skip trade - for conditional trading control
             if not self.from_token or not self.to_token:
                 return await self._complete_skip(
                     "Skipping swap: empty from_token/to_token input, no trade executed",
@@ -1188,7 +1188,7 @@ class SwapNode(NodeBase):
             return False
 
     def _register_input_handles(self) -> None:
-        """注册输入句柄"""
+        """Register input handles"""
         # Register vault input (unified)
         self.register_input_handle(
             name=VAULT_HANDLE,
@@ -1248,7 +1248,7 @@ class SwapNode(NodeBase):
         )
 
 
-# ============ 实例节点类 ============
+# ============ Instance Node Classes ============
 
 @register_node_type(
     "buy_node",
@@ -1265,25 +1265,25 @@ class SwapNode(NodeBase):
 )
 class BuyNode(SwapNode):
     """
-    Buy Node - 专门用于买入代币的节点实例
+    Buy Node - Specialized node instance for buying tokens
 
-    输入参数:
-    - buy_token: 要买入的代币符号 (string)
-    - base_token: 用于支付的基础代币符号 (string)
-    - chain: 区块链网络 (string)
-    - vault_address: Vault合约地址 (string)
-    # - order_type: 订单类型 (string) - "market" 或 "limit" [COMMENTED: Not in frontend]
-    # - limited_price: 限价 (number) - 仅限价单使用 [COMMENTED: Not in frontend]
-    - amount_in_percentage: 交易金额百分比 (number)
-    - amount_in_human_readable: 人类可读金额 (number)
-    - slippery: 滑点容忍度 (number)
+    Input parameters:
+    - buy_token: Token symbol to buy (string)
+    - base_token: Base token symbol for payment (string)
+    - chain: Blockchain network (string)
+    - vault_address: Vault contract address (string)
+    # - order_type: Order type (string) - "market" or "limit" [COMMENTED: Not in frontend]
+    # - limited_price: Limit price (number) - only for limit orders [COMMENTED: Not in frontend]
+    - amount_in_percentage: Trading amount percentage (number)
+    - amount_in_human_readable: Human readable amount (number)
+    - slippery: Slippage tolerance (number)
 
-    输出信号:
-    - trade_receipt: 交易收据 (json object)
+    Output signals:
+    - trade_receipt: Transaction receipt (json object)
     """
 
     def __init__(self, **kwargs):
-        # 设置买入逻辑：from_token = base_token, to_token = buy_token
+        # Set buy logic: from_token = base_token, to_token = buy_token
         buy_token = kwargs.get('buy_token')
         base_token = kwargs.get('base_token')
 
@@ -1292,7 +1292,7 @@ class BuyNode(SwapNode):
         if base_token:
             kwargs['from_token'] = base_token
 
-        # 设置实例节点元数据
+        # Set instance node metadata
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Buy Node')
         kwargs.setdefault('node_category', 'instance')
@@ -1303,17 +1303,17 @@ class BuyNode(SwapNode):
 
         super().__init__(**kwargs)
 
-        # 保存买入特定参数
+        # Save buy specific parameters
         self.buy_token = buy_token
         self.base_token = base_token
         # self.order_type = kwargs.get('order_type', 'market')  # COMMENTED: Not in frontend
         # self.limited_price = kwargs.get('limited_price')  # COMMENTED: Not in frontend
 
-        # 重新设置日志名称
+        # Reset logger name
         # Logger removed - using persist_log from NodeBase
 
     def _register_input_handles(self) -> None:
-        """注册买入节点特化的输入句柄"""
+        """Register buy node specialized input handles"""
         # Register vault input (unified)
         self.register_input_handle(
             name=VAULT_HANDLE,
@@ -1406,25 +1406,25 @@ class BuyNode(SwapNode):
 )
 class SellNode(SwapNode):
     """
-    Sell Node - 专门用于卖出代币的节点实例
+    Sell Node - Specialized node instance for selling tokens
 
-    输入参数:
-    - sell_token: 要卖出的代币符号 (string)
-    - base_token: 换取的基础代币符号 (string)
-    - chain: 区块链网络 (string)
-    - vault_address: Vault合约地址 (string)
-    # - order_type: 订单类型 (string) - "market" 或 "limit" [COMMENTED: Not in frontend]
-    # - limited_price: 限价 (number) - 仅限价单使用 [COMMENTED: Not in frontend]
-    - amount_in_percentage: 交易金额百分比 (number)
-    - amount_in_human_readable: 人类可读金额 (number)
-    - slippery: 滑点容忍度 (number)
+    Input parameters:
+    - sell_token: Token symbol to sell (string)
+    - base_token: Base token symbol to receive (string)
+    - chain: Blockchain network (string)
+    - vault_address: Vault contract address (string)
+    # - order_type: Order type (string) - "market" or "limit" [COMMENTED: Not in frontend]
+    # - limited_price: Limit price (number) - only for limit orders [COMMENTED: Not in frontend]
+    - amount_in_percentage: Trading amount percentage (number)
+    - amount_in_human_readable: Human readable amount (number)
+    - slippery: Slippage tolerance (number)
 
-    输出信号:
-    - trade_receipt: 交易收据 (json object)
+    Output signals:
+    - trade_receipt: Transaction receipt (json object)
     """
 
     def __init__(self, **kwargs):
-        # 设置卖出逻辑：from_token = sell_token, to_token = base_token
+        # Set sell logic: from_token = sell_token, to_token = base_token
         sell_token = kwargs.get('sell_token')
         base_token = kwargs.get('base_token')
 
@@ -1433,7 +1433,7 @@ class SellNode(SwapNode):
         if base_token:
             kwargs['to_token'] = base_token
 
-        # 设置实例节点元数据
+        # Set instance node metadata
         kwargs.setdefault('version', '0.0.2')
         kwargs.setdefault('display_name', 'Sell Node')
         kwargs.setdefault('node_category', 'instance')
@@ -1444,7 +1444,7 @@ class SellNode(SwapNode):
 
         super().__init__(**kwargs)
 
-        # 保存卖出特定参数
+        # Save sell specific parameters
         self.sell_token = sell_token
         self.base_token = base_token
         # self.order_type = kwargs.get('order_type', 'market')  # COMMENTED: Not in frontend
@@ -1453,7 +1453,7 @@ class SellNode(SwapNode):
         # Logger removed - using persist_log from NodeBase
 
     def _register_input_handles(self) -> None:
-        """注册卖出节点特化的输入句柄"""
+        """Register sell node specialized input handles"""
         # Register vault input (unified)
         self.register_input_handle(
             name=VAULT_HANDLE,

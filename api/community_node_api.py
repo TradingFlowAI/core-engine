@@ -15,36 +15,36 @@ router = APIRouter(prefix="/node/community", tags=["community_nodes"])
 
 
 class CommunityNodeExecuteRequest(BaseModel):
-    """社区节点执行请求"""
-    nodeConfig: Dict[str, Any]  # 完整的节点配置
-    inputs: Dict[str, Any]  # 输入数据
+    """Community node execution request"""
+    nodeConfig: Dict[str, Any]  # Complete node configuration
+    inputs: Dict[str, Any]  # Input data
     
 
 class CommunityNodeValidateRequest(BaseModel):
-    """社区节点验证请求"""
+    """Community node validation request"""
     executionType: str  # 'python' or 'http'
-    executionConfig: Dict[str, Any]  # 执行配置
+    executionConfig: Dict[str, Any]  # Execution configuration
 
 
 @router.post("/execute")
 async def execute_community_node(request: CommunityNodeExecuteRequest):
     """
-    执行社区节点
+    Execute community node
     
     Args:
-        request: 包含节点配置和输入的请求体
+        request: Request body containing node configuration and inputs
         
     Returns:
-        节点执行结果
+        Node execution result
     """
     try:
-        # 创建社区节点实例
+        # Create community node instance
         node = CommunityNode(request.nodeConfig)
         
-        # 执行节点
+        # Execute node
         result = node.execute(**request.inputs)
         
-        # 获取日志
+        # Get logs
         logs = node.get_logs()
         
         return {
@@ -68,13 +68,13 @@ async def execute_community_node(request: CommunityNodeExecuteRequest):
 @router.post("/validate")
 async def validate_community_node(request: CommunityNodeValidateRequest):
     """
-    验证社区节点配置
+    Validate community node configuration
     
     Args:
-        request: 包含执行类型和配置的请求体
+        request: Request body containing execution type and configuration
         
     Returns:
-        验证结果
+        Validation result
     """
     try:
         if request.executionType == 'python':
@@ -103,19 +103,19 @@ async def validate_community_node(request: CommunityNodeValidateRequest):
 @router.get("/info/{nodeId}")
 async def get_community_node_info(nodeId: str):
     """
-    获取社区节点信息（从Control服务）
+    Get community node information (from Control service)
     
-    这个端点主要用于验证节点是否存在
-    实际的节点配置会由Control服务提供
+    This endpoint is mainly used to verify if node exists.
+    The actual node configuration is provided by Control service.
     
     Args:
-        nodeId: 节点ID
+        nodeId: Node ID
         
     Returns:
-        节点基本信息
+        Node basic information
     """
-    # 这里应该调用 Control 服务获取节点信息
-    # 暂时返回占位符响应
+    # Should call Control service to get node information
+    # Returning placeholder response for now
     return {
         "nodeId": nodeId,
         "message": "Please fetch node config from Control service"
@@ -125,13 +125,13 @@ async def get_community_node_info(nodeId: str):
 @router.get("/registry/list")
 async def list_registered_nodes(include_versions: bool = False):
     """
-    列出所有已注册的节点（包括内置节点）
+    List all registered nodes (including built-in nodes)
     
     Args:
-        include_versions: 是否包含所有版本
+        include_versions: Whether to include all versions
         
     Returns:
-        节点列表
+        Node list
     """
     try:
         nodes = NodeRegistry.list_all_nodes(include_versions=include_versions)
@@ -155,14 +155,14 @@ async def list_registered_nodes(include_versions: bool = False):
 @router.get("/registry/{nodeType}")
 async def get_node_info(nodeType: str, version: Optional[str] = None):
     """
-    获取特定节点的信息
+    Get specific node information
     
     Args:
-        nodeType: 节点类型
-        version: 版本号（可选，默认最新）
+        nodeType: Node type
+        version: Version number (optional, defaults to latest)
         
     Returns:
-        节点信息
+        Node information
     """
     try:
         if not NodeRegistry.is_registered(nodeType, version):
@@ -193,13 +193,13 @@ async def get_node_info(nodeType: str, version: Optional[str] = None):
 @router.get("/registry/{nodeType}/versions")
 async def get_node_versions(nodeType: str):
     """
-    获取节点的所有版本
+    Get all versions of a node
     
     Args:
-        nodeType: 节点类型
+        nodeType: Node type
         
     Returns:
-        版本列表
+        Version list
     """
     try:
         versions = NodeRegistry.get_all_versions(nodeType)

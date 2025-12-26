@@ -1,0 +1,107 @@
+TradingFlow Sustainable Use License
+Version 1.0
+
+Copyright (c) 2024-present TradingFlow
+
+## Acceptance
+
+By using the software, you agree to all of the terms and conditions below.
+
+## License Grant
+
+The licensor grants you a non-exclusive, royalty-free, worldwide, non-sublicensable, 
+non-transferable license to use, copy, distribute, make available, and prepare 
+derivative works of the software, subject to the limitations and conditions below.
+
+## Free Use
+
+You may use, copy, modify, and distribute this software for free if you are:
+
+1. **An individual** using the software for personal, educational, or non-commercial purposes.
+
+2. **A business or organization** that meets ALL of the following conditions:
+   - Total annual revenue is less than $1,000,000 USD, AND
+   - Total funding raised is less than $1,000,000 USD, AND
+   - The software is used solely for internal data processing, analytics, or operations, AND
+   - You do NOT use the software to provide services to third parties (directly or indirectly).
+
+## Commercial License Required
+
+You MUST obtain a commercial license from TradingFlow if ANY of the following apply:
+
+1. Your business or organization has total annual revenue of $1,000,000 USD or more.
+
+2. Your business or organization has raised total funding of $1,000,000 USD or more.
+
+3. You use the software (directly or indirectly) to provide services to third parties, 
+   including but not limited to:
+   - Offering the software as a hosted service (SaaS)
+   - Integrating the software into a product or service sold to customers
+   - Using the software to process data or execute workflows on behalf of third parties
+   - Providing consulting, development, or operational services that utilize the software
+
+## Limitations
+
+You may not:
+
+1. Remove or obscure any licensing, copyright, or other notices from the software.
+
+2. Use the licensor's trademarks, trade names, logos, or other brand features without 
+   prior written consent.
+
+3. Use the software in violation of any applicable law or regulation.
+
+4. Use the software to compete directly with TradingFlow's commercial offerings without 
+   a commercial license.
+
+## Patents
+
+The licensor grants you a license, under any patent claims the licensor can license or 
+becomes able to license, to make, have made, use, sell, offer for sale, import, and have 
+imported the software. This license does not cover any patent claims that you cause to 
+be infringed by modifications or additions to the software.
+
+## No Liability
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR 
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE 
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, 
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE 
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Termination
+
+Your license to use the software terminates automatically if you breach any of these terms. 
+Upon termination, you must cease all use of the software and destroy all copies.
+
+## Interpretation
+
+If any provision of this license is held to be unenforceable, that provision shall be 
+modified to the minimum extent necessary to make it enforceable, and all other provisions 
+shall remain in full force and effect.
+
+## Governing Law
+
+This license is governed by the laws of the State of Delaware, United States, without 
+regard to its conflict of laws principles.
+
+## Commercial Licensing
+
+For commercial licensing inquiries, please contact:
+- Email: license@tradingflow.xyz
+- Website: https://tradingflow.xyz/license
+
+---
+
+## Summary (Not Part of License)
+
+| Use Case | License Required? |
+|----------|-------------------|
+| Individual/Personal use | ❌ Free |
+| Non-profit/Educational | ❌ Free |
+| Small business (<$1M revenue/funding), internal use only | ❌ Free |
+| Business with ≥$1M revenue or funding | ✅ Commercial License |
+| Providing services to third parties (any size) | ✅ Commercial License |
+| SaaS/Hosted service offering | ✅ Commercial License |
+

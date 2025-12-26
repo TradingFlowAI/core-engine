@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from binance.client import BaseClient, Client
 from binance.exceptions import BinanceAPIException
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 from common.edge import Edge
 
 from common.node_decorators import register_node_type

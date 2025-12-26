@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 from common.edge import Edge
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType

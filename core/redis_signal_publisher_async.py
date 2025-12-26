@@ -1,11 +1,10 @@
 """
 Async Redis Signal Publisher
-异步 Redis 信号发布器
 
-职责：
-- 将节点间信号异步发布到 Redis Pub/Sub
-- 供 Control 服务订阅并转发到前端 WebSocket
-- 用于调试和监控节点间数据流
+Responsibilities:
+- Async publish inter-node signals to Redis Pub/Sub
+- For Control service to subscribe and forward to frontend WebSocket
+- Used for debugging and monitoring data flow between nodes
 """
 
 import asyncio
@@ -19,28 +18,28 @@ try:
 except ImportError:
     import aioredis
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 
 class AsyncRedisSignalPublisher:
-    """异步 Redis 信号发布器"""
+    """Async Redis Signal Publisher"""
 
     def __init__(self):
-        """初始化（延迟连接）"""
+        """Initialize (lazy connection)."""
         self.redis_client: Optional[aioredis.Redis] = None
         self._connected = False
         self._lock = asyncio.Lock()
 
-        # 统计信息
+        # Statistics
         self._publish_success_count = 0
         self._publish_failure_count = 0
 
         logger.info("[AsyncRedisSignalPublisher] Initialized (connection will be lazy-loaded)")
 
     async def connect(self):
-        """连接到 Redis"""
+        """Connect to Redis."""
         if self._connected:
             return
 
@@ -77,7 +76,7 @@ class AsyncRedisSignalPublisher:
                 raise
 
     async def ensure_connected(self):
-        """确保已连接到 Redis"""
+        """Ensure connected to Redis."""
         if not self._connected:
             await self.connect()
 
@@ -90,23 +89,23 @@ class AsyncRedisSignalPublisher:
         retry_delay: float = 0.1
     ) -> bool:
         """
-        异步发布信号到 Redis 频道
+        Async publish signal to Redis channel.
 
         Args:
             flow_id: Flow ID
-            cycle: 执行周期
-            signal_data: 信号数据，应包含:
+            cycle: Execution cycle
+            signal_data: Signal data, should contain:
                 - direction: 'input' | 'output'
-                - from_node_id: 源节点 ID
-                - to_node_id: 目标节点 ID
+                - from_node_id: Source node ID
+                - to_node_id: Target node ID
                 - handle_id: Handle ID
-                - payload: 传输的数据
-                - data_type: 数据类型标识
-            max_retries: 最大重试次数
-            retry_delay: 重试延迟（秒）
+                - payload: Transmitted data
+                - data_type: Data type identifier
+            max_retries: Maximum retry attempts
+            retry_delay: Retry delay (seconds)
 
         Returns:
-            bool: 是否发布成功
+            bool: Whether publish was successful
         """
         try:
             await self.ensure_connected()
@@ -122,10 +121,10 @@ class AsyncRedisSignalPublisher:
             self._publish_failure_count += 1
             return False
 
-        # 构建频道名称
+        # Build channel name
         channel = f"signal:flow:{flow_id}"
 
-        # 构建完整的信号消息
+        # Build complete signal message
         complete_signal = {
             "type": "signal",
             "timestamp": datetime.now().isoformat(),
@@ -134,7 +133,7 @@ class AsyncRedisSignalPublisher:
             **signal_data
         }
 
-        # 尝试发布（带重试）
+        # Try to publish (with retry)
         for attempt in range(max_retries):
             try:
                 message = json.dumps(complete_signal)
@@ -182,7 +181,7 @@ class AsyncRedisSignalPublisher:
         return False
 
     async def close(self):
-        """关闭 Redis 连接"""
+        """Close Redis connection."""
         if self.redis_client:
             try:
                 await self.redis_client.close()
@@ -196,7 +195,7 @@ class AsyncRedisSignalPublisher:
                 )
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取统计信息"""
+        """Get statistics."""
         total_count = self._publish_success_count + self._publish_failure_count
         success_rate = (
             self._publish_success_count / total_count * 100
@@ -213,14 +212,14 @@ class AsyncRedisSignalPublisher:
         }
 
 
-# 全局单例实例
+# Global singleton instance
 _async_signal_publisher: Optional[AsyncRedisSignalPublisher] = None
-# 🔧 修复：延迟创建 Lock，避免在模块加载时事件循环未初始化的问题
+# Fix: Lazy create Lock to avoid event loop not initialized issue during module load
 _publisher_lock: Optional[asyncio.Lock] = None
 
 
 def _get_publisher_lock() -> asyncio.Lock:
-    """获取或创建 publisher lock"""
+    """Get or create publisher lock."""
     global _publisher_lock
     if _publisher_lock is None:
         _publisher_lock = asyncio.Lock()
@@ -228,7 +227,7 @@ def _get_publisher_lock() -> asyncio.Lock:
 
 
 async def get_async_signal_publisher() -> AsyncRedisSignalPublisher:
-    """获取异步 Redis 信号发布器的单例实例"""
+    """Get async Redis signal publisher singleton instance."""
     global _async_signal_publisher
 
     if _async_signal_publisher is None:
@@ -258,49 +257,49 @@ async def publish_signal_async(
     direction: str = "output",  # 'input' | 'output'
     data_type: str = "unknown",
     max_retries: int = 2,
-    # 兼容旧版参数
+    # Backward compatibility parameters
     from_node_id: str = None,
     to_node_id: str = None,
     handle_id: str = None,
 ) -> bool:
     """
-    便捷函数：异步发布信号到 Redis
+    Convenience function: Async publish signal to Redis.
 
     Args:
         flow_id: Flow ID
-        cycle: 执行周期
-        source_node_id: 源节点 ID
-        source_handle: 源 Handle ID
-        target_node_ids: 目标节点 ID 列表
-        signal_type: 信号类型 (e.g., 'ANY', 'NUMBER', 'STRING')
-        payload: 传输的数据
-        direction: 方向 ('input' 或 'output')
-        data_type: 数据类型标识
-        max_retries: 最大重试次数
-        from_node_id: (兼容) 源节点 ID
-        to_node_id: (兼容) 目标节点 ID
-        handle_id: (兼容) Handle ID
+        cycle: Execution cycle
+        source_node_id: Source node ID
+        source_handle: Source Handle ID
+        target_node_ids: Target node ID list
+        signal_type: Signal type (e.g., 'ANY', 'NUMBER', 'STRING')
+        payload: Transmitted data
+        direction: Direction ('input' or 'output')
+        data_type: Data type identifier
+        max_retries: Maximum retry attempts
+        from_node_id: (compat) Source node ID
+        to_node_id: (compat) Target node ID
+        handle_id: (compat) Handle ID
 
     Returns:
-        bool: 是否发布成功
+        bool: Whether publish was successful
     """
     try:
         publisher = await get_async_signal_publisher()
         
-        # 兼容旧版参数
+        # Backward compatibility for old parameters
         actual_from_node = source_node_id or from_node_id or ""
         actual_targets = target_node_ids or ([to_node_id] if to_node_id else [])
         
-        # 确定 handle_id：优先使用显式传入的 handle_id，否则使用 source_handle
-        # 对于 input 信号，handle_id 应该是目标 handle（接收方）
-        # 对于 output 信号，handle_id 应该是源 handle（发送方）
+        # Determine handle_id: prefer explicitly passed handle_id, otherwise use source_handle
+        # For input signal, handle_id should be target handle (receiver)
+        # For output signal, handle_id should be source handle (sender)
         actual_handle = handle_id or source_handle or ""
         
         signal_data = {
             "direction": direction,
             "from_node_id": actual_from_node,
-            "to_node_ids": actual_targets,  # 注意：改为数组格式
-            "to_node_id": actual_targets[0] if actual_targets else None,  # 兼容旧格式
+            "to_node_ids": actual_targets,  # Note: changed to array format
+            "to_node_id": actual_targets[0] if actual_targets else None,  # Backward compat
             "handle_id": actual_handle,
             "signal_type": signal_type,
             "payload": _serialize_payload(payload),
@@ -315,7 +314,7 @@ async def publish_signal_async(
 
 def _serialize_payload(payload: Any) -> Any:
     """
-    序列化 payload，处理不可直接 JSON 序列化的类型
+    Serialize payload, handle types that cannot be directly JSON serialized.
     """
     if payload is None:
         return None
@@ -329,7 +328,7 @@ def _serialize_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
         return {k: _serialize_payload(v) for k, v in payload.items()}
     
-    # 对于复杂对象，转换为字符串表示
+    # For complex objects, convert to string representation
     try:
         return str(payload)
     except Exception:
@@ -337,7 +336,7 @@ def _serialize_payload(payload: Any) -> Any:
 
 
 async def close_async_signal_publisher():
-    """关闭异步信号发布器"""
+    """Close async signal publisher."""
     global _async_signal_publisher
 
     if _async_signal_publisher is not None:
@@ -346,7 +345,7 @@ async def close_async_signal_publisher():
 
 
 async def get_signal_publisher_stats() -> Dict[str, Any]:
-    """获取发布器统计信息"""
+    """Get publisher statistics."""
     if _async_signal_publisher is None:
         return {
             "connected": False,

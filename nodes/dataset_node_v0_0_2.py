@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import gspread
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 from common.edge import Edge
 
 from common.node_decorators import register_node_type

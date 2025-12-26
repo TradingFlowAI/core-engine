@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 
 import redis.asyncio as aioredis
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 if TYPE_CHECKING:
     from nodes.node_base import NodeBase
@@ -142,7 +142,7 @@ class NodeRegistry:
             or f"{node_class_type}-{node_id}",
             "input_edges": input_edges,
             "output_edges": output_edges,
-            "node_type": node_class_type,  # 添加 node_type 参数
+            "node_type": node_class_type,  # Add node_type parameter
         }
 
         # Update default parameters

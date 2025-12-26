@@ -6,7 +6,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 import httpx
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 from common.edge import Edge
 
 from common.node_decorators import register_node_type
@@ -263,7 +263,7 @@ class AIModelNode(NodeBase):
             return
 
         try:
-            from weather_depot.exceptions.tf_exception import InsufficientCreditsException
+            from infra.exceptions.tf_exception import InsufficientCreditsException
 
             credits_cost = self.ai_model_credits
             await self.persist_log(

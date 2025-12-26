@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import httpx
 
-from weather_depot.logging_config import setup_logging  # noqa: F401, E402
-from weather_depot.config import CONFIG
+from infra.logging_config import setup_logging  # noqa: F401, E402
+from infra.config import CONFIG
 
 # Setup logging
 setup_logging(CONFIG)
@@ -485,9 +485,9 @@ class FlowEvmVaultService:
             Dict[str, any]: 操作历史数据
         """
         try:
-            from weather_depot.db import db_session
-            from weather_depot.db.services.vault_operation_history_service import VaultOperationHistoryService
-            from weather_depot.db.models.vault_operation_history import OperationType
+            from infra.db import db_session
+            from infra.db.services.vault_operation_history_service import VaultOperationHistoryService
+            from infra.db.models.vault_operation_history import OperationType
 
             # 处理操作类型过滤
             operation_types = None

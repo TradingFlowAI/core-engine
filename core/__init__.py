@@ -1,13 +1,13 @@
-"""核心功能模块"""
+"""Core Functionality Module"""
 
-# Redis 日志发布
+# Redis Log Publishing
 from .redis_log_publisher_async import (
     publish_log_async,
     get_async_log_publisher,
     close_async_log_publisher,
 )
 
-# Redis 状态发布
+# Redis Status Publishing
 from .redis_status_publisher import (
     publish_node_status,
     publish_flow_status,
@@ -15,7 +15,7 @@ from .redis_status_publisher import (
     close_status_publisher,
 )
 
-# Redis 信号发布 (节点间数据传输)
+# Redis Signal Publishing (inter-node data transfer)
 from .redis_signal_publisher_async import (
     publish_signal_async,
     get_async_signal_publisher,

@@ -10,40 +10,40 @@ from .community_node_executor import CommunityNodeExecutor
 
 class CommunityNode(NodeBase):
     """
-    社区节点 - 可以执行用户定义的代码或 HTTP 调用
+    Community Node - Can execute user-defined code or HTTP calls.
     
-    这个类作为所有社区节点的基类，根据配置动态执行
+    This class serves as base class for all community nodes, executes dynamically based on config.
     """
     
     def __init__(self, node_config: Dict[str, Any], **kwargs):
         """
-        初始化社区节点
+        Initialize community node.
         
         Args:
-            node_config: 节点配置字典（从数据库加载）
-                - nodeId: 节点ID
-                - name: 节点名称
-                - displayName: 显示名称
-                - category: 类别
-                - version: 版本
-                - description: 描述
-                - inputs: 输入配置列表
-                - outputs: 输出配置列表
-                - executionType: 执行类型 ('python' or 'http')
-                - executionConfig: 执行配置
-                - authorId: 创作者ID
-                - authorName: 创作者名称
+            node_config: Node config dictionary (loaded from database)
+                - nodeId: Node ID
+                - name: Node name
+                - displayName: Display name
+                - category: Category
+                - version: Version
+                - description: Description
+                - inputs: Input config list
+                - outputs: Output config list
+                - executionType: Execution type ('python' or 'http')
+                - executionConfig: Execution config
+                - authorId: Author ID
+                - authorName: Author name
         """
         self.node_config = node_config
         self.node_id = node_config.get('nodeId')
         self.execution_type = node_config.get('executionType', 'python')
         self.execution_config = node_config.get('executionConfig', {})
         
-        # 构建输入输出句柄
+        # Build input/output handles
         input_handles = self._build_handles(node_config.get('inputs', []))
         output_handles = self._build_handles(node_config.get('outputs', []))
         
-        # 初始化基类
+        # Initialize base class
         super().__init__(
             version=node_config.get('version', '0.0.1'),
             display_name=node_config.get('displayName', node_config.get('name')),
@@ -54,7 +54,7 @@ class CommunityNode(NodeBase):
             **kwargs
         )
         
-        # 设置额外的元数据
+        # Set additional metadata
         self.update_metadata({
             'node_id': self.node_id,
             'author_id': node_config.get('authorId'),
@@ -65,13 +65,13 @@ class CommunityNode(NodeBase):
     
     def _build_handles(self, handle_configs: List[Dict]) -> List[Dict]:
         """
-        从配置构建输入/输出句柄
+        Build input/output handles from config.
         
         Args:
-            handle_configs: 句柄配置列表
+            handle_configs: Handle config list
             
         Returns:
-            格式化的句柄列表
+            Formatted handle list
         """
         handles = []
         for config in handle_configs:
@@ -81,7 +81,7 @@ class CommunityNode(NodeBase):
                 'description': config.get('description', '')
             }
             
-            # 输入句柄的额外字段
+            # Additional fields for input handles
             if 'required' in config:
                 handle['required'] = config['required']
             if 'default' in config:
@@ -93,27 +93,27 @@ class CommunityNode(NodeBase):
     
     def validate_inputs(self, data: Dict[str, Any]) -> tuple:
         """
-        验证输入数据
+        Validate input data.
         
         Args:
-            data: 输入数据字典
+            data: Input data dictionary
             
         Returns:
             (is_valid, error_message)
         """
-        # 获取输入句柄配置
+        # Get input handle configs
         input_configs = {h['name']: h for h in self.node_config.get('inputs', [])}
         
-        # 检查必需字段
+        # Check required fields
         for name, config in input_configs.items():
             if config.get('required', False) and name not in data:
-                # 检查是否有默认值
+                # Check if has default value
                 if 'default' not in config:
                     return False, f"Required input '{name}' is missing"
-                # 使用默认值
+                # Use default value
                 data[name] = config['default']
         
-        # 类型验证（基础）
+        # Type validation (basic)
         for name, value in data.items():
             if name in input_configs:
                 expected_type = input_configs[name].get('type', 'string')
@@ -124,14 +124,14 @@ class CommunityNode(NodeBase):
     
     def _validate_type(self, value: Any, expected_type: str) -> bool:
         """
-        验证值的类型
+        Validate value type.
         
         Args:
-            value: 值
-            expected_type: 期望的类型字符串
+            value: Value
+            expected_type: Expected type string
             
         Returns:
-            是否匹配
+            Whether matches
         """
         type_mapping = {
             'string': str,
@@ -144,25 +144,25 @@ class CommunityNode(NodeBase):
         
         expected_python_type = type_mapping.get(expected_type)
         if expected_python_type is None:
-            return True  # 未知类型，不验证
+            return True  # Unknown type, skip validation
         
         return isinstance(value, expected_python_type)
     
     def execute(self, **inputs) -> Dict[str, Any]:
         """
-        执行社区节点
+        Execute community node.
         
         Args:
-            **inputs: 输入参数
+            **inputs: Input parameters
             
         Returns:
-            输出字典
+            Output dictionary
         """
         try:
-            # 记录开始
+            # Log start
             self.log(f"Executing community node: {self.node_id}", level="info")
             
-            # 验证输入
+            # Validate inputs
             is_valid, error_msg = self.validate_inputs(inputs)
             if not is_valid:
                 self.log(f"Input validation failed: {error_msg}", level="error")
@@ -171,18 +171,18 @@ class CommunityNode(NodeBase):
                     'error': error_msg
                 }
             
-            # 执行节点
+            # Execute node
             result = CommunityNodeExecutor.execute(
                 self.execution_type,
                 self.execution_config,
                 inputs
             )
             
-            # 记录执行结果
+            # Log execution result
             if result.get('success'):
                 self.log("Execution successful", level="info")
                 
-                # 记录执行日志
+                # Log execution logs
                 if 'logs' in result:
                     for log_entry in result['logs']:
                         self.log(log_entry['message'], level=log_entry['level'])
@@ -208,22 +208,22 @@ class CommunityNode(NodeBase):
     @classmethod
     def from_database(cls, node_config: Dict[str, Any]):
         """
-        从数据库配置创建节点实例
+        Create node instance from database config.
         
         Args:
-            node_config: 节点配置字典
+            node_config: Node config dictionary
             
         Returns:
-            CommunityNode 实例
+            CommunityNode instance
         """
         return cls(node_config)
     
     def to_dict(self) -> Dict[str, Any]:
         """
-        转换为字典（用于序列化）
+        Convert to dictionary (for serialization).
         
         Returns:
-            节点配置字典
+            Node config dictionary
         """
         base_dict = super().to_dict()
         base_dict.update({

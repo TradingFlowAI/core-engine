@@ -11,7 +11,7 @@ from utils.token_price_util import get_aptos_token_price_usd
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 # input handles
 CHAIN_HANDLE = "chain"

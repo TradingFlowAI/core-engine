@@ -4,10 +4,10 @@ import aiohttp
 import asyncio
 from typing import Dict, List, Optional
 
-from weather_depot.db import db_session
-from weather_depot.db.services.monitored_token_service import MonitoredTokenService
-from weather_depot.utils.redis_manager import RedisManager
-from weather_depot.config import CONFIG
+from infra.db import db_session
+from infra.db.services.monitored_token_service import MonitoredTokenService
+from infra.utils.redis_manager import RedisManager
+from infra.config import CONFIG
 
 logger = logging.getLogger(__name__)
 

@@ -11,10 +11,10 @@ from typing import Any, Dict, List, Optional, Set
 import httpx
 import redis.asyncio as aioredis
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
-from mq.activity_publisher import publish_activity
+from publishers.activity_publisher import publish_activity
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class FlowScheduler:
             CONFIG.get("FLOW_MONITOR_MAX_WAIT_SECONDS", 300), default=300
         )
 
-        # 等待下一周期的状态标记
+        # Status marker for waiting for next cycle
         self.waiting_status = "waiting_next_cycle"
 
     async def initialize(self):
@@ -73,7 +73,7 @@ class FlowScheduler:
         """Initialize flow execution log service lazily"""
         if self._log_service is None:
             try:
-                from weather_depot.db.services.flow_execution_log_service import (
+                from infra.db.services.flow_execution_log_service import (
                     FlowExecutionLogService,
                 )
                 self._log_service = FlowExecutionLogService()
@@ -586,7 +586,7 @@ class FlowScheduler:
         nodes_key = f"flow:{flow_id}:cycle:{cycle}:nodes"
         node_ids = await self.redis.smembers(nodes_key)
 
-        # 获取 NodeTaskManager 实例
+        # Get NodeTaskManager instance
         task_manager = NodeTaskManager.get_instance()
         if not task_manager._initialized:
             await task_manager.initialize()
@@ -594,7 +594,7 @@ class FlowScheduler:
         nodes_status = {}
         for node_id in node_ids:
             node_task_id = f"{flow_id}_{cycle}_{node_id}"
-            # 使用 NodeTaskManager 获取任务信息
+            # Use NodeTaskManager to get task info
             node_data = await task_manager.get_task(node_task_id)
             if node_data:
                 nodes_status[node_id] = node_data
@@ -654,19 +654,19 @@ class FlowScheduler:
             # Get total nodes in the flow from Redis set
             total_flow_nodes = await self.redis.scard(f"flow:{flow_id}:cycle:{cycle}:nodes")
 
-            # 📊 详细统计所有节点状态（区分 failed 和 terminated）
+            # 📊 Detailed statistics for all node statuses (distinguish failed and terminated)
             total_nodes = len(comprehensive_nodes)
             running_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'running')
             completed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'completed')
             failed_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'failed')
             terminated_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'terminated')
             pending_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'pending')
-            # 保留 error 作为向后兼容（可能有些节点使用 'error' 而非 'failed'）
+            # Keep error for backward compatibility (some nodes may use 'error' instead of 'failed')
             error_nodes = sum(1 for node in comprehensive_nodes.values() if node['status'] == 'error')
 
-            # 💳 Credits 使用量（粗略估算：按节点类型固定扣费规则）
-            # NOTE: Station 目前扣费发生在节点执行前（见 NodeBase._charge_credits_sync），
-            # 因此这里将“已开始/已结束”的节点都计入使用量。
+            # 💳 Credits usage (rough estimate: fixed charge rules by node type)
+            # NOTE: Station currently charges before node execution (see NodeBase._charge_credits_sync),
+            # so here we count nodes that have started or finished as used.
             credits_used = 0
             for node in comprehensive_nodes.values():
                 status_value = (node or {}).get("status")
@@ -682,7 +682,7 @@ class FlowScheduler:
                 is_code_node = "code" in node_type_value
                 credits_used += 20 if is_code_node else 10
 
-            # 🏦 Vault metrics（现金流校正：principal / current value / net profit）
+            # 🏦 Vault metrics (cash flow correction: principal / current value / net profit)
             vault_total_value_usd = None
             vault_principal_usd = None
             net_profit_usd = None
@@ -744,27 +744,27 @@ class FlowScheduler:
                         else:
                             net_profit_pct = 0.0
             except Exception:
-                # 不影响 comprehensive status 主流程
+                # Don't affect comprehensive status main flow
                 pass
 
-            # 🔄 Flow 状态计算逻辑（优先使用存储的终态状态）
-            # 优先使用 Redis 中存储的 flow status（如果是终态：completed/stopped）
+            # 🔄 Flow status calculation logic (prefer stored terminal state)
+            # Prefer using flow status stored in Redis (if terminal: completed/stopped)
             stored_status = flow_data.get("status")
             terminal_flow_statuses = {"completed", "stopped", "failed", "error", "terminated", "timeout"}
 
             if stored_status in terminal_flow_statuses:
-                # Run once (interval=0) 或手动停止的 flow，直接返回存储的终态
+                # Run once (interval=0) or manually stopped flow, return stored terminal state directly
                 flow_status = stored_status
             else:
                 if failed_nodes > 0:
-                    # 任何节点失败都立即将 flow 视为失败，避免前端继续显示运行中
+                    # Any node failure immediately marks flow as failed, prevent frontend from showing running
                     flow_status = "failed"
                 elif running_nodes > 0 or pending_nodes > 0:
                     flow_status = "running"
                 elif (completed_nodes + failed_nodes + terminated_nodes) == total_flow_nodes and total_flow_nodes > 0:
                     flow_status = "completed"
                 else:
-                    # 保留等待态
+                    # Keep waiting state
                     flow_status = stored_status or "running"
 
             return {
@@ -776,9 +776,9 @@ class FlowScheduler:
                 "next_execution": flow_data.get("next_execution"),
                 "next_cycle_eta": flow_data.get("next_cycle_eta"),
                 "last_cycle_duration_ms": flow_data.get("last_cycle_duration_ms"),
-                # 新增：Runtime metrics（前端 RuntimePanel 使用）
+                # Added: Runtime metrics (for frontend RuntimePanel)
                 "credits_used": credits_used,
-                # ✅ 现金流校正后的净收益/收益率（来自 04_monitor）
+                # ✅ Cash flow corrected net profit/rate of return (from 04_monitor)
                 "net_profit_usd": net_profit_usd if net_profit_usd is not None else flow_data.get("net_profit_usd"),
                 "net_profit_pct": net_profit_pct if net_profit_pct is not None else flow_data.get("net_profit_pct"),
                 "vault_total_value_usd": vault_total_value_usd,
@@ -792,7 +792,7 @@ class FlowScheduler:
                     "failed_nodes": failed_nodes,
                     "terminated_nodes": terminated_nodes,
                     "pending_nodes": pending_nodes,
-                    "error_nodes": error_nodes  # 向后兼容
+                    "error_nodes": error_nodes  # Backward compatible
                 },
                 "flow_metadata": {
                     "name": flow_data.get("name"),
@@ -943,8 +943,8 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Use database session context manager
-            from weather_depot.db import db_session
-            from weather_depot.db.services.flow_execution_log_service import (
+            from infra.db import db_session
+            from infra.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -1029,8 +1029,8 @@ class FlowScheduler:
         """
         try:
             # Use database session context manager
-            from weather_depot.db import db_session
-            from weather_depot.db.services.flow_execution_log_service import (
+            from infra.db import db_session
+            from infra.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
 
@@ -1184,7 +1184,7 @@ class FlowScheduler:
                 raise ValueError(f"Flow {flow_id} does not exist")
 
             # Initialize log service
-            from weather_depot.db.services.flow_execution_log_service import (
+            from infra.db.services.flow_execution_log_service import (
                 FlowExecutionLogService,
             )
             log_service = FlowExecutionLogService()
@@ -1457,7 +1457,7 @@ class FlowScheduler:
 
                 # Check flow status
                 flow_status = flow_data.get("status")
-                # 运行中或等待下个周期都继续调度
+                # Continue scheduling if running or waiting for next cycle
                 if flow_status not in {"running", self.waiting_status}:
                     logger.info(
                         "Flow %s status is %s, pausing scheduling", flow_id, flow_status
@@ -1500,7 +1500,7 @@ class FlowScheduler:
                         )
                         execution_error = str(e)
 
-                    # 🔔 发送执行完成事件到 WebSocket (通过 Redis Pub/Sub)
+                    # 🔔 Send execution complete event to WebSocket (via Redis Pub/Sub)
                     try:
                         completion_event = {
                             "flow_id": flow_id,
@@ -1515,7 +1515,7 @@ class FlowScheduler:
                             "timestamp": datetime.now().isoformat(),
                         }
 
-                        # 发布到 execution_complete 频道（最终状态由监控任务再次推送）
+                        # Publish to execution_complete channel (final state pushed again by monitor task)
                         await self.redis.publish(
                             f"execution_complete:flow:{flow_id}",
                             json.dumps(completion_event)
@@ -1531,16 +1531,16 @@ class FlowScheduler:
                     interval_seconds = self._parse_interval(
                         flow_config.get("interval", "0")
                     )
-                    # 如果 interval_seconds 为 0，表示只执行一次
+                    # If interval_seconds is 0, execute only once
                     if interval_seconds == 0:
                         logger.info(
                             "Flow %s has interval=0, executing once and stopping scheduling",
                             flow_id
                         )
-                        # 从运行中的流程列表中移除
+                        # Remove from running flows list
                         if flow_id in self.running_flows:
                             self.running_flows.remove(flow_id)
-                        # 更新状态为 running（保持一致命名），等待异步监控完成后再写最终结果
+                        # Update status to running (keep consistent naming), wait for async monitor to write final result
                         await self.redis.hset(
                             f"flow:{flow_id}",
                             mapping={
@@ -1548,17 +1548,17 @@ class FlowScheduler:
                                 "last_cycle": str(new_cycle),
                             },
                         )
-                        # 退出循环
+                        # Exit loop
                         break
                     else:
-                        # 正常情况，计算下次执行时间并进入等待态
+                        # Normal case, calculate next execution time and enter waiting state
                         next_execution = current_time + interval_seconds
                         await self.redis.hset(
                             f"flow:{flow_id}",
                             mapping={
                                 "next_execution": str(next_execution),
                                 "last_cycle": str(new_cycle),
-                                # 写等待状态，便于前端显示
+                                # Write waiting status for frontend display
                                 "status": self.waiting_status,
                                 "last_cycle_duration_ms": (
                                     int((datetime.now().timestamp() - current_time) * 1000)
@@ -1567,11 +1567,11 @@ class FlowScheduler:
                             },
                         )
                 else:
-                    # 未到执行时间，等待剩余时间（至少 0.1 秒防止忙轮询）
+                    # Not yet time to execute, wait remaining time (at least 0.1s to prevent busy polling)
                     interval_seconds = max(next_execution - current_time, 0.1)
 
                 await asyncio.sleep(interval_seconds)
-                # 周期间隔等待期结束后，回到 running
+                # After cycle interval wait ends, return to running
                 await self.redis.hset(f"flow:{flow_id}", "status", "running")
                 tried += 1
 
@@ -2233,7 +2233,7 @@ class FlowScheduler:
     ) -> None:
         """Persist final cycle status and publish events/logs."""
         cycle_key = f"flow:{flow_id}:cycle:{cycle}"
-        # 计算耗时
+        # Calculate duration
         cycle_data = await self.redis.hgetall(cycle_key)
         start_time_str = cycle_data.get("start_time")
         end_time_dt = datetime.now()
@@ -2274,7 +2274,7 @@ class FlowScheduler:
             error_message=error_message,
         )
 
-        # 将耗时加入 summary，便于后续流级别状态使用
+        # Add duration to summary for subsequent flow-level status use
         if duration_ms is not None:
             summary["duration_ms"] = duration_ms
 
@@ -2309,13 +2309,13 @@ class FlowScheduler:
         if not self.redis:
             return
 
-        # 🔥 获取收益数据（调用 04 API）
+        # 🔥 Get profit data (call 04 API)
         net_profit_usd = None
         net_profit_pct = None
         credits_used = None
 
         try:
-            # 使用 get_comprehensive_flow_status 获取完整状态（包含收益数据）
+            # Use get_comprehensive_flow_status to get complete status (including profit data)
             comprehensive_status = await self.get_comprehensive_flow_status(flow_id, cycle)
             if comprehensive_status:
                 net_profit_usd = comprehensive_status.get("net_profit_usd")
@@ -2331,7 +2331,7 @@ class FlowScheduler:
             "error": error_message,
             "summary": summary,
             "timestamp": datetime.now().isoformat(),
-            # 🔥 新增：Runtime metrics（前端 RuntimePanel 需要）
+            # 🔥 Added: Runtime metrics (for frontend RuntimePanel)
             "net_profit_usd": net_profit_usd,
             "net_profit_pct": net_profit_pct,
             "credits_used": credits_used,
@@ -2371,7 +2371,7 @@ class FlowScheduler:
         if interval_seconds == 0:
             await self.redis.hset(f"flow:{flow_id}", "status", final_status)
         else:
-            # 周期性任务进入等待下周期
+            # Periodic task enters waiting for next cycle
             next_execution = flow_data.get("next_execution")
             try:
                 next_eta = (
@@ -2386,7 +2386,7 @@ class FlowScheduler:
                 f"flow:{flow_id}",
                 mapping={
                     "status": self.waiting_status,
-                    # 统计信息存入 flow 级别，便于前端展示
+                    # Store statistics at flow level for frontend display
                     "last_cycle_duration_ms": summary.get("duration_ms"),
                     "next_cycle_eta": next_eta,
                 },

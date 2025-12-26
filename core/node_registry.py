@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
 class NodeRegistry:
     """
-    节点注册表 - 管理所有节点类型和版本
+    Node Registry - Manages all node types and versions
     
-    存储结构:
+    Storage structure:
     {
         'node_type': {
             '0.0.1': NodeClass,
@@ -37,34 +37,34 @@ class NodeRegistry:
     def register(cls, node_type: str, version: str, node_class: Type[NodeBase],
                  metadata: Optional[Dict[str, Any]] = None) -> None:
         """
-        注册节点类型和版本
+        Register node type and version.
         
         Args:
-            node_type: 节点类型标识符 (如 'vault_node')
-            version: 版本号 (如 '0.0.1')
-            node_class: 节点类
-            metadata: 额外的元数据
+            node_type: Node type identifier (e.g., 'vault_node')
+            version: Version number (e.g., '0.0.1')
+            node_class: Node class
+            metadata: Additional metadata
         
         Raises:
-            ValueError: 如果版本格式不正确或已存在
+            ValueError: If version format is invalid or already exists
         """
-        # 验证版本格式
+        # Validate version format
         if not VersionManager.validate_version(version):
             raise ValueError(f"Invalid version format: {version}")
         
-        # 初始化节点类型字典
+        # Initialize node type dict
         if node_type not in cls._nodes:
             cls._nodes[node_type] = {}
             cls._metadata_cache[node_type] = {}
         
-        # 检查版本是否已存在
+        # Check if version already exists
         if version in cls._nodes[node_type]:
             raise ValueError(f"Node {node_type} version {version} already registered")
         
-        # 注册节点
+        # Register node
         cls._nodes[node_type][version] = node_class
         
-        # 缓存元数据
+        # Cache metadata
         if metadata:
             cls._metadata_cache[node_type][version] = metadata
         
@@ -73,22 +73,22 @@ class NodeRegistry:
     @classmethod
     def get_node(cls, node_type: str, version: Optional[str] = None) -> Type[NodeBase]:
         """
-        获取节点类
+        Get node class.
         
         Args:
-            node_type: 节点类型
-            version: 版本号，如果为 None 则返回最新版本
+            node_type: Node type
+            version: Version number, returns latest if None
             
         Returns:
-            节点类
+            Node class
             
         Raises:
-            KeyError: 如果节点类型或版本不存在
+            KeyError: If node type or version not found
         """
         if node_type not in cls._nodes:
             raise KeyError(f"Node type '{node_type}' not found")
         
-        # 如果未指定版本，获取最新版本
+        # If version not specified, get latest
         if version is None:
             version = cls.get_latest_version(node_type)
             if version is None:
@@ -103,13 +103,13 @@ class NodeRegistry:
     @classmethod
     def get_latest_version(cls, node_type: str) -> Optional[str]:
         """
-        获取节点类型的最新版本
+        Get latest version for node type.
         
         Args:
-            node_type: 节点类型
+            node_type: Node type
             
         Returns:
-            最新版本号，如果不存在则返回 None
+            Latest version number, None if not exists
         """
         if node_type not in cls._nodes:
             return None
@@ -120,13 +120,13 @@ class NodeRegistry:
     @classmethod
     def get_all_versions(cls, node_type: str) -> List[str]:
         """
-        获取节点类型的所有版本
+        Get all versions for node type.
         
         Args:
-            node_type: 节点类型
+            node_type: Node type
             
         Returns:
-            版本列表，按版本号排序
+            Version list, sorted by version number
         """
         if node_type not in cls._nodes:
             return []
@@ -138,36 +138,36 @@ class NodeRegistry:
     @classmethod
     def get_all_node_types(cls) -> List[str]:
         """
-        获取所有注册的节点类型
+        Get all registered node types.
         
         Returns:
-            节点类型列表
+            List of node types
         """
         return list(cls._nodes.keys())
     
     @classmethod
     def get_node_info(cls, node_type: str, version: Optional[str] = None) -> Dict[str, Any]:
         """
-        获取节点信息（包含元数据）
+        Get node info (including metadata).
         
         Args:
-            node_type: 节点类型
-            version: 版本号
+            node_type: Node type
+            version: Version number
             
         Returns:
-            节点信息字典
+            Node info dictionary
         """
         if version is None:
             version = cls.get_latest_version(node_type)
         
         node_class = cls.get_node(node_type, version)
         
-        # 获取类级别元数据
+        # Get class-level metadata
         metadata = {}
         if hasattr(node_class, 'get_class_metadata'):
             metadata = node_class.get_class_metadata()
         
-        # 合并缓存的元数据
+        # Merge cached metadata
         if node_type in cls._metadata_cache and version in cls._metadata_cache[node_type]:
             metadata.update(cls._metadata_cache[node_type][version])
         
@@ -182,23 +182,23 @@ class NodeRegistry:
     @classmethod
     def list_all_nodes(cls, include_versions: bool = False) -> List[Dict[str, Any]]:
         """
-        列出所有节点
+        List all nodes.
         
         Args:
-            include_versions: 是否包含所有版本信息
+            include_versions: Whether to include all version info
             
         Returns:
-            节点信息列表
+            Node info list
         """
         result = []
         
         for node_type in cls.get_all_node_types():
             if include_versions:
-                # 包含所有版本
+                # Include all versions
                 for version in cls.get_all_versions(node_type):
                     result.append(cls.get_node_info(node_type, version))
             else:
-                # 只包含最新版本
+                # Only include latest version
                 latest_version = cls.get_latest_version(node_type)
                 if latest_version:
                     result.append(cls.get_node_info(node_type, latest_version))
@@ -208,14 +208,14 @@ class NodeRegistry:
     @classmethod
     def is_registered(cls, node_type: str, version: Optional[str] = None) -> bool:
         """
-        检查节点是否已注册
+        Check if node is registered.
         
         Args:
-            node_type: 节点类型
-            version: 版本号（可选）
+            node_type: Node type
+            version: Version number (optional)
             
         Returns:
-            是否已注册
+            Whether registered
         """
         if node_type not in cls._nodes:
             return False
@@ -228,7 +228,7 @@ class NodeRegistry:
     @classmethod
     def clear(cls) -> None:
         """
-        清空注册表（主要用于测试）
+        Clear registry (mainly for testing).
         """
         cls._nodes.clear()
         cls._metadata_cache.clear()
@@ -236,24 +236,24 @@ class NodeRegistry:
     @classmethod
     def resolve_version(cls, node_type: str, version_spec: str) -> str:
         """
-        根据版本规范解析实际版本（支持 latest, 范围表达式等）
+        Resolve version spec to actual version (supports latest, range expressions, etc.)
         
         Args:
-            node_type: 节点类型
-            version_spec: 版本规范
-                - "latest": 最新稳定版本
-                - "latest-beta": 最新 beta 版本
-                - "^1.2.0": 兼容 1.x.x
-                - "~1.2.0": 兼容 1.2.x
-                - "1.2.3": 精确版本
-                - "1.2.3-beta.1": 精确预发布版本
+            node_type: Node type
+            version_spec: Version specification
+                - "latest": Latest stable version
+                - "latest-beta": Latest beta version
+                - "^1.2.0": Compatible with 1.x.x
+                - "~1.2.0": Compatible with 1.2.x
+                - "1.2.3": Exact version
+                - "1.2.3-beta.1": Exact prerelease version
                 
         Returns:
-            解析后的具体版本号
+            Resolved specific version number
             
         Raises:
-            KeyError: 如果节点类型不存在
-            ValueError: 如果无法解析版本或版本不存在
+            KeyError: If node type not found
+            ValueError: If cannot resolve version or version not found
             
         Examples:
             >>> NodeRegistry.resolve_version("code_node", "latest")
@@ -270,7 +270,7 @@ class NodeRegistry:
         if not available_versions:
             raise ValueError(f"No versions available for node type '{node_type}'")
         
-        # 使用 VersionManager 解析版本规范
+        # Use VersionManager to resolve version spec
         resolved = VersionManager.resolve_version_spec(version_spec, available_versions)
         
         if resolved is None:
@@ -284,14 +284,14 @@ class NodeRegistry:
     @classmethod
     def get_compatible_version(cls, node_type: str, version_range: str) -> Optional[str]:
         """
-        获取兼容的版本（已废弃，请使用 resolve_version）
+        Get compatible version (deprecated, use resolve_version instead).
         
         Args:
-            node_type: 节点类型
-            version_range: 版本范围表达式 (如 '^1.0.0', '~1.2.0')
+            node_type: Node type
+            version_range: Version range expression (e.g., '^1.0.0', '~1.2.0')
             
         Returns:
-            兼容的最新版本，如果没有则返回 None
+            Latest compatible version, None if not found
         """
         try:
             return cls.resolve_version(node_type, version_range)
@@ -301,30 +301,30 @@ class NodeRegistry:
 
 def register_node(node_type: str, version: str = '0.0.1', **metadata):
     """
-    节点注册装饰器
+    Node registration decorator.
     
-    使用方式:
+    Usage:
         @register_node('vault_node', version='0.0.1')
         class VaultNode(NodeBase):
             pass
     
     Args:
-        node_type: 节点类型
-        version: 版本号
-        **metadata: 额外的元数据
+        node_type: Node type
+        version: Version number
+        **metadata: Additional metadata
         
     Returns:
-        装饰器函数
+        Decorator function
     """
     def decorator(node_class: Type[NodeBase]):
-        # 设置类级别元数据
+        # Set class-level metadata
         if hasattr(node_class, 'set_class_metadata'):
             node_class.set_class_metadata({
                 'version': version,
                 **metadata
             })
         
-        # 注册到注册表
+        # Register to registry
         NodeRegistry.register(node_type, version, node_class, metadata)
         
         return node_class

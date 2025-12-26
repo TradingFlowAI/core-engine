@@ -1,6 +1,6 @@
 """
 Signal Persistence
-异步持久化 Signal 到数据库
+Async persistence of Signals to database
 """
 
 import logging
@@ -8,16 +8,16 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# 服务实例缓存
+# Service instance cache
 _signal_service = None
 
 
 def _get_signal_service():
-    """获取或创建 Signal 服务实例"""
+    """Get or create Signal service instance."""
     global _signal_service
     if _signal_service is None:
         try:
-            from weather_depot.db.services.flow_execution_signal_service import (
+            from infra.db.services.flow_execution_signal_service import (
                 FlowExecutionSignalService,
             )
             _signal_service = FlowExecutionSignalService()
@@ -40,22 +40,22 @@ async def persist_signal(
     payload: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
-    持久化 Signal 到数据库
+    Persist Signal to database.
     
     Args:
         flow_id: Flow ID
-        cycle: 执行周期
-        direction: 信号方向 ('input' 或 'output')
-        from_node_id: 源节点 ID
-        to_node_id: 目标节点 ID
-        source_handle: 源 Handle
-        target_handle: 目标 Handle
-        signal_type: 信号类型
-        data_type: 数据类型
-        payload: 信号数据
+        cycle: Execution cycle
+        direction: Signal direction ('input' or 'output')
+        from_node_id: Source node ID
+        to_node_id: Target node ID
+        source_handle: Source Handle
+        target_handle: Target Handle
+        signal_type: Signal type
+        data_type: Data type
+        payload: Signal data
         
     Returns:
-        是否保存成功
+        Whether save was successful
     """
     try:
         service = _get_signal_service()
@@ -63,7 +63,7 @@ async def persist_signal(
             logger.debug("Signal service not available, skipping persistence")
             return False
         
-        # 序列化 payload
+        # Serialize payload
         serialized_payload = _serialize_payload(payload)
         
         result = await service.save_signal(
@@ -92,7 +92,7 @@ async def persist_signal(
 
 
 def _serialize_payload(payload: Any) -> Any:
-    """序列化 payload，处理不可直接 JSON 序列化的类型"""
+    """Serialize payload, handle types that cannot be directly JSON serialized."""
     if payload is None:
         return None
     
@@ -105,7 +105,7 @@ def _serialize_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
         return {k: _serialize_payload(v) for k, v in payload.items()}
     
-    # 对于复杂对象，转换为字符串表示
+    # For complex objects, convert to string representation
     try:
         return str(payload)
     except Exception:

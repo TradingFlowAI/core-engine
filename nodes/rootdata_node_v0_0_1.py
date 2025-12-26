@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from weather_depot.config import CONFIG
-from weather_depot.utils.redis_manager import RedisManager
+from infra.config import CONFIG
+from infra.utils.redis_manager import RedisManager
 from common.edge import Edge
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType

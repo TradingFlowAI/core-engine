@@ -1,24 +1,24 @@
 """
 Initialize Built-in Nodes with Versioning
-为所有内置节点注册版本信息
+
+This file registers version information for all built-in nodes.
+All built-in nodes start from version 0.0.1.
+
+Usage:
+1. Add @register_node decorator before each node class definition
+2. Or import and register here uniformly
 """
 
 from core.node_registry import register_node
 
-# 这个文件用于为所有内置节点添加版本信息
-# 所有内置节点从 0.0.1 开始
-
-# 使用方式：
-# 1. 在每个节点类定义前添加 @register_node 装饰器
-# 2. 或者在这里统一导入和注册
 
 def init_all_builtin_nodes():
     """
-    初始化所有内置节点
-    为每个节点注册到版本控制系统
+    Initialize all built-in nodes.
+    Register each node to the version control system.
     """
 
-    # 注册所有内置节点（按各节点当前版本）
+    # Register all built-in nodes (using their current versions)
     node_registrations = [
         {
             'node_type': 'vault_node',
@@ -154,14 +154,14 @@ def init_all_builtin_nodes():
         }
     ]
 
-    # 动态导入和注册
+    # Dynamic import and registration
     for registration in node_registrations:
         try:
-            # 动态导入模块
+            # Dynamically import module
             module = __import__(registration['module'], fromlist=[registration['class']])
             node_class = getattr(module, registration['class'])
 
-            # 使用装饰器注册
+            # Register using decorator
             decorated_class = register_node(
                 registration['node_type'],
                 version=registration['version'],
@@ -177,10 +177,10 @@ def init_all_builtin_nodes():
 
 
 if __name__ == '__main__':
-    # 运行注册
+    # Run registration
     init_all_builtin_nodes()
 
-    # 打印注册信息
+    # Print registration info
     from core.node_registry import NodeRegistry
 
     print("\n=== Registered Nodes ===")

@@ -6,14 +6,14 @@ import logging
 from sanic import Sanic
 
 
-from weather_depot.config import get_station_config
-from weather_depot.logging_config import setup_logging  # noqa: F401, E402
-from weather_depot.mq.pool_manager import pool_manager
+from infra.config import get_station_config
+from infra.logging_config import setup_logging  # noqa: F401, E402
+from infra.mq.pool_manager import pool_manager
 from api import flow_bp, health_bp, node_bp
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
 from services import setup_services  # noqa: F401, E402
-from mq.activity_publisher import init_activity_publisher, get_activity_publisher
+from publishers.activity_publisher import init_activity_publisher, get_activity_publisher
 
 pool_manager.register_shutdown_handler()
 
@@ -21,7 +21,7 @@ CONFIG = get_station_config()
 setup_logging(CONFIG, "station")
 logger = logging.getLogger(__name__)
 
-# 降低 pika 和 asyncio 的日志级别，减少 DEBUG 日志
+# Reduce log level for pika and asyncio to minimize DEBUG noise
 logging.getLogger('pika').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 

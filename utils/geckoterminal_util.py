@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from weather_depot.constants import EVM_CHAIN_ID_NETWORK_MAP
-from weather_depot.utils.address_util import normalize_token_address
+from infra.constants import EVM_CHAIN_ID_NETWORK_MAP
+from infra.utils.address_util import normalize_token_address
 
 logger = logging.getLogger(__name__)
 

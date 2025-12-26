@@ -1,14 +1,14 @@
-"""Worker注册和管理API"""
+"""Worker registration and management API"""
 
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
-# 配置信息
+# Configuration
 WORKER_ID = CONFIG["WORKER_ID"]
 SERVER_URL = CONFIG["SERVER_URL"]
 
 
 def register_worker_routes(app):
-    """注册Worker管理相关路由"""
+    """Register Worker management related routes"""
 
-    # Worker注册与注销行为通过服务启动和停止事件处理，
-    # 该模块不定义额外的API路由
+    # Worker registration and deregistration are handled through service start and stop events,
+    # this module does not define additional API routes

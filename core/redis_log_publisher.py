@@ -1,10 +1,9 @@
 """
 Redis Log Publisher
-Redis 日志发布器
 
-职责：
-- 将节点执行日志发布到 Redis Pub/Sub
-- 供 Control 服务订阅并转发到前端 WebSocket
+Responsibilities:
+- Publish node execution logs to Redis Pub/Sub
+- For Control service to subscribe and forward to frontend WebSocket
 """
 
 import redis
@@ -12,15 +11,15 @@ import json
 import os
 from typing import Dict, Any
 from datetime import datetime
-from weather_depot.config import CONFIG
+from infra.config import CONFIG
 
 
 class RedisLogPublisher:
-    """Redis 日志发布器"""
+    """Redis Log Publisher"""
     
     def __init__(self):
-        """初始化 Redis 连接"""
-        # 使用 CONFIG 中自动编码密码的 URL
+        """Initialize Redis connection."""
+        # Use auto-encoded password URL from CONFIG
         redis_url = CONFIG.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis_client = redis.from_url(
             redis_url,
@@ -29,7 +28,7 @@ class RedisLogPublisher:
             socket_connect_timeout=5,
         )
         
-        # 测试连接
+        # Test connection
         try:
             self.redis_client.ping()
             print("[RedisLogPublisher] Connected to Redis successfully")
@@ -44,21 +43,21 @@ class RedisLogPublisher:
         log_entry: Dict[str, Any]
     ) -> bool:
         """
-        发布日志到 Redis 频道
+        Publish log to Redis channel.
         
         Args:
             flow_id: Flow ID
-            cycle: 执行周期
-            log_entry: 日志条目数据
+            cycle: Execution cycle
+            log_entry: Log entry data
             
         Returns:
-            bool: 是否发布成功
+            bool: Whether publish was successful
         """
         try:
-            # 构建频道名称
+            # Build channel name
             channel = f"logs:flow:{flow_id}:cycle:{cycle}"
             
-            # 确保日志条目包含必要字段
+            # Ensure log entry contains required fields
             complete_log_entry = {
                 "timestamp": datetime.now().isoformat(),
                 "flow_id": flow_id,
@@ -66,10 +65,10 @@ class RedisLogPublisher:
                 **log_entry
             }
             
-            # 序列化为 JSON
+            # Serialize to JSON
             message = json.dumps(complete_log_entry)
             
-            # 发布到 Redis
+            # Publish to Redis
             self.redis_client.publish(channel, message)
             
             return True
@@ -82,7 +81,7 @@ class RedisLogPublisher:
             return False
     
     def close(self):
-        """关闭 Redis 连接"""
+        """Close Redis connection."""
         try:
             self.redis_client.close()
             print("[RedisLogPublisher] Redis connection closed")
@@ -90,16 +89,16 @@ class RedisLogPublisher:
             print(f"[RedisLogPublisher] Error closing Redis connection: {e}")
 
 
-# 全局单例实例
+# Global singleton instance
 _log_publisher = None
 
 
 def get_log_publisher() -> RedisLogPublisher:
     """
-    获取 Redis 日志发布器的单例实例
+    Get Redis log publisher singleton instance.
     
     Returns:
-        RedisLogPublisher: 日志发布器实例
+        RedisLogPublisher: Log publisher instance
     """
     global _log_publisher
     if _log_publisher is None:
@@ -109,22 +108,22 @@ def get_log_publisher() -> RedisLogPublisher:
 
 def publish_log(flow_id: str, cycle: int, log_entry: Dict[str, Any]) -> bool:
     """
-    便捷函数：发布日志到 Redis
+    Convenience function: Publish log to Redis.
     
     Args:
         flow_id: Flow ID
-        cycle: 执行周期
-        log_entry: 日志条目数据
+        cycle: Execution cycle
+        log_entry: Log entry data
         
     Returns:
-        bool: 是否发布成功
+        bool: Whether publish was successful
     """
     publisher = get_log_publisher()
     return publisher.publish_log(flow_id, cycle, log_entry)
 
 
 def close_log_publisher():
-    """关闭日志发布器"""
+    """Close log publisher."""
     global _log_publisher
     if _log_publisher is not None:
         _log_publisher.close()

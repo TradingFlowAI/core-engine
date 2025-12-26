@@ -1,8 +1,8 @@
-"""服务模块"""
+"""Services Module"""
 
 
 def setup_services(app):
-    """设置应用服务"""
+    """Setup application services."""
     from services.health_check import setup_health_check
 
     setup_health_check(app)

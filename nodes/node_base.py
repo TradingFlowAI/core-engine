@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import httpx
 
-from weather_depot.config import CONFIG
-from weather_depot.exceptions.tf_exception import (
+from infra.config import CONFIG
+from infra.exceptions.tf_exception import (
     InsufficientCreditsException,
     NodeStopExecutionException,
 )
-from weather_depot.mq.node_signal_consumer import NodeSignalConsumer
-from weather_depot.mq.node_signal_publisher import NodeSignalPublisher
+from infra.mq.node_signal_consumer import NodeSignalConsumer
+from infra.mq.node_signal_publisher import NodeSignalPublisher
 from common.edge import Edge
 from common.signal_types import Signal, SignalType
 from common.state_store import StateStoreFactory
@@ -238,7 +238,7 @@ class NodeBase(abc.ABC):
         """Initialize flow execution log service lazily"""
         if self._log_service is None:
             try:
-                from weather_depot.db.services.flow_execution_log_service import (
+                from infra.db.services.flow_execution_log_service import (
                     FlowExecutionLogService,
                 )
                 self._log_service = FlowExecutionLogService()

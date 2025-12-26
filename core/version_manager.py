@@ -10,16 +10,16 @@ from functools import cmp_to_key
 
 class VersionManager:
     """
-    版本管理器 - 遵循语义化版本规范（扩展支持预发布版本）
+    Version Manager - Follows semantic versioning (with prerelease support)
     
-    版本格式: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-    - MAJOR: 不兼容的 API 修改
-    - MINOR: 向下兼容的功能性新增
-    - PATCH: 向下兼容的问题修正
-    - PRERELEASE: 预发布标识（alpha, beta, rc, preview）
-    - BUILD: 构建元数据（可选）
+    Version format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+    - MAJOR: Incompatible API changes
+    - MINOR: Backward compatible new features
+    - PATCH: Backward compatible bug fixes
+    - PRERELEASE: Prerelease identifier (alpha, beta, rc, preview)
+    - BUILD: Build metadata (optional)
     
-    支持的预发布标签优先级（从低到高）:
+    Supported prerelease tag priority (lowest to highest):
     alpha < beta < rc < preview < (stable)
     
     Examples:
@@ -34,47 +34,47 @@ class VersionManager:
         "1.2.3"
     """
     
-    # 基础版本格式: X.Y.Z
+    # Basic version format: X.Y.Z
     VERSION_PATTERN = re.compile(r'^(\d+)\.(\d+)\.(\d+)$')
     
-    # 完整版本格式: X.Y.Z[-PRERELEASE][+BUILD]
+    # Full version format: X.Y.Z[-PRERELEASE][+BUILD]
     FULL_VERSION_PATTERN = re.compile(
         r'^(\d+)\.(\d+)\.(\d+)'
         r'(?:-((?:alpha|beta|rc|preview)(?:\.\d+)?))?' 
         r'(?:\+([0-9A-Za-z-.]+))?$'
     )
     
-    # 预发布标签优先级
+    # Prerelease tag priority
     PRERELEASE_PRIORITY = {
         'alpha': 1,
         'beta': 2,
         'rc': 3,
         'preview': 4,
-        # stable版本（无预发布标签）优先级最高
+        # Stable version (no prerelease tag) has highest priority
         None: 5
     }
     
     @staticmethod
     def parse_version(version_str: str) -> Tuple[int, int, int]:
         """
-        解析基础版本号字符串（仅支持 X.Y.Z 格式）
+        Parse basic version string (only X.Y.Z format).
         
         Args:
-            version_str: 版本字符串，如 "1.2.3"
+            version_str: Version string, e.g., "1.2.3"
             
         Returns:
-            (major, minor, patch) 元组
+            (major, minor, patch) tuple
             
         Raises:
-            ValueError: 如果版本格式不正确
+            ValueError: If version format is invalid
         """
-        # 先尝试完整格式解析，提取基础版本
+        # Try full format parsing first, extract basic version
         full_match = VersionManager.FULL_VERSION_PATTERN.match(version_str)
         if full_match:
             major, minor, patch = map(int, full_match.groups()[:3])
             return (major, minor, patch)
         
-        # 回退到基础格式
+        # Fallback to basic format
         match = VersionManager.VERSION_PATTERN.match(version_str)
         if not match:
             raise ValueError(f"Invalid version format: {version_str}. Expected format: X.Y.Z[-PRERELEASE][+BUILD]")
@@ -85,16 +85,16 @@ class VersionManager:
     @staticmethod
     def parse_version_with_prerelease(version_str: str) -> Tuple[int, int, int, Optional[str], Optional[str]]:
         """
-        解析完整版本号字符串（包含预发布标签和构建元数据）
+        Parse full version string (including prerelease tag and build metadata).
         
         Args:
-            version_str: 版本字符串，如 "1.2.3-beta.1+build.123"
+            version_str: Version string, e.g., "1.2.3-beta.1+build.123"
             
         Returns:
-            (major, minor, patch, prerelease, build) 元组
+            (major, minor, patch, prerelease, build) tuple
             
         Raises:
-            ValueError: 如果版本格式不正确
+            ValueError: If version format is invalid
             
         Examples:
             >>> parse_version_with_prerelease("1.0.0")
@@ -123,17 +123,17 @@ class VersionManager:
     @staticmethod
     def compare_versions(v1: str, v2: str) -> int:
         """
-        比较两个版本号（支持预发布版本）
+        Compare two version numbers (with prerelease support).
         
-        比较规则:
-        1. 先比较主版本号 (MAJOR.MINOR.PATCH)
-        2. 如果主版本号相同，比较预发布标签
-        3. 预发布版本 < 稳定版本
-        4. 预发布标签优先级: alpha < beta < rc < preview < stable
+        Comparison rules:
+        1. Compare main version first (MAJOR.MINOR.PATCH)
+        2. If main versions are equal, compare prerelease tags
+        3. Prerelease version < Stable version
+        4. Prerelease tag priority: alpha < beta < rc < preview < stable
         
         Args:
-            v1: 版本1 (支持预发布版本，如 "1.2.3-beta.1")
-            v2: 版本2
+            v1: Version 1 (supports prerelease, e.g., "1.2.3-beta.1")
+            v2: Version 2
             
         Returns:
             -1 if v1 < v2
@@ -149,18 +149,18 @@ class VersionManager:
             -1
         """
         try:
-            # 解析完整版本信息
+            # Parse full version info
             major1, minor1, patch1, pre1, _ = VersionManager.parse_version_with_prerelease(v1)
             major2, minor2, patch2, pre2, _ = VersionManager.parse_version_with_prerelease(v2)
             
-            # 比较主版本号
+            # Compare main version
             if (major1, minor1, patch1) < (major2, minor2, patch2):
                 return -1
             elif (major1, minor1, patch1) > (major2, minor2, patch2):
                 return 1
             
-            # 主版本号相同，比较预发布标签
-            # 获取预发布标签的基础类型（如 "beta.1" -> "beta"）
+            # Main version equal, compare prerelease tags
+            # Extract base type from prerelease tag (e.g., "beta.1" -> "beta")
             pre1_type = VersionManager._extract_prerelease_type(pre1)
             pre2_type = VersionManager._extract_prerelease_type(pre2)
             
@@ -172,7 +172,7 @@ class VersionManager:
             elif priority1 > priority2:
                 return 1
             
-            # 同类型预发布版本，比较序号（如 beta.1 vs beta.2）
+            # Same prerelease type, compare sequence number (e.g., beta.1 vs beta.2)
             if pre1 and pre2 and pre1_type == pre2_type:
                 num1 = VersionManager._extract_prerelease_number(pre1)
                 num2 = VersionManager._extract_prerelease_number(pre2)
@@ -189,7 +189,7 @@ class VersionManager:
     @staticmethod
     def _extract_prerelease_type(prerelease: Optional[str]) -> Optional[str]:
         """
-        提取预发布标签类型
+        Extract prerelease tag type.
         
         Examples:
             >>> _extract_prerelease_type("beta.1")
@@ -202,14 +202,14 @@ class VersionManager:
         if not prerelease:
             return None
         
-        # 提取标签类型（如 "beta.1" -> "beta"）
+        # Extract tag type (e.g., "beta.1" -> "beta")
         parts = prerelease.split('.')
         return parts[0] if parts else None
     
     @staticmethod
     def _extract_prerelease_number(prerelease: str) -> int:
         """
-        提取预发布版本序号
+        Extract prerelease version number.
         
         Examples:
             >>> _extract_prerelease_number("beta.1")
@@ -227,14 +227,14 @@ class VersionManager:
     @staticmethod
     def get_latest_version(versions: List[str], include_prerelease: bool = False) -> Optional[str]:
         """
-        从版本列表中获取最新版本
+        Get the latest version from a version list.
         
         Args:
-            versions: 版本列表
-            include_prerelease: 是否包含预发布版本（默认 False，只返回稳定版本）
+            versions: List of versions
+            include_prerelease: Whether to include prerelease versions (default False, returns stable only)
             
         Returns:
-            最新版本字符串，如果列表为空则返回 None
+            Latest version string, None if list is empty
             
         Examples:
             >>> versions = ["1.0.0", "1.2.3-beta.1", "1.2.3", "1.2.4-alpha.1"]
@@ -246,13 +246,13 @@ class VersionManager:
         if not versions:
             return None
         
-        # 过滤出有效版本
+        # Filter valid versions
         valid_versions = []
         for v in versions:
             try:
                 major, minor, patch, prerelease, _ = VersionManager.parse_version_with_prerelease(v)
                 
-                # 如果不包含预发布版本，过滤掉预发布版本
+                # If not including prerelease, filter them out
                 if not include_prerelease and prerelease is not None:
                     continue
                 
@@ -263,7 +263,7 @@ class VersionManager:
         if not valid_versions:
             return None
         
-        # 排序并返回最大版本
+        # Sort and return the largest version
         sorted_versions = sorted(
             valid_versions,
             key=cmp_to_key(VersionManager.compare_versions),
@@ -274,14 +274,14 @@ class VersionManager:
     @staticmethod
     def get_latest_prerelease_version(versions: List[str], prerelease_type: str = None) -> Optional[str]:
         """
-        从版本列表中获取最新的预发布版本
+        Get the latest prerelease version from a version list.
         
         Args:
-            versions: 版本列表
-            prerelease_type: 预发布类型过滤 (alpha, beta, rc, preview)，None 表示所有预发布版本
+            versions: List of versions
+            prerelease_type: Prerelease type filter (alpha, beta, rc, preview), None for all prerelease
             
         Returns:
-            最新预发布版本字符串，如果没有则返回 None
+            Latest prerelease version string, None if not found
             
         Examples:
             >>> versions = ["1.0.0", "1.2.3-beta.1", "1.2.3-beta.2", "1.2.4-alpha.1"]
@@ -293,17 +293,17 @@ class VersionManager:
         if not versions:
             return None
         
-        # 过滤出符合条件的预发布版本
+        # Filter matching prerelease versions
         filtered_versions = []
         for v in versions:
             try:
                 major, minor, patch, prerelease, _ = VersionManager.parse_version_with_prerelease(v)
                 
-                # 必须有预发布标签
+                # Must have prerelease tag
                 if prerelease is None:
                     continue
                 
-                # 如果指定了类型，进行过滤
+                # If type specified, filter by type
                 if prerelease_type:
                     pre_type = VersionManager._extract_prerelease_type(prerelease)
                     if pre_type != prerelease_type:
@@ -316,7 +316,7 @@ class VersionManager:
         if not filtered_versions:
             return None
         
-        # 排序并返回最大版本
+        # Sort and return the largest version
         sorted_versions = sorted(
             filtered_versions,
             key=cmp_to_key(VersionManager.compare_versions),
@@ -327,14 +327,14 @@ class VersionManager:
     @staticmethod
     def increment_version(version: str, level: str = 'patch') -> str:
         """
-        增加版本号
+        Increment version number.
         
         Args:
-            version: 当前版本
-            level: 增加级别 ('major', 'minor', 'patch')
+            version: Current version
+            level: Increment level ('major', 'minor', 'patch')
             
         Returns:
-            新版本号
+            New version number
         """
         major, minor, patch = VersionManager.parse_version(version)
         
@@ -351,32 +351,32 @@ class VersionManager:
     def is_compatible(required_version: str, available_version: str, 
                      compatibility: str = 'minor') -> bool:
         """
-        检查版本兼容性
+        Check version compatibility.
         
         Args:
-            required_version: 需要的版本
-            available_version: 可用的版本
-            compatibility: 兼容级别 ('major', 'minor', 'patch')
+            required_version: Required version
+            available_version: Available version
+            compatibility: Compatibility level ('major', 'minor', 'patch')
             
         Returns:
-            是否兼容
+            Whether compatible
         """
         req_major, req_minor, req_patch = VersionManager.parse_version(required_version)
         avail_major, avail_minor, avail_patch = VersionManager.parse_version(available_version)
         
         if compatibility == 'major':
-            # 主版本号必须相同
+            # Major version must match
             return avail_major == req_major and (
                 avail_minor > req_minor or 
                 (avail_minor == req_minor and avail_patch >= req_patch)
             )
         elif compatibility == 'minor':
-            # 主版本和次版本号必须相同
+            # Major and minor version must match
             return (avail_major == req_major and 
                    avail_minor == req_minor and 
                    avail_patch >= req_patch)
         elif compatibility == 'patch':
-            # 完全匹配
+            # Exact match
             return (avail_major == req_major and 
                    avail_minor == req_minor and 
                    avail_patch == req_patch)
@@ -386,23 +386,23 @@ class VersionManager:
     @staticmethod
     def resolve_version_spec(version_spec: str, available_versions: List[str]) -> Optional[str]:
         """
-        解析版本规范到具体版本号（支持 latest 关键字）
+        Resolve version spec to specific version number (supports 'latest' keyword).
         
         Supported patterns:
-            - "latest": 最新稳定版本
-            - "latest-alpha": 最新 alpha 版本
-            - "latest-beta": 最新 beta 版本
-            - "latest-rc": 最新 rc 版本
-            - "latest-preview": 最新 preview 版本
-            - "1.2.3": 精确版本（不解析，直接返回）
-            - "^1.2.3", "~1.2.3", etc.: 范围表达式（返回匹配的最新版本）
+            - "latest": Latest stable version
+            - "latest-alpha": Latest alpha version
+            - "latest-beta": Latest beta version
+            - "latest-rc": Latest rc version
+            - "latest-preview": Latest preview version
+            - "1.2.3": Exact version (no resolution, returns as-is)
+            - "^1.2.3", "~1.2.3", etc.: Range expression (returns latest matching version)
             
         Args:
-            version_spec: 版本规范字符串
-            available_versions: 可用版本列表
+            version_spec: Version spec string
+            available_versions: List of available versions
             
         Returns:
-            解析后的具体版本号，如果无法解析则返回 None
+            Resolved specific version, None if cannot resolve
             
         Examples:
             >>> versions = ["1.0.0", "1.2.3", "1.2.4-beta.1", "1.3.0-alpha.1"]
@@ -415,19 +415,19 @@ class VersionManager:
         """
         spec = version_spec.strip()
         
-        # 处理 "latest" 关键字
+        # Handle "latest" keyword
         if spec == "latest":
             return VersionManager.get_latest_version(available_versions, include_prerelease=False)
         
-        # 处理 "latest-{prerelease_type}" 关键字
+        # Handle "latest-{prerelease_type}" keyword
         if spec.startswith("latest-"):
-            prerelease_type = spec[7:]  # 去掉 "latest-" 前缀
+            prerelease_type = spec[7:]  # Remove "latest-" prefix
             if prerelease_type in ['alpha', 'beta', 'rc', 'preview']:
                 return VersionManager.get_latest_prerelease_version(available_versions, prerelease_type)
             else:
                 raise ValueError(f"Unknown prerelease type: {prerelease_type}")
         
-        # 如果是精确版本号，直接返回（如果存在）
+        # If exact version, return directly (if exists)
         try:
             VersionManager.parse_version_with_prerelease(spec)
             if spec in available_versions:
@@ -437,7 +437,7 @@ class VersionManager:
         except ValueError:
             pass
         
-        # 处理范围表达式（^, ~, >=, etc.）
+        # Handle range expressions (^, ~, >=, etc.)
         matched_versions = []
         for v in available_versions:
             try:
@@ -447,7 +447,7 @@ class VersionManager:
                 continue
         
         if matched_versions:
-            # 返回匹配范围内的最新版本
+            # Return latest version within range
             return VersionManager.get_latest_version(matched_versions, include_prerelease=True)
         
         return None
@@ -455,60 +455,60 @@ class VersionManager:
     @staticmethod
     def match_version_range(version: str, range_spec: str) -> bool:
         """
-        匹配版本范围 (支持 npm 风格的范围表达式，支持预发布版本)
+        Match version range (supports npm-style range expressions with prerelease).
         
         Supported patterns:
-            - "1.2.3": 精确匹配
-            - "1.2.3-beta.1": 精确匹配（包含预发布版本）
-            - "^1.2.3": 兼容 1.x.x (主版本相同)
-            - "~1.2.3": 兼容 1.2.x (主版本和次版本相同)
-            - ">=1.2.3": 大于等于
-            - "<=1.2.3": 小于等于
-            - ">1.2.3": 大于
-            - "<1.2.3": 小于
+            - "1.2.3": Exact match
+            - "1.2.3-beta.1": Exact match (with prerelease)
+            - "^1.2.3": Compatible with 1.x.x (same major version)
+            - "~1.2.3": Compatible with 1.2.x (same major and minor version)
+            - ">=1.2.3": Greater than or equal
+            - "<=1.2.3": Less than or equal
+            - ">1.2.3": Greater than
+            - "<1.2.3": Less than
             
         Args:
-            version: 要检查的版本（可以包含预发布标签）
-            range_spec: 范围表达式
+            version: Version to check (may contain prerelease tag)
+            range_spec: Range expression
             
         Returns:
-            是否在范围内
+            Whether in range
         """
         range_spec = range_spec.strip()
         
-        # 精确匹配（支持预发布版本）
+        # Exact match (supports prerelease)
         try:
             VersionManager.parse_version_with_prerelease(range_spec)
             return version == range_spec
         except ValueError:
             pass
         
-        # ^ 符号: 兼容主版本
+        # ^ symbol: Compatible with major version
         if range_spec.startswith('^'):
             target = range_spec[1:]
             return VersionManager.is_compatible(target, version, 'major')
         
-        # ~ 符号: 兼容次版本
+        # ~ symbol: Compatible with minor version
         if range_spec.startswith('~'):
             target = range_spec[1:]
             return VersionManager.is_compatible(target, version, 'minor')
         
-        # >= 符号
+        # >= symbol
         if range_spec.startswith('>='):
             target = range_spec[2:].strip()
             return VersionManager.compare_versions(version, target) >= 0
         
-        # <= 符号
+        # <= symbol
         if range_spec.startswith('<='):
             target = range_spec[2:].strip()
             return VersionManager.compare_versions(version, target) <= 0
         
-        # > 符号
+        # > symbol
         if range_spec.startswith('>'):
             target = range_spec[1:].strip()
             return VersionManager.compare_versions(version, target) > 0
         
-        # < 符号
+        # < symbol
         if range_spec.startswith('<'):
             target = range_spec[1:].strip()
             return VersionManager.compare_versions(version, target) < 0
@@ -518,13 +518,13 @@ class VersionManager:
     @staticmethod
     def validate_version(version: str) -> bool:
         """
-        验证版本号格式是否正确（支持预发布版本）
+        Validate version format (supports prerelease).
         
         Args:
-            version: 版本字符串（可以包含预发布标签和构建元数据）
+            version: Version string (may contain prerelease tag and build metadata)
             
         Returns:
-            是否有效
+            Whether valid
             
         Examples:
             >>> validate_version("1.2.3")
@@ -545,13 +545,13 @@ class VersionManager:
     @staticmethod
     def version_to_filename(version: str) -> str:
         """
-        将版本号转换为文件名格式
+        Convert version to filename format.
         
         Args:
-            version: 版本字符串（如 "1.2.3-beta.1"）
+            version: Version string (e.g., "1.2.3-beta.1")
             
         Returns:
-            文件名格式（如 "v1_2_3_beta1"）
+            Filename format (e.g., "v1_2_3_beta1")
             
         Examples:
             >>> version_to_filename("1.2.3")
@@ -564,12 +564,12 @@ class VersionManager:
         try:
             major, minor, patch, prerelease, _ = VersionManager.parse_version_with_prerelease(version)
             
-            # 基础版本部分
+            # Basic version part
             filename = f"v{major}_{minor}_{patch}"
             
-            # 添加预发布标签
+            # Add prerelease tag
             if prerelease:
-                # 移除点号，如 "beta.1" -> "beta1"
+                # Remove dots, e.g., "beta.1" -> "beta1"
                 pre_tag = prerelease.replace('.', '')
                 filename += f"_{pre_tag}"
             
@@ -580,13 +580,13 @@ class VersionManager:
     @staticmethod
     def filename_to_version(filename: str) -> str:
         """
-        将文件名格式转换为版本号
+        Convert filename format to version.
         
         Args:
-            filename: 文件名（如 "v1_2_3_beta1.py" 或 "v1_2_3"）
+            filename: Filename (e.g., "v1_2_3_beta1.py" or "v1_2_3")
             
         Returns:
-            版本字符串（如 "1.2.3-beta.1"）
+            Version string (e.g., "1.2.3-beta.1")
             
         Examples:
             >>> filename_to_version("v1_2_3.py")
@@ -596,24 +596,24 @@ class VersionManager:
             >>> filename_to_version("v2_0_0_rc2.py")
             "2.0.0-rc.2"
         """
-        # 移除 .py 后缀和 v 前缀
+        # Remove .py suffix and v prefix
         name = filename.replace('.py', '').replace('v', '', 1)
         
-        # 分割部分
+        # Split parts
         parts = name.split('_')
         
         if len(parts) < 3:
             raise ValueError(f"Invalid filename format: {filename}")
         
-        # 提取基础版本
+        # Extract basic version
         major, minor, patch = parts[0:3]
         version = f"{major}.{minor}.{patch}"
         
-        # 提取预发布标签
+        # Extract prerelease tag
         if len(parts) > 3:
             pre_tag = '_'.join(parts[3:])
             
-            # 识别预发布类型和序号
+            # Identify prerelease type and sequence number
             for tag_type in ['alpha', 'beta', 'rc', 'preview']:
                 if pre_tag.startswith(tag_type):
                     number_part = pre_tag[len(tag_type):]
