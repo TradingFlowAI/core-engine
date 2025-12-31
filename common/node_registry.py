@@ -76,9 +76,19 @@ class NodeRegistry:
         # If Redis is connected, also sync to Redis (asynchronously)
         if self.redis:
             # Since we can't use await directly in a synchronous method, wrap with asyncio.create_task
-            asyncio.create_task(
-                self._sync_node_type_to_redis(node_class_type, default_params)
-            )
+            # But only if there's a running event loop
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._sync_node_type_to_redis(node_class_type, default_params)
+                )
+            except RuntimeError:
+                # No running event loop, skip Redis sync
+                # This can happen during module initialization
+                logger.debug(
+                    "No running event loop, skipping Redis sync for node type %s",
+                    node_class_type
+                )
 
         logger.info(
             "Node type %s has been registered to local registry", node_class_type

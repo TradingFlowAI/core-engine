@@ -1,8 +1,8 @@
-import asyncio
 import json
+import time
 import uuid
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .signal_formats import SignalFormats
 
@@ -64,6 +64,8 @@ class Signal:
         payload: Dict[str, Any] = None,
         timestamp: float = None,
         validate: bool = False,
+        source_node: Optional[str] = None,
+        source_handle: Optional[str] = None,
     ):
         """
         Initialize a signal.
@@ -73,11 +75,20 @@ class Signal:
             payload: Data payload carried by signal
             timestamp: Signal timestamp, auto-generated if not provided
             validate: Whether to validate payload format
+            source_node: Source node ID that generated this signal
+            source_handle: Source handle name from which signal was sent
         """
         self.id = str(uuid.uuid4())
         self.type = signal_type
         self.payload = payload or {}
-        self.timestamp = timestamp or asyncio.get_event_loop().time()
+        self.timestamp = timestamp or time.time()
+        
+        # Source information - can be set during signal routing
+        self.source_node: Optional[str] = source_node
+        self.source_handle: Optional[str] = source_handle
+        
+        # Alias for backward compatibility
+        self.source_node_id: Optional[str] = source_node
 
         # If validation enabled, validate payload format
         if validate:
@@ -95,6 +106,8 @@ class Signal:
                 ),
                 "payload": self.payload,
                 "timestamp": self.timestamp,
+                "source_node": self.source_node,
+                "source_handle": self.source_handle,
             }
         )
 
@@ -106,11 +119,28 @@ class Signal:
             signal_type=SignalType(data["type"]),
             payload=data["payload"],
             timestamp=data["timestamp"],
+            source_node=data.get("source_node"),
+            source_handle=data.get("source_handle"),
         )
+    
+    def set_source(self, source_node: str, source_handle: str) -> None:
+        """
+        Set source information for the signal.
+        
+        This is typically called when routing signals between nodes.
+        
+        Args:
+            source_node: Source node ID
+            source_handle: Source handle name
+        """
+        self.source_node = source_node
+        self.source_handle = source_handle
+        self.source_node_id = source_node  # Keep alias in sync
 
     def __repr__(self):
         return (
             f"Signal(id={self.id}, type={self.type}, "
+            f"source={self.source_node}:{self.source_handle}, "
             f"payload={self.payload}, timestamp={self.timestamp})"
         )
 

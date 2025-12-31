@@ -49,6 +49,25 @@ class InputHandle:
 
 
 @dataclass
+class OutputHandle:
+    """Output handle definition"""
+
+    name: str
+    data_type: type
+    description: str = ""
+    example: Any = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary format"""
+        return {
+            "name": self.name,
+            "type": self.data_type.__name__,
+            "description": self.description,
+            "example": self.example,
+        }
+
+
+@dataclass
 class NodeMetadata:
     """Node metadata definition"""
 
@@ -172,9 +191,13 @@ class NodeBase(abc.ABC):
         # Input handles registry
         # NOTE: 描述静态的handle有哪些
         self._input_handles: Dict[str, InputHandle] = {}
+        
+        # Output handles registry
+        self._output_handles: Dict[str, OutputHandle] = {}
 
-        # Register input handles defined by subclass
+        # Register input and output handles defined by subclass
         self._register_input_handles()
+        self._register_output_handles()
 
         self.status = NodeStatus.PENDING
         self.error_message = None
@@ -1748,6 +1771,62 @@ class NodeBase(abc.ABC):
             List of handle names
         """
         return list(self._input_handles.keys())
+
+    # ============ Output Handle 相关方法 ============
+
+    def register_output_handle(
+        self,
+        name: str,
+        data_type: type,
+        description: str = "",
+        example: Any = None,
+    ) -> None:
+        """
+        Register an output handle
+
+        Args:
+            name: Handle name
+            data_type: Output data type
+            description: Description of the handle
+            example: Example value
+        """
+        self._output_handles[name] = OutputHandle(
+            name=name,
+            data_type=data_type,
+            description=description,
+            example=example,
+        )
+        self.logger.debug(
+            "Registered output handle: %s (%s)",
+            name,
+            data_type.__name__,
+        )
+
+    def _register_output_handles(self) -> None:
+        """
+        Register output handles. Should be overridden by subclasses.
+        This method is called during initialization.
+        """
+        # Default implementation does nothing
+        # Subclasses should override this method to register their output handles
+
+    def get_output_handles(self) -> Dict[str, "OutputHandle"]:
+        """
+        Get all registered output handles
+
+        Returns:
+            Dict mapping handle names to OutputHandle objects
+        """
+        return self._output_handles.copy()
+
+    def get_output_handle_names(self) -> List[str]:
+        """
+        Get list of all registered output handle names
+
+        Returns:
+            List of handle names
+        """
+        return list(self._output_handles.keys())
 
     # ============ 元数据相关方法 ============
 

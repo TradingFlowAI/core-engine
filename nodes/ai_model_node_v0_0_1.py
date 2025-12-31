@@ -554,7 +554,9 @@ class AIModelNode(NodeBase):
         try:
             # 添加信号类型和来源信息
             text = f"Signal Type: {signal.type.value}\n"
-            text += f"Source Node: {signal.source_node_id}\n"
+            # 兼容处理：优先使用 source_node，回退到 source_node_id
+            source_node = getattr(signal, 'source_node', None) or getattr(signal, 'source_node_id', 'unknown')
+            text += f"Source Node: {source_node}\n"
 
             # 处理payload
             if signal.payload:
@@ -666,7 +668,8 @@ class AIModelNode(NodeBase):
                         # 将信号 payload 转为文本
                         signal_text = await self._signal_to_text(signal)
                         context = context.replace(placeholder, signal_text)
-                        await self.persist_log(f"Replaced {placeholder} with signal data from {signal.source_node_id}", "INFO")
+                        source_node = getattr(signal, 'source_node', None) or getattr(signal, 'source_node_id', 'unknown')
+                        await self.persist_log(f"Replaced {placeholder} with signal data from {source_node}", "INFO")
                     else:
                         # 否则将信号内容作为额外上下文添加
                         signal_text = await self._signal_to_text(signal)
