@@ -24,6 +24,7 @@ SYMBOL_HANDLE = "symbol"
         "source": "coingecko",
         "data_type": "kline",
         "symbol": "bitcoin",
+        "days": "30",
     },
 )
 class PriceNode(NodeBase):
@@ -34,9 +35,15 @@ class PriceNode(NodeBase):
     - source: Data source, currently supports 'coingecko'
     - data_type: Type of data to fetch - 'kline' for OHLC data or 'current_price' for current price only
     - symbol: Cryptocurrency symbol/ID (e.g., 'bitcoin', 'ethereum', 'aptos')
+    - days: Number of days for OHLC data (1, 7, 14, 30, 90, 180, 365, max)
 
     Output Signals:
     - data: Signal containing price data (current price or OHLC kline data)
+
+    CoinGecko OHLC Data Granularity:
+    - 1-2 days: 30 minutes
+    - 3-30 days: 4 hours
+    - 31 days and beyond: 4 days
 
     Credits Cost:
     - Current Price: 2 credits
@@ -53,6 +60,7 @@ class PriceNode(NodeBase):
         source: str = "coingecko",
         data_type: str = "kline",
         symbol: str = "bitcoin",
+        days: str = "30",
         input_edges: List[Edge] = None,
         output_edges: List[Edge] = None,
         state_store=None,
@@ -69,6 +77,7 @@ class PriceNode(NodeBase):
             source: Data source (currently only 'coingecko' is supported)
             data_type: Type of data - 'kline' for OHLC data or 'current_price' for current price
             symbol: Cryptocurrency symbol/ID (e.g., 'bitcoin', 'ethereum')
+            days: Number of days for OHLC data (1, 7, 14, 30, 90, 180, 365, max)
             **kwargs: Additional parameters passed to base class
         """
         super().__init__(
@@ -87,6 +96,7 @@ class PriceNode(NodeBase):
         self.source = source.lower()
         self.data_type = data_type.lower()
         self.symbol = symbol.lower()  # CoinGecko uses lowercase IDs
+        self.days = days  # Keep as string to support 'max'
 
         # Monitor service URL
         self.monitor_url = CONFIG.get("MONITOR_URL", "http://localhost:3000")
@@ -97,6 +107,11 @@ class PriceNode(NodeBase):
 
         if self.data_type not in ["kline", "current_price"]:
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be 'kline' or 'current_price'.")
+
+        # Validate days
+        valid_days = ["1", "7", "14", "30", "90", "180", "365", "max"]
+        if self.days not in valid_days:
+            self.days = "30"  # Default to 30 days if invalid
 
     async def fetch_current_price(self) -> Optional[Dict]:
         """
@@ -147,25 +162,25 @@ class PriceNode(NodeBase):
             traceback.print_exc()
             return None
 
-    async def fetch_ohlc_data(self, days: int = 30) -> Optional[Dict]:
+    async def fetch_ohlc_data(self) -> Optional[Dict]:
         """
         Fetch OHLC (kline) data from monitor API
 
-        Args:
-            days: Number of days of historical data (default: 30)
+        Uses self.days parameter for data range.
+        Supported values: 1, 7, 14, 30, 90, 180, 365, max
 
         Returns:
             Dict: OHLC data, returns None if error occurs
         """
         try:
-            url = f"{self.monitor_url}/api/price/ohlc/{self.symbol}"
+            url = f"{self.monitor_url}/api/v1/price/ohlc/{self.symbol}"
             params = {
                 "vs_currency": "usd",
-                "days": days
+                "days": self.days
             }
 
             await self.persist_log(
-                f"Fetching OHLC data for {self.symbol} (last {days} days) from {url}",
+                f"Fetching OHLC data for {self.symbol} (days={self.days}) from {url}",
                 log_level="DEBUG"
             )
 
@@ -224,7 +239,7 @@ class PriceNode(NodeBase):
         """
         try:
             await self.persist_log(
-                f"Executing PriceNode: source={self.source}, data_type={self.data_type}, symbol={self.symbol}"
+                f"Executing PriceNode: source={self.source}, data_type={self.data_type}, symbol={self.symbol}, days={self.days}"
             )
 
             await self.set_status(NodeStatus.RUNNING)
@@ -241,6 +256,7 @@ class PriceNode(NodeBase):
                     "source": self.source,
                     "data_type": self.data_type,
                     "symbol": self.symbol,
+                    "days": self.days,
                     "data": data
                 }
 
@@ -309,6 +325,13 @@ class PriceNode(NodeBase):
             example="bitcoin",
         )
 
+        self.register_input_handle(
+            name="days",
+            data_type=str,
+            description="Number of days for OHLC data (1, 7, 14, 30, 90, 180, 365, max). Granularity: 1-2d=30min, 3-30d=4h, 31d+=4d",
+            example="30",
+        )
+
     def _register_output_handles(self) -> None:
         """Register output handles"""
         # Single unified data output containing price data
@@ -320,6 +343,7 @@ class PriceNode(NodeBase):
                 "source": "coingecko",
                 "data_type": "kline",
                 "symbol": "bitcoin",
+                "days": "30",
                 "data": {
                     "coin_id": "bitcoin",
                     "vs_currency": "usd",

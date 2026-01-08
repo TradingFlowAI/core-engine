@@ -18,12 +18,21 @@ class Edge:
 
     @staticmethod
     def from_dict(data: dict) -> "Edge":
-        """Create Edge object from dictionary."""
+        """Create Edge object from dictionary.
+        
+        Supports both camelCase (from frontend) and snake_case formats:
+        - sourceHandle / source_handle
+        - targetHandle / target_handle
+        """
+        # 支持 camelCase (sourceHandle) 和 snake_case (source_handle)
+        source_handle = data.get("source_handle") or data.get("sourceHandle") or ""
+        target_handle = data.get("target_handle") or data.get("targetHandle") or ""
+        
         return Edge(
             source_node=data["source"],
-            source_node_handle=data["source_handle"],
+            source_node_handle=source_handle,
             target_node=data["target"],
-            target_node_handle=data["target_handle"],
+            target_node_handle=target_handle,
         )
 
     def to_dict(self) -> dict:

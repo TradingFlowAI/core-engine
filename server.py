@@ -9,11 +9,14 @@ from sanic import Sanic
 from infra.config import get_station_config
 from infra.logging_config import setup_logging  # noqa: F401, E402
 from infra.mq.pool_manager import pool_manager
-from api import flow_bp, health_bp, node_bp
+from api import flow_bp, health_bp, node_bp, pause_bp, partial_run_bp
 from common.node_registry import NodeRegistry
 from common.node_task_manager import NodeTaskManager
 from services import setup_services  # noqa: F401, E402
 from publishers.activity_publisher import init_activity_publisher, get_activity_publisher
+
+# Import nodes package to trigger @register_node decorators
+import nodes  # noqa: F401
 
 pool_manager.register_shutdown_handler()
 
@@ -44,6 +47,8 @@ app = Sanic("WorkerService")
 app.blueprint(health_bp)
 app.blueprint(node_bp)
 app.blueprint(flow_bp)
+app.blueprint(pause_bp)
+app.blueprint(partial_run_bp)
 
 
 def init_app():
@@ -98,10 +103,54 @@ async def server_ready(app, loop):
     logger.info(f"Worker ID: {WORKER_ID}")
     logger.info("Server is running and accepting requests...")
 
+    # 3. Initialize and restart Constant Nodes
+    # 当新的 Station 镜像部署后，需要重启所有 Constant Nodes
+    try:
+        from common.constant_node_manager import ConstantNodeManager
+
+        constant_manager = ConstantNodeManager.get_instance()
+        if await constant_manager.initialize():
+            app.ctx.constant_node_manager = constant_manager
+
+            # 获取需要重启的 Constant Nodes
+            all_nodes = await constant_manager.get_all_constant_nodes()
+            if all_nodes:
+                logger.info(f"Found {len(all_nodes)} Constant Nodes to restart after deployment")
+
+                # 重启每个 Constant Node
+                for node_info in all_nodes:
+                    flow_id = node_info.get("flow_id")
+                    node_id = node_info.get("node_id")
+                    if flow_id and node_id:
+                        try:
+                            await constant_manager.restart_constant_node(flow_id, node_id)
+                            logger.info(f"Restarted Constant Node: {flow_id}/{node_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to restart Constant Node {flow_id}/{node_id}: {e}")
+            else:
+                logger.info("No Constant Nodes to restart")
+
+            logger.info("✓ Constant Node Manager initialized")
+        else:
+            logger.warning("Failed to initialize Constant Node Manager")
+    except Exception as e:
+        logger.warning(f"Error initializing Constant Node Manager: {e}")
+
 
 @app.listener("after_server_stop")
 async def cleanup_node_registry(app, loop):
-    """Close node registry after server stops"""
+    """Close node registry and constant node manager after server stops"""
+    # 1. Stop Constant Nodes
+    if hasattr(app.ctx, "constant_node_manager"):
+        try:
+            constant_manager = app.ctx.constant_node_manager
+            await constant_manager.stop_all_local_nodes()
+            await constant_manager.close()
+            logger.info("Constant Node Manager has been closed")
+        except Exception as e:
+            logger.error("Error closing Constant Node Manager: %s", str(e))
+
+    # 2. Close Node Registry
     if hasattr(app.ctx, "node_registry"):
         registry = app.ctx.node_registry
 

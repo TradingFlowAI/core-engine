@@ -19,6 +19,31 @@ from publishers.activity_publisher import publish_activity
 logger = logging.getLogger(__name__)
 
 
+# 🔥 节点冲突异常：当节点已在运行时抛出
+class NodeConflictError(Exception):
+    """当节点已在运行时抛出的异常"""
+    def __init__(
+        self,
+        node_id: str,
+        message: str = "Node is already running",
+        elapsed_seconds: Optional[int] = None,
+        can_force: bool = True,
+    ):
+        self.node_id = node_id
+        self.message = message
+        self.elapsed_seconds = elapsed_seconds
+        self.can_force = can_force
+        super().__init__(message)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "error": self.message,
+            "node_id": self.node_id,
+            "elapsed_seconds": self.elapsed_seconds,
+            "can_force": self.can_force,
+        }
+
+
 class FlowScheduler:
     """
     Flow Scheduler: Responsible for managing periodic flow execution and status tracking
@@ -553,6 +578,182 @@ class FlowScheduler:
         logger.info("Flow %s scheduling has been stopped", flow_id)
         return {"status": "stopped", "flow_id": flow_id, "terminated_nodes": terminated_count if last_cycle >= 0 else 0}
 
+    async def execute_partial(
+        self,
+        flow_id: str,
+        trigger_node_id: str,
+        mode: str,
+        signal_config: Dict = None,
+        options: Dict = None,
+        nodes: List[Dict] = None,
+        edges: List[Dict] = None,
+    ) -> Dict:
+        """
+        执行局部 Run
+
+        Args:
+            flow_id: Flow ID
+            trigger_node_id: 触发节点 ID
+            mode: 执行模式 ("single", "upstream", "downstream", "component")
+            signal_config: Signal 配置
+                {
+                    "use_previous": bool,
+                    "custom_signals": dict
+                }
+            options: 执行选项
+                {
+                    "skip_cache": bool,
+                    "debug_mode": bool
+                }
+            nodes: 可选，前端传递的节点列表（覆盖 Redis 数据）
+            edges: 可选，前端传递的边列表（覆盖 Redis 数据）
+
+        Returns:
+            执行结果
+        """
+        from flow.graph_utils import build_graph_from_flow_structure, get_nodes_to_execute
+
+        signal_config = signal_config or {}
+        options = options or {}
+
+        # 1. 获取 Flow 结构（优先使用前端传递的数据）
+        flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+        if not flow_data:
+            raise ValueError(f"Flow {flow_id} does not exist")
+
+        structure_str = flow_data.get("structure", "{}")
+        flow_structure = json.loads(structure_str)
+        
+        # 如果前端传递了 nodes/edges，使用前端数据覆盖
+        if nodes is not None:
+            flow_structure["nodes"] = nodes
+            # 构建 node_map
+            flow_structure["node_map"] = {n.get("id"): n for n in nodes}
+            logger.info(f"[execute_partial] Using {len(nodes)} nodes from request")
+        if edges is not None:
+            flow_structure["edges"] = edges
+            logger.info(f"[execute_partial] Using {len(edges)} edges from request")
+
+        # 2. 构建图并计算执行节点
+        graph = build_graph_from_flow_structure(flow_structure)
+        nodes_to_execute = get_nodes_to_execute(graph, trigger_node_id, mode)
+
+        if not nodes_to_execute:
+            raise ValueError(f"No nodes to execute for trigger_node_id={trigger_node_id}, mode={mode}")
+
+        # 3. 生成执行 ID（不使用全局 Cycle）
+        execution_id = f"partial_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{trigger_node_id[:8]}"
+
+        # 4. 记录执行状态到 Redis
+        execution_data = {
+            "execution_id": execution_id,
+            "flow_id": flow_id,
+            "trigger_node_id": trigger_node_id,
+            "mode": mode,
+            "nodes_to_execute": nodes_to_execute,
+            "status": "running",
+            "execution_type": "partial",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "signal_config": signal_config,
+            "options": options,
+            "nodes_status": {node_id: "pending" for node_id in nodes_to_execute},
+        }
+
+        status_key = f"partial_run:{flow_id}:{execution_id}"
+        await self.redis.set(status_key, json.dumps(execution_data), ex=86400)  # 24小时过期
+
+        # 5. 记录日志
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=-1,  # 局部 Run 不计入 Cycle
+            message=f"Starting partial run: mode={mode}, trigger={trigger_node_id}, nodes={len(nodes_to_execute)}",
+            log_level="INFO",
+            log_source="scheduler",
+        )
+
+        # 6. 按拓扑顺序执行节点
+        node_map = flow_structure.get("node_map", {})
+        edges = flow_structure.get("edges", [])
+
+        # 异步执行节点
+        import asyncio
+
+        async def execute_node_in_partial_run(node_id: str):
+            """执行单个节点"""
+            try:
+                node_config = node_map.get(node_id, {})
+                node_type = node_config.get("type", "unknown")
+
+                # 获取该节点的边
+                input_edges = [e for e in edges if e.get("target") == node_id]
+                output_edges = [e for e in edges if e.get("source") == node_id]
+
+                # 处理 Signal
+                if signal_config.get("use_previous"):
+                    # TODO: 从上次运行获取 Signal
+                    pass
+                elif signal_config.get("custom_signals"):
+                    # 使用自定义 Signal
+                    pass
+
+                # 更新节点状态
+                execution_data["nodes_status"][node_id] = "running"
+                await self.redis.set(status_key, json.dumps(execution_data), ex=86400)
+
+                # 执行节点
+                # 🔥 传递 force 参数（用于强制重新执行）
+                force_execute = options.get("force", False)
+                result = await self._execute_node(
+                    flow_id=flow_id,
+                    component_id="0",  # 局部 Run 使用固定 component_id
+                    cycle=-1,  # 局部 Run 不计入 Cycle
+                    node_id=node_id,
+                    node_type=node_type,
+                    input_edges=input_edges,
+                    output_edges=output_edges,
+                    node_config=node_config,
+                    force=force_execute,
+                )
+
+                # 更新节点状态
+                execution_data["nodes_status"][node_id] = result.get("status", "completed")
+                await self.redis.set(status_key, json.dumps(execution_data), ex=86400)
+
+                return result
+
+            except NodeConflictError:
+                # 🔥 节点冲突异常需要传递到上层，让 API 返回 409
+                raise
+            except Exception as e:
+                logger.exception(f"Error executing node {node_id} in partial run: {e}")
+                execution_data["nodes_status"][node_id] = "failed"
+                await self.redis.set(status_key, json.dumps(execution_data), ex=86400)
+                return {"status": "failed", "error": str(e)}
+
+        # 顺序执行节点（按拓扑顺序）
+        for node_id in nodes_to_execute:
+            await execute_node_in_partial_run(node_id)
+
+        # 7. 更新最终状态
+        all_statuses = list(execution_data["nodes_status"].values())
+        if "failed" in all_statuses:
+            execution_data["status"] = "failed"
+        else:
+            execution_data["status"] = "completed"
+
+        execution_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+        await self.redis.set(status_key, json.dumps(execution_data), ex=86400)
+
+        await self.persist_log(
+            flow_id=flow_id,
+            cycle=-1,
+            message=f"Partial run completed: execution_id={execution_id}, status={execution_data['status']}",
+            log_level="INFO",
+            log_source="scheduler",
+        )
+
+        return execution_data
+
     async def get_flow_status(self, flow_id: str) -> Dict:
         """Get flow status information"""
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
@@ -906,6 +1107,39 @@ class FlowScheduler:
             f"flow:{flow_id}:cycle:{cycle}:component:{component_id}:stop"
         )
         return bool(stop_flag)
+
+    async def _check_pause_state(
+        self, flow_id: str, component_id: str, node_id: str
+    ) -> bool:
+        """
+        Check if execution is paused at any level (flow, component, or node)
+
+        Args:
+            flow_id: Flow ID
+            component_id: Component ID
+            node_id: Node ID
+
+        Returns:
+            True if execution is paused at any level
+        """
+        from flow.pause_manager import get_pause_manager
+
+        manager = get_pause_manager()
+        await manager.initialize()
+
+        # Check flow level pause
+        if await manager.is_flow_paused(flow_id):
+            return True
+
+        # Check component level pause
+        if await manager.is_component_paused(flow_id, component_id):
+            return True
+
+        # Check node level pause
+        if await manager.is_node_paused(flow_id, node_id):
+            return True
+
+        return False
 
     async def get_flow_execution_logs(
         self,
@@ -1828,6 +2062,7 @@ class FlowScheduler:
         input_edges: List[Dict],
         output_edges: List[Dict],
         node_config: Dict,
+        force: bool = False,  # 🔥 强制执行参数
     ) -> Dict:
         """
         Execute a single node
@@ -1851,6 +2086,18 @@ class FlowScheduler:
                 node_id=node_id
             )
             return {"status": "skipped", "reason": "component_stopped"}
+
+        # Check if flow, component, or node is paused
+        if await self._check_pause_state(flow_id, component_id, node_id):
+            await self.persist_log(
+                flow_id=flow_id,
+                cycle=cycle,
+                message=f"Execution paused for node {node_id}, waiting for resume",
+                log_level="INFO",
+                log_source="scheduler",
+                node_id=node_id
+            )
+            return {"status": "paused", "reason": "execution_paused"}
 
         # Use NodeRegistry to find workers supporting this node type
         node_registry = NodeRegistry.get_instance()
@@ -1912,6 +2159,7 @@ class FlowScheduler:
             "input_edges": input_edges,
             "output_edges": output_edges,
             "config": node_config,
+            "force": force,  # 🔥 强制执行参数
         }
 
         try:
@@ -1955,6 +2203,18 @@ class FlowScheduler:
                         log_source="scheduler",
                         node_id=node_id
                     )
+                    # 🔥 特殊处理 409 冲突错误：传递给上层处理
+                    if e.response.status_code == 409:
+                        try:
+                            error_data = e.response.json()
+                            raise NodeConflictError(
+                                node_id=node_id,
+                                message=error_data.get("error", "Node is already running"),
+                                elapsed_seconds=error_data.get("elapsed_seconds"),
+                                can_force=error_data.get("can_force", True),
+                            )
+                        except json.JSONDecodeError:
+                            pass
                     raise
                 result = response.json()
 
@@ -1972,6 +2232,9 @@ class FlowScheduler:
 
                 return result
 
+        except NodeConflictError:
+            # 🔥 节点冲突异常需要传递到上层，让 API 返回 409
+            raise
         except Exception as e:
             await self.persist_log(
                 flow_id=flow_id,

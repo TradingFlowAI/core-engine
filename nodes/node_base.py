@@ -105,6 +105,7 @@ class NodeStatus(Enum):
     FAILED = "failed"  # Execution failed
     SKIPPED = "skipped"  # Execution skipped
     TERMINATED = "terminated"  # Execution terminated
+    AWAITING_INPUT = "awaiting_input"  # Waiting for user interaction (Interactive Node)
 
 
 class NodeBase(abc.ABC):
@@ -201,6 +202,9 @@ class NodeBase(abc.ABC):
 
         self.status = NodeStatus.PENDING
         self.error_message = None
+        
+        # 存储最后发送的输出数据，用于在节点完成时通过 WebSocket 推送给前端
+        self._last_output_data: Dict[str, Any] = {}
 
         # Message queue configuration
         if self._input_edges:
@@ -1101,6 +1105,13 @@ class NodeBase(abc.ABC):
                 timestamp=None,
             )
             await self.node_signal_publisher.send_signal(source_handle, signal)
+            
+            # 存储输出数据，用于节点完成时通过 WebSocket 推送给前端
+            self._last_output_data[source_handle] = {
+                'signal_type': signal_type.value if hasattr(signal_type, 'value') else str(signal_type),
+                'payload': payload or {},
+                'timestamp': signal.timestamp,
+            }
 
             # Persist signal data to database for comprehensive status API
             signal_data = {
@@ -1385,19 +1396,176 @@ class NodeBase(abc.ABC):
         try:
             from core.redis_status_publisher import publish_node_status
 
+            # 构建 metadata，包含节点类型
+            metadata = {
+                "node_type": self.node_type,
+            }
+            
+            # 如果节点完成，包含输出数据供前端使用
+            if status == NodeStatus.COMPLETED and self._last_output_data:
+                # 提取主要输出数据（通常是 'data' handle）
+                if 'data' in self._last_output_data:
+                    last_output = self._last_output_data['data'].get('payload', {})
+                    metadata["lastOutput"] = last_output
+                    # 🔍 调试：打印 lastOutput 的大小
+                    self.logger.info(
+                        "Node %s completed with lastOutput (keys: %s, size: ~%d chars)",
+                        self.node_id,
+                        list(last_output.keys()) if isinstance(last_output, dict) else type(last_output).__name__,
+                        len(str(last_output)[:1000])  # 避免打印过大
+                    )
+                elif self._last_output_data:
+                    # 如果没有 'data' handle，使用第一个输出
+                    first_output = list(self._last_output_data.values())[0]
+                    metadata["lastOutput"] = first_output.get('payload', {})
+                
+                self.logger.info(
+                    "Node %s completed with output data (keys: %s)",
+                    self.node_id,
+                    list(self._last_output_data.keys())
+                )
+
+            # 🔥 根据 cycle 值推断执行类型：cycle < 0 表示 partial run
+            execution_type = "partial" if self.cycle < 0 else "global"
+            
             publish_node_status(
                 flow_id=self.flow_id,
                 cycle=self.cycle,
                 node_id=self.node_id,
                 status=status.value,
                 error_message=error_message,
-                metadata={
-                    "node_type": self.node_type,
-                }
+                metadata=metadata,
+                execution_type=execution_type,
             )
         except Exception as e:
             # 不让推送失败影响节点执行
             self.logger.debug("Failed to publish status to Redis: %s", str(e))
+
+    # ==================== 暂停/恢复相关方法 ====================
+
+    async def pause(
+        self,
+        pause_type: str = "manual",
+        resume_context: dict = None,
+    ) -> dict:
+        """
+        暂停当前节点执行
+
+        Args:
+            pause_type: 暂停类型 ("manual", "error", "breakpoint")
+            resume_context: 恢复时需要的上下文数据
+
+        Returns:
+            暂停状态数据
+        """
+        from flow.pause_manager import PauseManager, PauseType
+
+        try:
+            pause_type_enum = PauseType(pause_type)
+        except ValueError:
+            pause_type_enum = PauseType.MANUAL
+
+        manager = PauseManager.get_instance()
+        await manager.initialize()
+
+        pause_data = await manager.pause_node(
+            flow_id=self.flow_id,
+            node_id=self.node_id,
+            cycle=self.cycle,
+            pause_type=pause_type_enum,
+            paused_by="node",
+            resume_context=resume_context or {},
+        )
+
+        self.logger.info(
+            "Node %s paused: type=%s", self.node_id, pause_type
+        )
+        return pause_data
+
+    async def await_input(
+        self,
+        prompt: str,
+        timeout_seconds: int = 300,
+        input_options: dict = None,
+        resume_context: dict = None,
+    ) -> dict:
+        """
+        暂停节点等待用户输入（持久化方式）
+
+        与旧的 wait_for_response 不同，这个方法：
+        1. 将暂停状态持久化到 Redis
+        2. 不在进程内阻塞等待
+        3. 支持服务重启后恢复
+
+        Args:
+            prompt: 提示信息
+            timeout_seconds: 超时时间
+            input_options: 输入选项（如 yes/no 标签）
+            resume_context: 恢复时需要的额外上下文
+
+        Returns:
+            暂停状态数据
+        """
+        from flow.pause_manager import PauseManager, PauseType
+
+        manager = PauseManager.get_instance()
+        await manager.initialize()
+
+        input_request = {
+            "prompt": prompt,
+            "timeout_seconds": timeout_seconds,
+            "options": input_options or {},
+        }
+
+        pause_data = await manager.pause_node(
+            flow_id=self.flow_id,
+            node_id=self.node_id,
+            cycle=self.cycle,
+            pause_type=PauseType.AWAITING_INPUT,
+            paused_by="node",
+            resume_context=resume_context or {},
+            input_request=input_request,
+        )
+
+        # 设置节点状态为等待输入
+        await self.set_status(NodeStatus.AWAITING_INPUT)
+
+        self.logger.info(
+            "Node %s awaiting input: prompt='%s', timeout=%ds",
+            self.node_id, prompt[:50], timeout_seconds
+        )
+        return pause_data
+
+    async def check_paused(self) -> bool:
+        """
+        检查当前节点是否处于暂停状态
+
+        Returns:
+            是否暂停
+        """
+        from flow.pause_manager import PauseManager
+
+        manager = PauseManager.get_instance()
+        await manager.initialize()
+
+        return await manager.is_node_paused(self.flow_id, self.node_id)
+
+    async def get_resume_context(self) -> dict:
+        """
+        获取恢复上下文（如果节点已暂停）
+
+        Returns:
+            恢复上下文数据，如果没有暂停则返回 None
+        """
+        from flow.pause_manager import PauseManager
+
+        manager = PauseManager.get_instance()
+        await manager.initialize()
+
+        pause_state = await manager.get_node_pause_state(self.flow_id, self.node_id)
+        if pause_state:
+            return pause_state.get("resume_context")
+        return None
 
     async def start(self) -> bool:
         """
