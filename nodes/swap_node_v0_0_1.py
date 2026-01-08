@@ -1001,6 +1001,10 @@ class SwapNode(NodeBase):
                     fee_tier=fee_tier,  # Use dynamically searched fee_tier
                     sqrt_price_limit=sqrt_price_limit,
                     amount_out_min=estimated_min_output,
+                    # Flow 关联参数（用于收益追踪）
+                    flow_id=self.flow_id,
+                    node_id=self.node_id,
+                    cycle=self.cycle,
                 )
 
             elif self.chain == "flow_evm":
