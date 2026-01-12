@@ -136,16 +136,17 @@ async def execute_node(request: Request):
                 
                 if not is_zombie:
                     # 🔥 返回更多信息，帮助前端判断
-            return sanic_json(
-                {
-                    "error": "Node is already running",
-                    "status": existing_node_task.get("status"),
+                    return sanic_json(
+                        {
+                            "error": "Node is already running",
+                            "status": existing_node_task.get("status"),
                             "start_time": start_time_str,
                             "elapsed_seconds": int(elapsed_seconds),
                             "can_force": True,  # 提示前端可以使用 force 参数
-                },
+                        },
                         status=409,  # 使用 409 Conflict 更语义化
-            )
+                    )
+                
                 # 🔥 如果是僵尸任务，清理旧状态，继续执行
                 logger.info("Cleaning up zombie task %s before re-execution", node_task_id)
                 await node_manager.remove_task(node_task_id)
