@@ -618,21 +618,37 @@ class FlowScheduler:
 
         # 1. 获取 Flow 结构（优先使用前端传递的数据）
         flow_data = await self.redis.hgetall(f"flow:{flow_id}")
-        if not flow_data:
-            raise ValueError(f"Flow {flow_id} does not exist")
-
-        structure_str = flow_data.get("structure", "{}")
-        flow_structure = json.loads(structure_str)
         
-        # 如果前端传递了 nodes/edges，使用前端数据覆盖
-        if nodes is not None:
-            flow_structure["nodes"] = nodes
-            # 构建 node_map
-            flow_structure["node_map"] = {n.get("id"): n for n in nodes}
-            logger.info(f"[execute_partial] Using {len(nodes)} nodes from request")
-        if edges is not None:
-            flow_structure["edges"] = edges
-            logger.info(f"[execute_partial] Using {len(edges)} edges from request")
+        # 🔥 如果前端传递了 nodes 和 edges，可以不依赖 Redis 中的 flow 数据
+        if nodes is not None and edges is not None:
+            # 直接使用前端传递的数据构建 flow_structure
+            flow_structure = {
+                "nodes": nodes,
+                "edges": edges,
+                "node_map": {n.get("id"): n for n in nodes},
+            }
+            logger.info(f"[execute_partial] Using frontend data: {len(nodes)} nodes, {len(edges)} edges")
+            
+            # 如果 flow 不存在于 Redis，临时注册以便后续操作
+            if not flow_data:
+                logger.info(f"[execute_partial] Flow {flow_id} not in Redis, using frontend data directly")
+                # 不需要完整注册，只需确保有基本结构即可执行
+        elif not flow_data:
+            # 如果既没有前端数据，也没有 Redis 数据，报错
+            raise ValueError(f"Flow {flow_id} does not exist and no nodes/edges provided")
+        else:
+            # 使用 Redis 中的数据
+            structure_str = flow_data.get("structure", "{}")
+            flow_structure = json.loads(structure_str)
+            
+            # 如果前端只传递了部分数据，进行覆盖
+            if nodes is not None:
+                flow_structure["nodes"] = nodes
+                flow_structure["node_map"] = {n.get("id"): n for n in nodes}
+                logger.info(f"[execute_partial] Overriding with {len(nodes)} nodes from request")
+            if edges is not None:
+                flow_structure["edges"] = edges
+                logger.info(f"[execute_partial] Overriding with {len(edges)} edges from request")
 
         # 2. 构建图并计算执行节点
         graph = build_graph_from_flow_structure(flow_structure)

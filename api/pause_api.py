@@ -399,3 +399,160 @@ async def clear_pause_states(request: Request, flow_id: str):
     except Exception as e:
         logger.exception(f"Error clearing pause states for flow {flow_id}: {e}")
         return sanic_json({"error": str(e)}, status=500)
+
+
+# ==================== 🔥 清理和统计 API ====================
+
+
+@pause_bp.get("/pause-stats")
+async def get_pause_stats(request: Request):
+    """获取全局暂停状态统计"""
+    try:
+        manager = get_pause_manager()
+        await manager.initialize()
+
+        stats = await manager.get_pause_stats()
+
+        return sanic_json(stats)
+
+    except Exception as e:
+        logger.exception(f"Error getting pause stats: {e}")
+        return sanic_json({"error": str(e)}, status=500)
+
+
+@pause_bp.post("/cleanup/pause-states")
+async def cleanup_pause_states(request: Request):
+    """
+    清理过期的暂停状态
+    
+    Request Body (optional):
+    {
+        "max_age_seconds": 604800  // 最大存活时间（秒），默认 7 天
+    }
+    """
+    try:
+        body = request.json or {}
+        max_age_seconds = body.get("max_age_seconds", 604800)
+
+        manager = get_pause_manager()
+        await manager.initialize()
+
+        # 清理过期引用
+        ref_result = await manager.cleanup_expired_pause_states()
+        
+        # 清理过时状态
+        stale_result = await manager.cleanup_stale_pause_states(
+            max_age_seconds=max_age_seconds
+        )
+
+        return sanic_json({
+            "cleaned_refs": ref_result.get("cleaned_count", 0),
+            "cleaned_stale": stale_result.get("cleaned_count", 0),
+            "total_cleaned": (
+                ref_result.get("cleaned_count", 0) + 
+                stale_result.get("cleaned_count", 0)
+            ),
+            "success": True,
+        })
+
+    except Exception as e:
+        logger.exception(f"Error cleaning up pause states: {e}")
+        return sanic_json({"error": str(e)}, status=500)
+
+
+@pause_bp.post("/cleanup/signals")
+async def cleanup_signals(request: Request):
+    """
+    清理过期的 Signal 记录
+    
+    Request Body (optional):
+    {
+        "retention_days": 7  // 保留天数，默认 7 天
+    }
+    """
+    try:
+        body = request.json or {}
+        retention_days = body.get("retention_days", 7)
+
+        from infra.db.services.flow_execution_signal_service import (
+            FlowExecutionSignalService,
+        )
+
+        service = FlowExecutionSignalService()
+        result = await service.cleanup_expired_signals(retention_days=retention_days)
+
+        return sanic_json(result)
+
+    except Exception as e:
+        logger.exception(f"Error cleaning up signals: {e}")
+        return sanic_json({"error": str(e)}, status=500)
+
+
+@pause_bp.get("/signal-stats")
+async def get_signal_stats(request: Request):
+    """
+    获取 Signal 统计信息
+    
+    Query params:
+        flow_id: 可选，指定 Flow ID
+    """
+    try:
+        flow_id = request.args.get("flow_id")
+
+        from infra.db.services.flow_execution_signal_service import (
+            FlowExecutionSignalService,
+        )
+
+        service = FlowExecutionSignalService()
+        stats = await service.get_signal_stats(flow_id=flow_id)
+
+        return sanic_json(stats)
+
+    except Exception as e:
+        logger.exception(f"Error getting signal stats: {e}")
+        return sanic_json({"error": str(e)}, status=500)
+
+
+@pause_bp.post("/cleanup/all")
+async def cleanup_all(request: Request):
+    """
+    运行所有清理任务
+    
+    Request Body (optional):
+    {
+        "signal_retention_days": 7,
+        "pause_max_age_seconds": 604800
+    }
+    """
+    try:
+        body = request.json or {}
+        signal_retention_days = body.get("signal_retention_days", 7)
+        pause_max_age_seconds = body.get("pause_max_age_seconds", 604800)
+
+        from tasks.cleanup_tasks import (
+            cleanup_expired_signals,
+            cleanup_expired_pause_states,
+        )
+
+        results = {}
+
+        # 清理 Signal
+        results["signals"] = await cleanup_expired_signals(
+            retention_days=signal_retention_days
+        )
+
+        # 清理暂停状态
+        results["pause_states"] = await cleanup_expired_pause_states(
+            max_age_seconds=pause_max_age_seconds
+        )
+
+        return sanic_json({
+            "results": results,
+            "success": all(
+                r.get("success", False) for r in results.values()
+            ),
+        })
+
+    except Exception as e:
+        logger.exception(f"Error running cleanup tasks: {e}")
+        return sanic_json({"error": str(e)}, status=500)

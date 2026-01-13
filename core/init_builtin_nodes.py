@@ -153,50 +153,51 @@ def init_all_builtin_nodes():
             }
         },
         # Interactive Nodes
-        {
-            'node_type': 'display_node',
-            'version': '0.0.1',
-            'module': 'nodes.interactive.display_node',
-            'class': 'DisplayNode',
-            'metadata': {
-                'display_name': 'Display Node',
-                'category': 'interactive',
-                'description': 'Display upstream data in Control Deck'
-            }
-        },
-        {
-            'node_type': 'yes_no_node',
-            'version': '0.0.1',
-            'module': 'nodes.interactive.yes_no_node',
-            'class': 'YesNoNode',
-            'metadata': {
-                'display_name': 'Yes/No Decision Node',
-                'category': 'interactive',
-                'description': 'User confirmation/rejection decision'
-            }
-        },
-        {
-            'node_type': 'chart_node',
-            'version': '0.0.1',
-            'module': 'nodes.interactive.chart_node',
-            'class': 'ChartNode',
-            'metadata': {
-                'display_name': 'Chart Node',
-                'category': 'interactive',
-                'description': 'Display data visualization charts in Control Deck'
-            }
-        },
-        {
-            'node_type': 'chatbox_node',
-            'version': '0.0.1',
-            'module': 'nodes.interactive.chatbox_node',
-            'class': 'ChatBoxNode',
-            'metadata': {
-                'display_name': 'ChatBox Node',
-                'category': 'interactive',
-                'description': 'Interactive chat interface with LLM (Constant Node)'
-            }
-        },
+        # 🔒 暂时只上线 candleline_node，其他节点产品逻辑待完善后再开放
+        # {
+        #     'node_type': 'display_node',
+        #     'version': '0.0.1',
+        #     'module': 'nodes.interactive.display_node',
+        #     'class': 'DisplayNode',
+        #     'metadata': {
+        #         'display_name': 'Display Node',
+        #         'category': 'interactive',
+        #         'description': 'Display upstream data in Control Deck'
+        #     }
+        # },
+        # {
+        #     'node_type': 'yes_no_node',
+        #     'version': '0.0.1',
+        #     'module': 'nodes.interactive.yes_no_node',
+        #     'class': 'YesNoNode',
+        #     'metadata': {
+        #         'display_name': 'Yes/No Decision Node',
+        #         'category': 'interactive',
+        #         'description': 'User confirmation/rejection decision'
+        #     }
+        # },
+        # {
+        #     'node_type': 'chart_node',
+        #     'version': '0.0.1',
+        #     'module': 'nodes.interactive.chart_node',
+        #     'class': 'ChartNode',
+        #     'metadata': {
+        #         'display_name': 'Chart Node',
+        #         'category': 'interactive',
+        #         'description': 'Display data visualization charts in Control Deck'
+        #     }
+        # },
+        # {
+        #     'node_type': 'chatbox_node',
+        #     'version': '0.0.1',
+        #     'module': 'nodes.interactive.chatbox_node',
+        #     'class': 'ChatBoxNode',
+        #     'metadata': {
+        #         'display_name': 'ChatBox Node',
+        #         'category': 'interactive',
+        #         'description': 'Interactive chat interface with LLM (Constant Node)'
+        #     }
+        # },
         {
             'node_type': 'candleline_node',
             'version': '0.0.1',

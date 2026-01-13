@@ -11,7 +11,7 @@ Pause Manager: 管理 Flow/Component/Node 的暂停和恢复
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -20,6 +20,10 @@ import redis.asyncio as aioredis
 from infra.config import CONFIG
 
 logger = logging.getLogger(__name__)
+
+# 🔥 暂停状态过期配置
+DEFAULT_PAUSE_TTL_SECONDS = 604800  # 默认 7 天
+MAX_PAUSE_TTL_SECONDS = 2592000  # 最大 30 天
 
 
 class PauseType(Enum):
@@ -502,6 +506,202 @@ class PauseManager:
 
         logger.info(f"Cleared {cleared} pause states for flow {flow_id}")
         return cleared
+
+    # ==================== 🔥 过期清理操作 ====================
+
+    async def cleanup_expired_pause_states(self) -> Dict[str, Any]:
+        """
+        清理已过期的暂停状态。
+        
+        Redis TTL 会自动过期键，但 paused_executions 集合中的引用不会自动清理。
+        这个方法清理集合中指向已过期键的引用。
+        
+        Returns:
+            {
+                'cleaned_count': int,
+                'remaining_count': int,
+                'success': bool
+            }
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            paused_keys = await self.redis.smembers(self._paused_set_key)
+            cleaned = 0
+            remaining = 0
+
+            for key in paused_keys:
+                # 检查键是否还存在
+                if not await self.redis.exists(key):
+                    # 键已过期，从集合中移除引用
+                    await self.redis.srem(self._paused_set_key, key)
+                    cleaned += 1
+                else:
+                    remaining += 1
+
+            if cleaned > 0:
+                logger.info(f"Cleaned {cleaned} expired pause state references")
+
+            return {
+                'cleaned_count': cleaned,
+                'remaining_count': remaining,
+                'success': True,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired pause states: {e}")
+            return {
+                'cleaned_count': 0,
+                'remaining_count': 0,
+                'success': False,
+                'error': str(e),
+            }
+
+    async def cleanup_stale_pause_states(
+        self,
+        max_age_seconds: int = DEFAULT_PAUSE_TTL_SECONDS,
+    ) -> Dict[str, Any]:
+        """
+        清理超过指定时间的暂停状态（主动清理，不依赖 TTL）。
+        
+        Args:
+            max_age_seconds: 最大存活时间（秒）
+            
+        Returns:
+            清理结果
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+            paused_keys = await self.redis.smembers(self._paused_set_key)
+            cleaned = 0
+
+            for key in paused_keys:
+                data_str = await self.redis.get(key)
+                if data_str:
+                    try:
+                        data = json.loads(data_str)
+                        paused_at = datetime.fromisoformat(
+                            data.get("paused_at", "").replace("Z", "+00:00")
+                        )
+                        
+                        if paused_at < cutoff_time:
+                            # 暂停状态太旧，删除
+                            await self.redis.delete(key)
+                            await self.redis.srem(self._paused_set_key, key)
+                            cleaned += 1
+                            logger.debug(f"Cleaned stale pause state: {key}")
+                    except (json.JSONDecodeError, ValueError) as e:
+                        # 数据格式错误，也删除
+                        logger.warning(f"Cleaning invalid pause state {key}: {e}")
+                        await self.redis.delete(key)
+                        await self.redis.srem(self._paused_set_key, key)
+                        cleaned += 1
+                else:
+                    # 键已不存在，清理引用
+                    await self.redis.srem(self._paused_set_key, key)
+                    cleaned += 1
+
+            if cleaned > 0:
+                logger.info(
+                    f"Cleaned {cleaned} stale pause states "
+                    f"(older than {max_age_seconds} seconds)"
+                )
+
+            return {
+                'cleaned_count': cleaned,
+                'max_age_seconds': max_age_seconds,
+                'cutoff_time': cutoff_time.isoformat(),
+                'success': True,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup stale pause states: {e}")
+            return {
+                'cleaned_count': 0,
+                'success': False,
+                'error': str(e),
+            }
+
+    # ==================== 统计操作 ====================
+
+    async def get_pause_stats(self) -> Dict[str, Any]:
+        """
+        获取暂停状态统计信息。
+        
+        Returns:
+            {
+                'total_paused': int,
+                'by_level': {'flow': int, 'component': int, 'node': int},
+                'by_type': {'awaiting_input': int, 'manual': int, ...},
+                'oldest_pause': str | None
+            }
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            paused_keys = await self.redis.smembers(self._paused_set_key)
+            
+            stats = {
+                'total_paused': 0,
+                'by_level': {'flow': 0, 'component': 0, 'node': 0},
+                'by_type': {},
+                'oldest_pause': None,
+            }
+            
+            oldest_time = None
+
+            for key in paused_keys:
+                data_str = await self.redis.get(key)
+                if data_str:
+                    try:
+                        data = json.loads(data_str)
+                        stats['total_paused'] += 1
+                        
+                        # 按级别统计
+                        level = data.get('level', 'unknown')
+                        if level in stats['by_level']:
+                            stats['by_level'][level] += 1
+                        
+                        # 按类型统计
+                        pause_type = data.get('pause_type', 'unknown')
+                        stats['by_type'][pause_type] = stats['by_type'].get(pause_type, 0) + 1
+                        
+                        # 最早的暂停时间
+                        paused_at = data.get('paused_at')
+                        if paused_at:
+                            try:
+                                paused_time = datetime.fromisoformat(
+                                    paused_at.replace("Z", "+00:00")
+                                )
+                                if oldest_time is None or paused_time < oldest_time:
+                                    oldest_time = paused_time
+                            except ValueError:
+                                pass
+                                
+                    except json.JSONDecodeError:
+                        pass
+                else:
+                    # 清理已过期的引用
+                    await self.redis.srem(self._paused_set_key, key)
+
+            stats['oldest_pause'] = oldest_time.isoformat() if oldest_time else None
+            
+            return stats
+
+        except Exception as e:
+            logger.error(f"Failed to get pause stats: {e}")
+            return {
+                'total_paused': 0,
+                'by_level': {'flow': 0, 'component': 0, 'node': 0},
+                'by_type': {},
+                'oldest_pause': None,
+                'error': str(e),
+            }
 
 
 # 便捷函数

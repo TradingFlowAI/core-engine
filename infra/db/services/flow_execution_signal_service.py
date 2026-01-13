@@ -4,13 +4,17 @@ Service for node-to-node signal records.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from infra.db.base import get_db_session
 from infra.db.models.flow_execution_signal import FlowExecutionSignal
 
 logger = logging.getLogger(__name__)
+
+# 🔥 Signal 过期配置
+DEFAULT_SIGNAL_RETENTION_DAYS = 7  # 默认保留 7 天
+DEFAULT_MAX_SIGNALS_PER_FLOW = 1000  # 每个 Flow 最多保留 1000 条 Signal
 
 
 class FlowExecutionSignalService:
@@ -246,6 +250,229 @@ class FlowExecutionSignalService:
                 except Exception:
                     pass
             return 0
+        finally:
+            if session:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+    # =========================================================================
+    # 🔥 Signal 过期清理方法
+    # =========================================================================
+
+    async def cleanup_expired_signals(
+        self,
+        retention_days: int = DEFAULT_SIGNAL_RETENTION_DAYS,
+    ) -> Dict[str, Any]:
+        """
+        清理过期的 Signal 记录（全局清理）。
+        
+        Args:
+            retention_days: 保留天数，超过这个天数的 Signal 将被删除
+            
+        Returns:
+            {
+                'deleted_count': int,
+                'cutoff_date': str,
+                'success': bool
+            }
+        """
+        session = None
+        cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+        
+        try:
+            session = get_db_session()
+            
+            # 删除过期的 Signal
+            count = session.query(FlowExecutionSignal).filter(
+                FlowExecutionSignal.created_at < cutoff_date
+            ).delete()
+            
+            session.commit()
+            
+            logger.info(
+                f"Cleaned up {count} expired signals (older than {retention_days} days)"
+            )
+            
+            return {
+                'deleted_count': count,
+                'cutoff_date': cutoff_date.isoformat(),
+                'retention_days': retention_days,
+                'success': True,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired signals: {e}")
+            if session:
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+            return {
+                'deleted_count': 0,
+                'cutoff_date': cutoff_date.isoformat(),
+                'retention_days': retention_days,
+                'success': False,
+                'error': str(e),
+            }
+        finally:
+            if session:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+    async def cleanup_signals_by_flow(
+        self,
+        flow_id: str,
+        retention_days: Optional[int] = None,
+        max_signals: int = DEFAULT_MAX_SIGNALS_PER_FLOW,
+    ) -> Dict[str, Any]:
+        """
+        清理指定 Flow 的过期 Signal 记录。
+        
+        保留策略：
+        1. 保留最近 retention_days 天的 Signal
+        2. 保留最近 max_signals 条 Signal（如果超过限制）
+        
+        Args:
+            flow_id: Flow ID
+            retention_days: 保留天数（可选，None 表示不按时间清理）
+            max_signals: 最大保留条数
+            
+        Returns:
+            清理结果
+        """
+        session = None
+        deleted_by_time = 0
+        deleted_by_count = 0
+        
+        try:
+            session = get_db_session()
+            
+            # 1. 按时间清理
+            if retention_days is not None:
+                cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+                deleted_by_time = session.query(FlowExecutionSignal).filter(
+                    FlowExecutionSignal.flow_id == flow_id,
+                    FlowExecutionSignal.created_at < cutoff_date
+                ).delete()
+            
+            # 2. 按数量清理（保留最新的 max_signals 条）
+            total_count = session.query(FlowExecutionSignal).filter(
+                FlowExecutionSignal.flow_id == flow_id
+            ).count()
+            
+            if total_count > max_signals:
+                # 获取第 max_signals 条记录的 created_at
+                cutoff_signal = session.query(FlowExecutionSignal).filter(
+                    FlowExecutionSignal.flow_id == flow_id
+                ).order_by(
+                    FlowExecutionSignal.created_at.desc()
+                ).offset(max_signals - 1).first()
+                
+                if cutoff_signal:
+                    deleted_by_count = session.query(FlowExecutionSignal).filter(
+                        FlowExecutionSignal.flow_id == flow_id,
+                        FlowExecutionSignal.created_at < cutoff_signal.created_at
+                    ).delete()
+            
+            session.commit()
+            
+            total_deleted = deleted_by_time + deleted_by_count
+            if total_deleted > 0:
+                logger.info(
+                    f"Cleaned up {total_deleted} signals for flow {flow_id} "
+                    f"(by_time={deleted_by_time}, by_count={deleted_by_count})"
+                )
+            
+            return {
+                'flow_id': flow_id,
+                'deleted_by_time': deleted_by_time,
+                'deleted_by_count': deleted_by_count,
+                'total_deleted': total_deleted,
+                'success': True,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup signals for flow {flow_id}: {e}")
+            if session:
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+            return {
+                'flow_id': flow_id,
+                'deleted_by_time': 0,
+                'deleted_by_count': 0,
+                'total_deleted': 0,
+                'success': False,
+                'error': str(e),
+            }
+        finally:
+            if session:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+    async def get_signal_stats(self, flow_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取 Signal 统计信息。
+        
+        Args:
+            flow_id: 可选，指定 Flow ID
+            
+        Returns:
+            统计信息
+        """
+        session = None
+        try:
+            session = get_db_session()
+            
+            if flow_id:
+                # 指定 Flow 的统计
+                total = session.query(FlowExecutionSignal).filter(
+                    FlowExecutionSignal.flow_id == flow_id
+                ).count()
+                
+                oldest = session.query(FlowExecutionSignal).filter(
+                    FlowExecutionSignal.flow_id == flow_id
+                ).order_by(FlowExecutionSignal.created_at.asc()).first()
+                
+                newest = session.query(FlowExecutionSignal).filter(
+                    FlowExecutionSignal.flow_id == flow_id
+                ).order_by(FlowExecutionSignal.created_at.desc()).first()
+                
+                return {
+                    'flow_id': flow_id,
+                    'total_signals': total,
+                    'oldest_signal': oldest.created_at.isoformat() if oldest else None,
+                    'newest_signal': newest.created_at.isoformat() if newest else None,
+                }
+            else:
+                # 全局统计
+                from sqlalchemy import func
+                
+                total = session.query(FlowExecutionSignal).count()
+                flow_count = session.query(
+                    func.count(func.distinct(FlowExecutionSignal.flow_id))
+                ).scalar()
+                
+                oldest = session.query(FlowExecutionSignal).order_by(
+                    FlowExecutionSignal.created_at.asc()
+                ).first()
+                
+                return {
+                    'total_signals': total,
+                    'total_flows': flow_count,
+                    'oldest_signal': oldest.created_at.isoformat() if oldest else None,
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get signal stats: {e}")
+            return {'error': str(e)}
         finally:
             if session:
                 try:
