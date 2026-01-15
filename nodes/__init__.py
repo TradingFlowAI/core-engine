@@ -15,6 +15,7 @@ from .swap_node_v0_0_1 import SwapNode
 
 # Inputs
 from .rootdata_node_v0_0_1 import RootDataNode
+from .chaincatcher_node_v0_0_1 import ChainCatcherNode
 
 # Interactive Nodes
 # 🔒 暂时只上线 candleline_node，其他节点产品逻辑待完善后再开放
