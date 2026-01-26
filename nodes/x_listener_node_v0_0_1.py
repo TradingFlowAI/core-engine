@@ -32,25 +32,25 @@ def is_user_id(identifier: str) -> bool:
 @register_node_type(
     "x_listener_node",
     default_params={
-        "accounts": [],  # X账号列表，支持UserId和UserName
-        "limit": 20,  # 获取的推文数量限制
-        "keywords": "",  # 关键词过滤，多个关键词用逗号分隔
-        "search_mode": "user_tweets",  # 搜索模式: "user_tweets" 或 "advanced_search"
-        "query_type": "Latest",  # 搜索类型: "Latest" 或 "Top"
-        "api_key": "",  # Twitter API密钥
+        "accounts": [],  # X accounts list, supports UserId and UserName
+        "limit": 20,  # Tweet fetch limit
+        "keywords": "",  # Keyword filter, comma separated
+        "search_mode": "latest",  # Sort mode: "latest" or "top" (frontend naming)
+        "query_type": "user_timeline",  # API mode: "user_timeline" or "search" (frontend naming)
+        "api_key": "",  # Twitter API key
     },
 )
 class XListenerNode(NodeBase):
     """
     Twitter监听器节点 - 用于获取指定用户的最近推文或进行高级搜索
 
-    输入参数:
-    - accounts: X 的用户名或id列表（用户推文模式下使用）
-    - keywords: 关键词过滤，多个关键词用逗号分隔
-    - search_mode: 搜索模式 ("user_tweets" 或 "advanced_search")
-    - query_type: 搜索类型 ("Latest" 或 "Top")
-    - limit: 获取的推文数量限制
-    - api_key: Twitter API密钥
+    Input parameters:
+    - accounts: X usernames or user IDs (for user timeline mode)
+    - keywords: Keyword filter, comma separated
+    - search_mode: Sort mode - "latest" or "top" (default: latest)
+    - query_type: API mode - "user_timeline" or "search" (default: user_timeline)
+    - limit: Max tweets to fetch (1-100)
+    - api_key: Twitter API key
 
     输出信号:
     - latest_tweets: 获取的最新推文数据
@@ -66,8 +66,8 @@ class XListenerNode(NodeBase):
             accounts: List[str] = None,
             limit: int = 20,
             keywords: str = "",
-            search_mode: str = "user_tweets",
-            query_type: str = "Latest",
+            search_mode: str = "latest",  # Frontend: "latest" or "top" (sort mode)
+            query_type: str = "user_timeline",  # Frontend: "user_timeline" or "search" (API mode)
             api_key: str = "",
             input_edges: List[Edge] = None,
             output_edges: List[Edge] = None,
@@ -104,12 +104,21 @@ class XListenerNode(NodeBase):
             **kwargs,
         )
 
-        # 保存参数
+        # Save parameters
         self.accounts = accounts or []
         self.keywords = keywords.strip() if keywords else ""
-        self.search_mode = search_mode
-        self.query_type = query_type
-        self.limit = max(1, min(100, limit))  # 限制在1-100之间
+        
+        # Map frontend naming to internal API values
+        # Frontend search_mode (latest/top) -> Internal _sort_mode (Latest/Top)
+        # Frontend query_type (user_timeline/search) -> Internal _api_mode (user_tweets/advanced_search)
+        self.search_mode = search_mode  # Keep original for output metadata
+        self.query_type = query_type  # Keep original for output metadata
+        
+        # Internal mappings for API calls
+        self._sort_mode = "Top" if search_mode == "top" else "Latest"
+        self._api_mode = "advanced_search" if query_type == "search" else "user_tweets"
+        
+        self.limit = max(1, min(100, limit))  # Limit between 1-100
         self.api_key = api_key or os.environ.get("TWITTER_API_KEY") or CONFIG.get("TWITTER_API_KEY", "")
 
         # API相关
@@ -165,8 +174,8 @@ class XListenerNode(NodeBase):
                 else:
                     query_parts.append(f'"{keywords_list[0]}"')
 
-        # 如果指定了用户列表，添加 from: 过滤条件
-        if self.accounts and self.search_mode == "advanced_search":
+        # If user list specified, add from: filter condition
+        if self.accounts and self._api_mode == "advanced_search":
             account_filters = []
             for account in self.accounts:
                 if not account:
@@ -238,10 +247,10 @@ class XListenerNode(NodeBase):
 
         try:
             while current_page < max_pages:
-                # 构建查询参数
+                # Build query parameters
                 params = {
                     "query": query,
-                    "queryType": self.query_type
+                    "queryType": self._sort_mode  # Use internal sort mode (Latest/Top)
                 }
 
                 if current_cursor:
@@ -467,8 +476,8 @@ class XListenerNode(NodeBase):
         """执行节点逻辑，获取Twitter用户的最近推文或进行高级搜索"""
         start_time = time.time()
         try:
-            mode_desc = "advanced search" if self.search_mode == "advanced_search" else f"tweets from users {', '.join(self.accounts)}"
-            await self.persist_log(f"Executing XListenerNode, mode: {self.search_mode}, fetching {mode_desc}", "INFO")
+            mode_desc = "advanced search" if self._api_mode == "advanced_search" else f"tweets from users {', '.join(self.accounts)}"
+            await self.persist_log(f"Executing XListenerNode, api_mode: {self._api_mode}, sort: {self._sort_mode}, fetching {mode_desc}", "INFO")
 
             # 检查API密钥
             if not self.api_key:
@@ -477,14 +486,14 @@ class XListenerNode(NodeBase):
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
 
-            # 根据搜索模式检查参数
-            if self.search_mode == "user_tweets":
+            # Validate parameters based on API mode
+            if self._api_mode == "user_tweets":
                 if not self.accounts:
                     error_msg = "Accounts parameter is required when fetching user tweets"
                     await self.persist_log(error_msg, "ERROR")
                     await self.set_status(NodeStatus.FAILED, error_msg)
                     return False
-            elif self.search_mode == "advanced_search":
+            elif self._api_mode == "advanced_search":
                 if not self.keywords and not self.accounts:
                     error_msg = "Keywords or accounts parameter is required for advanced search"
                     await self.persist_log(error_msg, "ERROR")
@@ -493,8 +502,8 @@ class XListenerNode(NodeBase):
 
             await self.set_status(NodeStatus.RUNNING)
 
-            # 根据搜索模式获取推文
-            if self.search_mode == "advanced_search":
+            # Fetch tweets based on API mode
+            if self._api_mode == "advanced_search":
                 result = await self.fetch_tweets_advanced_search()
             else:
                 result = await self.fetch_tweets_for_all_accounts()
