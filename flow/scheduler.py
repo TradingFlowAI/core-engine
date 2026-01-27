@@ -2603,10 +2603,35 @@ class FlowScheduler:
         except Exception as exc:
             logger.warning(f"Failed to get comprehensive status for completion event: {exc}")
 
+        # 🔥 Determine the actual flow status (not just cycle status)
+        # For interval/cron runs, the flow status should be waiting_next_cycle, not completed
+        flow_status = final_status
+        next_cycle_eta = None
+        last_cycle_duration_ms = summary.get("duration_ms")
+        
+        try:
+            flow_data = await self.redis.hgetall(f"flow:{flow_id}")
+            if flow_data:
+                flow_config = json.loads(flow_data.get("config", "{}"))
+                interval_seconds = self._parse_interval(flow_config.get("interval", "0"))
+                
+                if interval_seconds > 0 and final_status == "completed":
+                    # This is a cron/interval run, flow should be waiting for next cycle
+                    flow_status = self.waiting_status  # "waiting_next_cycle"
+                    next_execution = flow_data.get("next_execution")
+                    if next_execution:
+                        try:
+                            next_cycle_eta = datetime.fromtimestamp(float(next_execution)).isoformat()
+                        except Exception:
+                            next_cycle_eta = next_execution
+        except Exception as exc:
+            logger.warning(f"Failed to determine flow status for completion event: {exc}")
+
         event_payload = {
             "flow_id": flow_id,
             "cycle": cycle,
-            "status": final_status,
+            "status": flow_status,  # 🔥 Use actual flow status, not just cycle status
+            "cycle_status": final_status,  # 🔥 Keep original cycle status for reference
             "error": error_message,
             "summary": summary,
             "timestamp": datetime.now().isoformat(),
@@ -2614,6 +2639,9 @@ class FlowScheduler:
             "net_profit_usd": net_profit_usd,
             "net_profit_pct": net_profit_pct,
             "credits_used": credits_used,
+            # 🔥 Added: Waiting info for cron/interval runs
+            "next_cycle_eta": next_cycle_eta,
+            "last_cycle_duration_ms": last_cycle_duration_ms,
         }
 
         try:
@@ -2622,6 +2650,7 @@ class FlowScheduler:
             )
             logger.info(
                 f"Published execution complete: flow={flow_id} cycle={cycle} "
+                f"flow_status={flow_status} cycle_status={final_status} "
                 f"profit=${net_profit_usd} ({net_profit_pct}%) credits={credits_used}"
             )
         except Exception as exc:
