@@ -153,7 +153,7 @@ class SwapNode(NodeBase):
         self.vault_balance = vault.get("balance") if vault else None
         self.vault_transactions = vault.get("transactions", []) if vault else []
 
-        if self.chain not in ["aptos", "flow_evm"]:
+        if self.chain not in ["aptos", "flow_evm", "bsc", "bsc-testnet"]:
             raise ValueError(f"Unsupported chain: {self.chain}")
 
         self.from_token = from_token
@@ -182,7 +182,13 @@ class SwapNode(NodeBase):
         if self.chain == "aptos":
             self.vault_service = AptosVaultService.get_instance()
         elif self.chain == "flow_evm":
-            self.vault_service = FlowEvmVaultService.get_instance(545)  # Flow Testnet
+            self.vault_service = FlowEvmVaultService.get_instance(747)  # Flow EVM Mainnet
+        elif self.chain == "bsc":
+            from services.evm_vault_service import EvmVaultService
+            self.vault_service = EvmVaultService.get_bsc_instance(testnet=False)  # BSC Mainnet
+        elif self.chain == "bsc-testnet":
+            from services.evm_vault_service import EvmVaultService
+            self.vault_service = EvmVaultService.get_bsc_instance(testnet=True)  # BSC Testnet
 
         # Initialization log will be handled in execute method
 
@@ -474,8 +480,109 @@ class SwapNode(NodeBase):
             self.input_token_decimals = 18  # Default for EVM
             self.output_token_decimals = 18
 
+        elif self.chain in ["bsc", "bsc-testnet"]:
+            # For BSC, resolve token addresses and get decimals from monitor service
+            await self._resolve_bsc_token_addresses()
+
         await self.persist_log(
             f"Resolved tokens: {self.from_token}({self.input_token_address}) -> {self.to_token}({self.output_token_address})", "INFO"
+        )
+
+    async def _resolve_bsc_token_addresses(self) -> None:
+        """
+        Resolve BSC token addresses from symbols
+        
+        Uses common BSC token symbol-to-address mapping and fetches decimals from monitor service
+        """
+        # Common BSC token addresses (mainnet)
+        BSC_MAINNET_TOKENS = {
+            "BNB": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
+            "WBNB": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+            "USDT": "0x55d398326f99059fF775485246999027B3197955",  # BSC-USD (USDT)
+            "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+            "BUSD": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+            "ETH": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+            "BTCB": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",  # Bitcoin BEP2
+            "CAKE": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",  # PancakeSwap
+            "XRP": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+            "ADA": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
+            "DOGE": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
+            "DOT": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
+            "LINK": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
+            "UNI": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1",
+        }
+        
+        # BSC Testnet token addresses
+        BSC_TESTNET_TOKENS = {
+            "BNB": "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",  # WBNB Testnet
+            "WBNB": "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
+            "USDT": "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd",
+            "BUSD": "0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee",
+        }
+        
+        token_map = BSC_TESTNET_TOKENS if self.chain == "bsc-testnet" else BSC_MAINNET_TOKENS
+        chain_id = 97 if self.chain == "bsc-testnet" else 56
+        
+        # Resolve input token
+        from_token_upper = self.from_token.upper() if self.from_token else ""
+        if from_token_upper in token_map:
+            self.input_token_address = token_map[from_token_upper]
+        elif self.from_token and self.from_token.startswith("0x"):
+            # Already an address
+            self.input_token_address = self.from_token
+        else:
+            raise ValueError(f"Unknown BSC token symbol: {self.from_token}")
+        
+        # Resolve output token
+        to_token_upper = self.to_token.upper() if self.to_token else ""
+        if to_token_upper in token_map:
+            self.output_token_address = token_map[to_token_upper]
+        elif self.to_token and self.to_token.startswith("0x"):
+            # Already an address
+            self.output_token_address = self.to_token
+        else:
+            raise ValueError(f"Unknown BSC token symbol: {self.to_token}")
+        
+        # Normalize addresses
+        self.input_token_address = self._normalize_chain_address(self.input_token_address)
+        self.output_token_address = self._normalize_chain_address(self.output_token_address)
+        
+        # Fetch decimals from monitor service
+        try:
+            monitor_url = CONFIG.get("MONITOR_URL")
+            if monitor_url:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    # Get input token info
+                    input_url = f"{monitor_url}/evm/tokens/{chain_id}/{self.input_token_address}"
+                    input_resp = await client.get(input_url)
+                    if input_resp.status_code == 200:
+                        input_data = input_resp.json()
+                        self.input_token_decimals = input_data.get("data", {}).get("decimals", 18)
+                    else:
+                        self.input_token_decimals = 18
+                    
+                    # Get output token info
+                    output_url = f"{monitor_url}/evm/tokens/{chain_id}/{self.output_token_address}"
+                    output_resp = await client.get(output_url)
+                    if output_resp.status_code == 200:
+                        output_data = output_resp.json()
+                        self.output_token_decimals = output_data.get("data", {}).get("decimals", 18)
+                    else:
+                        self.output_token_decimals = 18
+            else:
+                # Default to 18 decimals for EVM tokens
+                self.input_token_decimals = 18
+                self.output_token_decimals = 18
+                
+        except Exception as e:
+            await self.persist_log(f"Warning: Could not fetch BSC token decimals: {e}", "WARNING")
+            self.input_token_decimals = 18
+            self.output_token_decimals = 18
+        
+        await self.persist_log(
+            f"BSC token resolution: {self.from_token} -> {self.input_token_address} (decimals={self.input_token_decimals}), "
+            f"{self.to_token} -> {self.output_token_address} (decimals={self.output_token_decimals})",
+            "INFO"
         )
 
     async def get_token_balance(self, token_address: str, token_symbol: Optional[str] = None) -> Decimal:
@@ -706,6 +813,170 @@ class SwapNode(NodeBase):
 
         await self.persist_log(f"Flow EVM estimation: output={output_amount_raw}", "INFO")
         return output_amount_raw
+
+    async def _get_estimated_min_output_bsc(self, amount_in: int, slippage: float) -> int:
+        """
+        Estimate BSC output amount using 04_weather_monitor price service
+        
+        Args:
+            amount_in: Input amount in wei
+            slippage: Slippage tolerance percentage (e.g., 1.0 for 1%)
+            
+        Returns:
+            int: Estimated minimum output amount after slippage
+        """
+        try:
+            monitor_url = CONFIG.get("MONITOR_URL")
+            if not monitor_url:
+                raise ValueError("MONITOR_URL not configured")
+            
+            chain_id = 56 if self.chain == "bsc" else 97
+            
+            # Get token prices from monitor service
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # Get input token price
+                input_price_url = f"{monitor_url}/evm/tokens/{chain_id}/{self.input_token_address}/price"
+                input_resp = await client.get(input_price_url)
+                input_data = input_resp.json() if input_resp.status_code == 200 else {}
+                input_price = input_data.get("data", {}).get("price_usd") or input_data.get("price_usd")
+                
+                # Get output token price
+                output_price_url = f"{monitor_url}/evm/tokens/{chain_id}/{self.output_token_address}/price"
+                output_resp = await client.get(output_price_url)
+                output_data = output_resp.json() if output_resp.status_code == 200 else {}
+                output_price = output_data.get("data", {}).get("price_usd") or output_data.get("price_usd")
+            
+            if not input_price or not output_price or float(output_price) <= 0:
+                await self.persist_log(
+                    f"Cannot get valid token prices for BSC: input={input_price}, output={output_price}",
+                    "WARNING"
+                )
+                # Return 0 as min output (no slippage protection) if prices unavailable
+                return 0
+            
+            # Calculate output amount
+            amount_in_decimal = Decimal(amount_in) / Decimal(10**self.input_token_decimals)
+            input_value_usd = amount_in_decimal * Decimal(str(input_price))
+            output_amount_decimal = input_value_usd / Decimal(str(output_price))
+            
+            # Apply slippage
+            slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
+            output_amount_with_slippage = output_amount_decimal * slippage_factor
+            output_amount_raw = int(output_amount_with_slippage * Decimal(10**self.output_token_decimals))
+            
+            await self.persist_log(
+                f"BSC estimation: input_price=${input_price}, output_price=${output_price}, "
+                f"output={output_amount_raw}",
+                "INFO"
+            )
+            return output_amount_raw
+            
+        except Exception as e:
+            await self.persist_log(f"Error estimating BSC output: {e}", "WARNING")
+            # Return 0 as min output if estimation fails (trade will still execute)
+            return 0
+
+    async def _get_optimal_route_bsc(self, amount_in: int, slippage: float) -> Dict[str, Any]:
+        """
+        Get optimal route from Monitor service using PancakeSwap Smart Router
+        
+        Args:
+            amount_in: Input amount in wei
+            slippage: Slippage tolerance percentage (e.g., 1.0 for 1%)
+            
+        Returns:
+            Dict containing:
+                - route_type: "single" | "v2" | "v3" | "mixed"
+                - path: Encoded path for V3 or JSON array for V2
+                - expected_output: Expected output amount
+                - expected_output_with_slippage: Min output with slippage applied
+                - price_impact: Price impact percentage
+        """
+        try:
+            monitor_url = CONFIG.get("MONITOR_URL")
+            if not monitor_url:
+                raise ValueError("MONITOR_URL not configured")
+            
+            chain_id = 56 if self.chain == "bsc" else 97
+            
+            await self.persist_log(
+                f"Getting optimal route for BSC swap: {self.input_token_address} -> {self.output_token_address}",
+                "INFO"
+            )
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                route_url = f"{monitor_url}/evm/route/quote"
+                response = await client.post(route_url, json={
+                    "chain_id": chain_id,
+                    "token_in": self.input_token_address,
+                    "token_out": self.output_token_address,
+                    "amount_in": str(amount_in),
+                    "slippage": slippage,
+                })
+                
+                if response.status_code != 200:
+                    await self.persist_log(
+                        f"Route quote request failed: {response.status_code} - {response.text}",
+                        "WARNING"
+                    )
+                    # Fallback to simple estimation
+                    return self._get_fallback_route(amount_in, slippage)
+                
+                data = response.json()
+                if not data.get("success"):
+                    await self.persist_log(
+                        f"Route quote returned error: {data.get('error', 'Unknown error')}",
+                        "WARNING"
+                    )
+                    return self._get_fallback_route(amount_in, slippage)
+                
+                route_data = data.get("data", {})
+                
+                # Calculate min output with slippage
+                expected_output = int(route_data.get("expected_output", "0"))
+                slippage_factor = Decimal("1") - (Decimal(str(slippage)) / Decimal("100"))
+                min_output = int(Decimal(expected_output) * slippage_factor)
+                
+                result = {
+                    "route_type": route_data.get("route_type", "single"),
+                    "path": route_data.get("path"),
+                    "path_tokens": route_data.get("path_tokens", []),
+                    "expected_output": str(expected_output),
+                    "expected_output_with_slippage": str(min_output),
+                    "price_impact": route_data.get("price_impact", 0),
+                    "gas_estimate": route_data.get("gas_estimate", "300000"),
+                    "fee_tiers": route_data.get("fee_tiers", []),
+                }
+                
+                await self.persist_log(
+                    f"Route found: type={result['route_type']}, "
+                    f"output={result['expected_output']}, "
+                    f"min_output={result['expected_output_with_slippage']}, "
+                    f"impact={result['price_impact']}%",
+                    "INFO"
+                )
+                
+                return result
+                
+        except Exception as e:
+            await self.persist_log(f"Error getting optimal route: {e}", "WARNING")
+            return self._get_fallback_route(amount_in, slippage)
+    
+    def _get_fallback_route(self, amount_in: int, slippage: float) -> Dict[str, Any]:
+        """
+        Get fallback route when Smart Router is unavailable
+        Uses single-hop with default fee tier
+        """
+        return {
+            "route_type": "single",
+            "path": None,
+            "path_tokens": [self.input_token_address, self.output_token_address],
+            "expected_output": "0",  # Will use price-based estimation
+            "expected_output_with_slippage": "0",
+            "price_impact": 0,
+            "gas_estimate": "300000",
+            "fee_tiers": [2500],  # Default 0.25% fee tier
+        }
 
     async def _fetch_token_metadata_from_monitor(self, token_address: str) -> Optional[Dict[str, any]]:
         """
@@ -1019,6 +1290,44 @@ class SwapNode(NodeBase):
                     token_out=self.output_token_address,
                     amount_in=final_amount_in,
                     amount_out_min=estimated_min_output,
+                )
+
+            elif self.chain in ["bsc", "bsc-testnet"]:
+                # BSC swap execution using Smart Router (via EvmVaultService -> 04_weather_monitor)
+                await self.persist_log(f"Executing BSC swap: {self.input_token_address} -> {self.output_token_address}", "INFO")
+                
+                # Get optimal route from monitor service
+                route_info = await self._get_optimal_route_bsc(final_amount_in, self.slippery)
+                
+                route_type = route_info.get("route_type", "single")
+                path = route_info.get("path")
+                path_fees = route_info.get("path_fees", [])
+                expected_output = route_info.get("expected_output_with_slippage", "0")
+                
+                await self.persist_log(
+                    f"BSC route: type={route_type}, path={'provided' if path else 'none'}, "
+                    f"expected_output={expected_output}",
+                    "INFO"
+                )
+                
+                # Use route's expected output with slippage, or fall back to price estimation
+                if int(expected_output) > 0:
+                    estimated_min_output = int(expected_output)
+                else:
+                    estimated_min_output = await self._get_estimated_min_output_bsc(
+                        final_amount_in, self.slippery
+                    )
+                
+                # Execute swap with route information
+                tx_result = await self.vault_service.execute_swap(
+                    vault_address=self.vault_address,
+                    token_in=self.input_token_address,
+                    token_out=self.output_token_address,
+                    amount_in=final_amount_in,
+                    amount_out_min=estimated_min_output,
+                    route_type=route_type,
+                    path=path,
+                    fee=path_fees[0] if path_fees else 2500,  # Use first fee tier or default
                 )
 
             self.tx_result = tx_result

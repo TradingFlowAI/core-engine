@@ -251,6 +251,98 @@ class VaultOperationHistoryService:
         )
 
     @staticmethod
+    def get_operations_by_investor(
+        db: Session,
+        investor_address: str,
+        network: str,
+        operation_types: Optional[List[OperationType]] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[VaultOperationHistory]:
+        """
+        Get operation records by investor address
+
+        Args:
+            db: Database session
+            investor_address: Investor address
+            network: Network name (e.g., 'aptos', 'flow-evm', 'bsc')
+            operation_types: Operation type filter
+            start_date: Start date
+            end_date: End date
+            skip: Skip records
+            limit: Limit records
+
+        Returns:
+            List of operation records
+        """
+        from infra.db.services.vault_contract_service import VaultContractService
+
+        # 网络名称到 chain_id 的映射
+        NETWORK_CHAIN_ID_MAP = {
+            'aptos': 1,  # Aptos mainnet
+            'flow-evm': 747,  # Flow EVM mainnet
+            'flow-evm-testnet': 545,  # Flow EVM testnet
+            'bsc': 56,  # BSC mainnet
+            'bsc-testnet': 97,  # BSC testnet
+            'eth': 1,  # Ethereum mainnet
+            'ethereum': 1,
+            'polygon': 137,
+            'arbitrum': 42161,
+            'optimism': 10,
+            'avalanche': 43114,
+        }
+
+        # 获取 chain_id
+        chain_id = NETWORK_CHAIN_ID_MAP.get(network.lower())
+        if chain_id is None:
+            # 尝试从网络名称中提取 chain_id（如 "evm-56"）
+            if network.startswith('evm-'):
+                try:
+                    chain_id = int(network.split('-')[1])
+                except (ValueError, IndexError):
+                    raise ValueError(f"Unsupported network: {network}")
+            else:
+                raise ValueError(f"Unsupported network: {network}")
+
+        # 首先获取该投资者的所有 vault
+        vaults = VaultContractService.get_vaults_by_investor(
+            db, investor_address, chain_id
+        )
+
+        if not vaults:
+            return []
+
+        # 获取所有 vault 的 ID
+        vault_ids = [vault.id for vault in vaults]
+
+        # 构建查询
+        query = db.query(VaultOperationHistory).filter(
+            VaultOperationHistory.vault_contract_id.in_(vault_ids)
+        ).filter(
+            VaultOperationHistory.network == network
+        )
+
+        if operation_types:
+            query = query.filter(
+                VaultOperationHistory.operation_type.in_(operation_types)
+            )
+
+        if start_date:
+            query = query.filter(VaultOperationHistory.created_at >= start_date)
+
+        if end_date:
+            query = query.filter(VaultOperationHistory.created_at <= end_date)
+
+        return (
+            query.order_by(desc(VaultOperationHistory.created_at))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
     def delete_record(db: Session, record_id: int) -> bool:
         """Delete operation record"""
         record = VaultOperationHistoryService.get_record_by_id(db, record_id)

@@ -83,12 +83,56 @@ erc20_abi = [
 EVM_CHAIN_ID_NETWORK_MAP = {
     1: "eth",           # Ethereum mainnet
     10: "optimism",
-    56: "bsc",
+    56: "bsc",          # BSC mainnet
+    97: "bsc-testnet",  # BSC testnet
     137: "polygon",
     31337: "eth",       # Hardhat local testnet
     42161: "arbitrum",
     43114: "avalanche",
+    545: "flow-evm-testnet",  # Flow EVM testnet
     747: "flow-evm",    # Flow EVM mainnet
+}
+
+# BSC Chain Configuration
+BSC_CONFIG = {
+    "mainnet": {
+        "chain_id": 56,
+        "name": "bsc",
+        "rpc_url": "https://bsc-dataseed.binance.org/",
+        "native_symbol": "BNB",
+        "wrapped_native": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
+        "swap_router": "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4",  # PancakeSwap V3 Router
+        "explorer": "https://bscscan.com",
+    },
+    "testnet": {
+        "chain_id": 97,
+        "name": "bsc-testnet",
+        "rpc_url": "https://data-seed-prebsc-1-s1.binance.org:8545/",
+        "native_symbol": "tBNB",
+        "wrapped_native": "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",  # WBNB Testnet
+        "swap_router": "0x1b81D678ffb9C0263b24A97847620C99d213eB14",  # PancakeSwap V3 Router Testnet
+        "explorer": "https://testnet.bscscan.com",
+    },
+}
+
+# Flow EVM Chain Configuration
+FLOW_EVM_CONFIG = {
+    "mainnet": {
+        "chain_id": 747,
+        "name": "flow-evm",
+        "rpc_url": "https://mainnet.evm.nodes.onflow.org",
+        "native_symbol": "FLOW",
+        "wrapped_native": "0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e",  # WFLOW
+        "explorer": "https://evm.flowscan.io",
+    },
+    "testnet": {
+        "chain_id": 545,
+        "name": "flow-evm-testnet",
+        "rpc_url": "https://testnet.evm.nodes.onflow.org",
+        "native_symbol": "FLOW",
+        "wrapped_native": "0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e",  # WFLOW Testnet
+        "explorer": "https://evm-testnet.flowscan.io",
+    },
 }
 
 # Extended network mapping, supporting non-EVM chains
@@ -134,8 +178,16 @@ def get_network_info_by_name(network_name: str) -> tuple[str, str]:
         return "sui-network", "sui"
     elif network_lower in ["solana"]:
         return "solana", "solana"
+    # Flow EVM networks
     elif network_lower in ["flow-evm", "flow_evm"]:
         return "flow-evm", "evm"
+    elif network_lower in ["flow-evm-testnet", "flow_evm_testnet"]:
+        return "flow-evm-testnet", "evm"
+    # BSC networks
+    elif network_lower in ["bsc", "binance", "binance-smart-chain"]:
+        return "bsc", "evm"
+    elif network_lower in ["bsc-testnet", "bsc_testnet", "binance-testnet"]:
+        return "bsc-testnet", "evm"
     else:
         # EVM network name variants
         evm_network_aliases = {
@@ -144,8 +196,6 @@ def get_network_info_by_name(network_name: str) -> tuple[str, str]:
             "mainnet": "eth",
             "polygon": "polygon",
             "matic": "polygon",
-            "bsc": "bsc",
-            "binance": "bsc",
             "optimism": "optimism",
             "arbitrum": "arbitrum",
             "avalanche": "avalanche",
@@ -159,6 +209,29 @@ def get_network_info_by_name(network_name: str) -> tuple[str, str]:
 
         # Default case: keep original name but mark as EVM type
         return network_name, "evm"
+
+
+def get_chain_config(chain_id: int) -> dict:
+    """
+    Get chain configuration by chain ID.
+
+    Args:
+        chain_id: Chain ID
+
+    Returns:
+        dict: Chain configuration or empty dict if not found
+    """
+    # BSC
+    if chain_id == 56:
+        return BSC_CONFIG["mainnet"]
+    if chain_id == 97:
+        return BSC_CONFIG["testnet"]
+    # Flow EVM
+    if chain_id == 747:
+        return FLOW_EVM_CONFIG["mainnet"]
+    if chain_id == 545:
+        return FLOW_EVM_CONFIG["testnet"]
+    return {}
 
 
 def is_evm_chain_id(chain_id: int) -> bool:
