@@ -1,79 +1,26 @@
 """
-Flow EVM Vault Service - DEPRECATED
-Use EvmVaultService from evm_vault_service.py instead.
-
-This file is kept for backward compatibility.
+EVM Vault Service - 通用 EVM 链 Vault 服务
+支持 Flow-EVM, BSC, Ethereum 等所有 EVM 兼容链
 """
 
+import asyncio
 import logging
+from decimal import Decimal
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-# Import from the new unified service
-from services.evm_vault_service import EvmVaultService
+import httpx
 
-logger = logging.getLogger(__name__)
-
-# Backward compatibility alias
-FlowEvmVaultService = EvmVaultService
-
-
-# Keep the old class for any code that might still reference it directly
-class _LegacyFlowEvmVaultService(EvmVaultService):
-    """
-    DEPRECATED: Use EvmVaultService instead.
-
-    This class is kept for backward compatibility only.
-    """
-
-    @classmethod
-    def get_instance(cls, chain_id: int = 545) -> "EvmVaultService":
-        """
-        Get FlowEvmVaultService instance (legacy method).
-
-        Args:
-            chain_id: Chain ID, default 545 (Flow testnet)
-
-        Returns:
-            EvmVaultService: Service instance
-        """
-        logger.warning(
-            "FlowEvmVaultService is deprecated. Use EvmVaultService instead."
-        )
-        return EvmVaultService.get_instance(chain_id)
-
-
-# For backward compatibility, if someone was importing MONITOR_URL etc.
+from infra.logging_config import setup_logging  # noqa: F401, E402
 from infra.config import CONFIG
 
-MONITOR_URL = CONFIG.get("MONITOR_URL")
-VAULT_API_CREATE_URI = "/evm/vault/create"
-VAULT_API_INFO_URI = "/evm/vault/{chain_id}/{vault_address}"
-VAULT_API_INVESTOR_URI = "/evm/vault/investor/{chain_id}/{investor_address}"
-VAULT_API_PORTFOLIO_URI = "/evm/vault/{chain_id}/{vault_address}/portfolio"
-VAULT_API_SWAP_URI = "/evm/vault/swap"
-TOKEN_API_INFO_URI = "/evm/tokens/{chain_id}/{token_address}"
-
-
-__all__ = [
-    "FlowEvmVaultService",
-    "EvmVaultService",
-    "MONITOR_URL",
-]
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def main():
-        # 使用示例 - 推荐使用新的 EvmVaultService
-        service = EvmVaultService.get_flow_evm_instance(testnet=True)
-        logger.info(f"FlowEvmVaultService: chain_id={service.chain_id}, network={service.network}")
-        await service.close()
-
-    asyncio.run(main())
+# Setup logging
+setup_logging(CONFIG)
+logger = logging.getLogger(__name__)
 
 MONITOR_URL = CONFIG.get("MONITOR_URL")
+
+# API URI 模板
 VAULT_API_CREATE_URI = "/evm/vault/create"
 VAULT_API_INFO_URI = "/evm/vault/{chain_id}/{vault_address}"
 VAULT_API_INVESTOR_URI = "/evm/vault/investor/{chain_id}/{investor_address}"
@@ -88,46 +35,139 @@ TOKEN_API_PRICES_URI = "/evm/tokens/prices"
 
 BASE_PATH = Path(__file__).parent.parent
 
+# EVM 链配置
+EVM_CHAIN_CONFIG = {
+    # BSC 主网
+    56: {
+        "name": "bsc",
+        "network": "bsc",
+        "network_type": "evm",
+        "native_symbol": "BNB",
+        "wrapped_native": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
+        "swap_router": "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4",  # PancakeSwap V3 Router
+        "explorer": "https://bscscan.com",
+    },
+    # BSC 测试网
+    97: {
+        "name": "bsc-testnet",
+        "network": "bsc-testnet",
+        "network_type": "evm",
+        "native_symbol": "tBNB",
+        "wrapped_native": "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",  # WBNB Testnet
+        "swap_router": "0x1b81D678ffb9C0263b24A97847620C99d213eB14",  # PancakeSwap V3 Router Testnet
+        "explorer": "https://testnet.bscscan.com",
+    },
+    # Flow EVM 主网
+    747: {
+        "name": "flow-evm",
+        "network": "flow-evm",
+        "network_type": "evm",
+        "native_symbol": "FLOW",
+        "wrapped_native": "0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e",  # WFLOW
+        "swap_router": "0x...",  # TODO: 添加实际地址
+        "explorer": "https://evm.flowscan.io",
+    },
+    # Flow EVM 测试网
+    545: {
+        "name": "flow-evm-testnet",
+        "network": "flow-evm-testnet",
+        "network_type": "evm",
+        "native_symbol": "FLOW",
+        "wrapped_native": "0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e",  # WFLOW Testnet
+        "swap_router": "0x...",  # TODO: 添加实际地址
+        "explorer": "https://evm-testnet.flowscan.io",
+    },
+    # Ethereum 主网
+    1: {
+        "name": "ethereum",
+        "network": "eth",
+        "network_type": "evm",
+        "native_symbol": "ETH",
+        "wrapped_native": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
+        "swap_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",  # Uniswap V3 Router
+        "explorer": "https://etherscan.io",
+    },
+}
 
-class FlowEvmVaultService:
+
+def get_network_name(chain_id: int) -> str:
+    """获取链ID对应的网络名称"""
+    config = EVM_CHAIN_CONFIG.get(chain_id)
+    if config:
+        return config["network"]
+    return f"evm-{chain_id}"
+
+
+class EvmVaultService:
     """
-    Service class for managing Flow EVM vaults.
+    通用 EVM Vault 服务类
 
-    Provides complete lifecycle management for Flow EVM Vault contracts through monitor. service,
-    including deployment, transaction execution and query functions. This class implements a singleton
-    factory pattern to ensure the same instance is always returned for the same chain_id.
+    支持所有 EVM 兼容链的 Vault 管理，包括：
+    - BSC (主网 & 测试网)
+    - Flow EVM (主网 & 测试网)
+    - Ethereum
+    - 其他 EVM 链
+
+    通过 chain_id 区分不同网络，实现单一服务类管理多链。
     """
 
-    # 类变量用于存储已创建的实例
-    _instances: Dict[int, "FlowEvmVaultService"] = {}
+    # 类变量用于存储已创建的实例（按 chain_id 分类）
+    _instances: Dict[int, "EvmVaultService"] = {}
 
     @classmethod
-    def get_instance(cls, chain_id: int = 545) -> "FlowEvmVaultService":
+    def get_instance(cls, chain_id: int) -> "EvmVaultService":
         """
-        获取FlowEvmVaultService实例
-
-        Args:
-            chain_id: 链ID，默认545（Flow测试网）
-
-        Returns:
-            FlowEvmVaultService: FlowEvmVaultService实例
-        """
-        if chain_id not in cls._instances:
-            cls._instances[chain_id] = FlowEvmVaultService(chain_id)
-            logger.info(f"FlowEvmVaultService instance created for chain_id: {chain_id}")
-        return cls._instances[chain_id]
-
-    def __init__(self, chain_id: int, monitor_url: str = MONITOR_URL):
-        """
-        Initialize FlowEvmVaultService
+        获取 EvmVaultService 实例（单例模式，按 chain_id 区分）
 
         Args:
             chain_id: 链ID
-            monitor_url: monitor服务URL
+                - 56: BSC 主网
+                - 97: BSC 测试网
+                - 747: Flow EVM 主网
+                - 545: Flow EVM 测试网
+
+        Returns:
+            EvmVaultService: 对应链的服务实例
+        """
+        if chain_id not in cls._instances:
+            cls._instances[chain_id] = EvmVaultService(chain_id)
+            network_name = get_network_name(chain_id)
+            logger.info(f"EvmVaultService instance created for chain_id: {chain_id} ({network_name})")
+        return cls._instances[chain_id]
+
+    @classmethod
+    def get_bsc_instance(cls, testnet: bool = False) -> "EvmVaultService":
+        """获取 BSC Vault 服务实例（便捷方法）"""
+        chain_id = 97 if testnet else 56
+        return cls.get_instance(chain_id)
+
+    @classmethod
+    def get_flow_evm_instance(cls, testnet: bool = True) -> "EvmVaultService":
+        """获取 Flow EVM Vault 服务实例（便捷方法）"""
+        chain_id = 545 if testnet else 747
+        return cls.get_instance(chain_id)
+
+    def __init__(self, chain_id: int, monitor_url: str = MONITOR_URL):
+        """
+        初始化 EvmVaultService
+
+        Args:
+            chain_id: 链ID
+            monitor_url: monitor 服务 URL
         """
         self.chain_id = chain_id
         self._monitor_url = monitor_url
         self._client = httpx.AsyncClient(timeout=30.0)
+
+        # 加载链配置
+        self.chain_config = EVM_CHAIN_CONFIG.get(chain_id, {})
+        self.network = self.chain_config.get("network", f"evm-{chain_id}")
+        self.network_type = self.chain_config.get("network_type", "evm")
+
+    @property
+    def network_name(self) -> str:
+        """获取当前链的网络名称"""
+        return self.network
 
     async def create_vault(
         self,
@@ -137,24 +177,20 @@ class FlowEvmVaultService:
         factory_address: str
     ) -> Dict[str, any]:
         """
-        创建新的Flow EVM Vault
+        创建新的 EVM Vault
 
         Args:
             investor_address: 投资者地址
-            swap_router: Swap路由器地址
+            swap_router: Swap 路由器地址
             wrapped_native: 包装原生代币地址
             factory_address: 工厂合约地址
 
         Returns:
             Dict[str, any]: 创建结果
-
-        Raises:
-            httpx.HTTPStatusError: HTTP请求失败
-            httpx.RequestError: 网络请求错误
         """
         try:
             url = f"{self._monitor_url}{VAULT_API_CREATE_URI}"
-            logger.info(f"Creating vault via monitor: {url}")
+            logger.info(f"Creating vault via monitor: {url} (chain_id: {self.chain_id})")
 
             request_data = {
                 "chain_id": self.chain_id,
@@ -184,13 +220,13 @@ class FlowEvmVaultService:
 
     async def get_vault_info(self, vault_address: str) -> Dict[str, any]:
         """
-        获取vault信息
+        获取 vault 信息
 
         Args:
-            vault_address: vault合约地址
+            vault_address: vault 合约地址
 
         Returns:
-            Dict[str, any]: vault信息
+            Dict[str, any]: vault 信息
         """
         try:
             url = f"{self._monitor_url}{VAULT_API_INFO_URI.format(chain_id=self.chain_id, vault_address=vault_address)}"
@@ -216,14 +252,14 @@ class FlowEvmVaultService:
 
     async def get_vault_by_investor(self, investor_address: str, factory_address: str) -> Dict[str, any]:
         """
-        根据投资者地址获取vault信息
+        根据投资者地址获取 vault 信息
 
         Args:
             investor_address: 投资者地址
             factory_address: 工厂合约地址
 
         Returns:
-            Dict[str, any]: vault信息
+            Dict[str, any]: vault 信息
         """
         try:
             url = f"{self._monitor_url}{VAULT_API_INVESTOR_URI.format(chain_id=self.chain_id, investor_address=investor_address)}"
@@ -253,7 +289,7 @@ class FlowEvmVaultService:
         获取投资组合构成
 
         Args:
-            vault_address: vault合约地址
+            vault_address: vault 合约地址
 
         Returns:
             Dict[str, any]: 投资组合信息
@@ -282,16 +318,15 @@ class FlowEvmVaultService:
 
     async def get_vault_info_with_prices(self, vault_address: str) -> Dict[str, any]:
         """
-        获取Vault信息并计算USD价值
+        获取 Vault 信息并计算 USD 价值
 
         Args:
-            vault_address: vault合约地址
+            vault_address: vault 合约地址
 
         Returns:
-            Dict[str, any]: 包含价格信息的完整Vault数据
+            Dict[str, any]: 包含价格信息的完整 Vault 数据
         """
         try:
-            from decimal import Decimal
             from utils.token_price_util import get_multiple_token_prices_usd
 
             # 获取投资组合数据
@@ -315,7 +350,7 @@ class FlowEvmVaultService:
                     token_addresses.append(native_address)
                     token_balances_map[native_address] = native_balance
 
-            # 添加ERC20代币
+            # 添加 ERC20 代币
             token_balances = portfolio.get("token_balances", [])
             for token in token_balances:
                 token_address = token.get("token_address", "").lower()
@@ -323,7 +358,7 @@ class FlowEvmVaultService:
                     token_addresses.append(token_address)
                     token_balances_map[token_address] = token
 
-            # 批量获取所有代币的USD价格
+            # 批量获取所有代币的 USD 价格
             token_prices = {}
             if token_addresses:
                 token_prices = get_multiple_token_prices_usd(
@@ -333,7 +368,7 @@ class FlowEvmVaultService:
                 )
                 logger.info(f"Retrieved prices for {len(token_prices)} tokens")
 
-            # 计算每个代币的USD价值
+            # 计算每个代币的 USD 价值
             portfolio_composition = []
             total_value_usd = Decimal("0")
 
@@ -347,7 +382,7 @@ class FlowEvmVaultService:
                 token_symbol = token_data.get("token_symbol", "UNKNOWN")
                 balance_human = token_data.get("balance_human", "0")
 
-                # 计算实际代币数量（使用balance_human或根据decimals计算）
+                # 计算实际代币数量
                 try:
                     if balance_human and balance_human != "0":
                         token_amount = Decimal(str(balance_human))
@@ -360,7 +395,7 @@ class FlowEvmVaultService:
                 # 获取代币价格
                 token_price = token_prices.get(token_address)
 
-                # 计算USD价值
+                # 计算 USD 价值
                 if token_price is not None and token_amount > 0:
                     token_value_usd = token_amount * Decimal(str(token_price))
                     total_value_usd += token_value_usd
@@ -397,6 +432,7 @@ class FlowEvmVaultService:
                 "vault": {
                     "vault_address": vault_address,
                     "chain_id": self.chain_id,
+                    "network": self.network,
                     "total_value_usd": str(total_value_usd),
                     "token_count": len(portfolio_composition),
                     "portfolio_composition": portfolio_composition,
@@ -417,36 +453,47 @@ class FlowEvmVaultService:
         amount_in: int,
         amount_out_min: int = 0,
         fee_recipient: Optional[str] = None,
-        fee_rate: int = 0
+        fee_rate: int = 0,
+        # Smart Router 新增参数
+        route_type: str = "single",    # "single", "v2", "v3"
+        path: Optional[str] = None,     # V3: bytes, V2: JSON array
+        fee: int = 2500                 # V3 fee tier (500, 2500, 10000)
     ) -> Dict[str, any]:
         """
-        执行swap交易
+        执行 swap 交易 (支持 Smart Router V2/V3 多跳路由)
 
         Args:
-            vault_address: vault合约地址
+            vault_address: vault 合约地址
             token_in: 输入代币地址
             token_out: 输出代币地址
             amount_in: 输入金额
             amount_out_min: 最小输出金额
             fee_recipient: 费用接收者地址
             fee_rate: 费用率
+            route_type: 路由类型 ("single", "v2", "v3")
+            path: 编码的路径 (V3: bytes hex, V2: JSON array string)
+            fee: V3 单跳 fee tier
 
         Returns:
             Dict[str, any]: 交易结果
         """
         try:
             url = f"{self._monitor_url}{VAULT_API_SWAP_URI}"
-            logger.info(f"Executing swap via monitor: {url}")
+            logger.info(f"Executing swap via monitor: {url} (chain_id: {self.chain_id}, route_type: {route_type})")
 
             request_data = {
                 "chain_id": self.chain_id,
                 "vault_address": vault_address,
                 "token_in": token_in,
                 "token_out": token_out,
-                "amount_in": amount_in,
-                "amount_out_min": amount_out_min,
+                "amount_in": str(amount_in),  # Convert to string to avoid JS number precision issues
+                "amount_out_min": str(amount_out_min),  # Convert to string
                 "fee_recipient": fee_recipient,
-                "fee_rate": fee_rate
+                "fee_rate": fee_rate,
+                # Smart Router 新增字段
+                "route_type": route_type,
+                "path": path,
+                "fee": fee
             }
 
             response = await self._client.post(url, json=request_data)
@@ -465,6 +512,55 @@ class FlowEvmVaultService:
             raise
         except Exception as e:
             logger.error(f"Unexpected error executing swap: {e}")
+            raise
+
+    async def get_route_quote(
+        self,
+        token_in: str,
+        token_out: str,
+        amount_in: int,
+        slippage: float = 0.5
+    ) -> Dict[str, any]:
+        """
+        获取最优交易路由报价
+
+        Args:
+            token_in: 输入代币地址
+            token_out: 输出代币地址
+            amount_in: 输入金额
+            slippage: 滑点百分比 (默认 0.5%)
+
+        Returns:
+            Dict[str, any]: 路由报价信息
+        """
+        try:
+            url = f"{self._monitor_url}/evm/route/quote"
+            logger.info(f"Getting route quote from monitor: {url} (chain_id: {self.chain_id})")
+
+            request_data = {
+                "chain_id": self.chain_id,
+                "token_in": token_in,
+                "token_out": token_out,
+                "amount_in": str(amount_in),
+                "slippage": slippage
+            }
+
+            response = await self._client.post(url, json=request_data)
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Route quote response: {data}")
+
+            return data.get("data", {})
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error getting route quote: {e.response.status_code} - {e.response.text}")
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Request error getting route quote: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error getting route quote: {e}")
             raise
 
     async def get_token_info(self, token_address: str) -> Dict[str, any]:
@@ -566,9 +662,9 @@ class FlowEvmVaultService:
                 operations = VaultOperationHistoryService.get_operations_by_investor(
                     db=db,
                     investor_address=investor_address,
-                    network="flow-evm",
+                    network=self.network,
                     operation_types=operation_types,
-                    limit=1000  # 获取更多记录
+                    limit=1000
                 )
 
                 # 转换为前端期望的格式
@@ -602,7 +698,7 @@ class FlowEvmVaultService:
                             if op.output_token_address
                             else None
                         ),
-                        # Gas成本
+                        # Gas 成本
                         "gas": {
                             "used": op.gas_used,
                             "price_wei": str(op.gas_price) if op.gas_price else None,
@@ -619,6 +715,7 @@ class FlowEvmVaultService:
                     "success": True,
                     "investor_address": investor_address,
                     "chain_id": self.chain_id,
+                    "network": self.network,
                     "operations": operations_data,
                 }
 
@@ -627,7 +724,7 @@ class FlowEvmVaultService:
             raise
 
     async def close(self):
-        """关闭HTTP客户端"""
+        """关闭 HTTP 客户端"""
         if hasattr(self, "_client"):
             await self._client.aclose()
 
@@ -638,21 +735,33 @@ class FlowEvmVaultService:
         await self.close()
 
 
+# 为向后兼容保留的别名
+FlowEvmVaultService = EvmVaultService
+BscVaultService = EvmVaultService
+
+
 if __name__ == "__main__":
     # 使用示例
     async def main():
-        service = FlowEvmVaultService.get_instance(545)  # Flow测试网
+        # BSC 主网服务
+        bsc_service = EvmVaultService.get_bsc_instance(testnet=False)
+        logger.info(f"BSC Service: chain_id={bsc_service.chain_id}, network={bsc_service.network}")
 
-        try:
-            # 测试获取代币信息
-            # token_info = await service.get_token_info("0x...")
-            # logger.info("Token info: %s", token_info)
+        # BSC 测试网服务
+        bsc_testnet_service = EvmVaultService.get_bsc_instance(testnet=True)
+        logger.info(f"BSC Testnet Service: chain_id={bsc_testnet_service.chain_id}, network={bsc_testnet_service.network}")
 
-            logger.info("FlowEvmVaultService initialized successfully")
+        # Flow EVM 服务
+        flow_service = EvmVaultService.get_flow_evm_instance(testnet=True)
+        logger.info(f"Flow EVM Service: chain_id={flow_service.chain_id}, network={flow_service.network}")
 
-        except Exception as e:
-            logger.error("Error: %s", e)
-        finally:
-            await service.close()
+        # 也可以直接通过 chain_id 获取
+        eth_service = EvmVaultService.get_instance(1)
+        logger.info(f"Ethereum Service: chain_id={eth_service.chain_id}, network={eth_service.network}")
+
+        await bsc_service.close()
+        await bsc_testnet_service.close()
+        await flow_service.close()
+        await eth_service.close()
 
     asyncio.run(main())

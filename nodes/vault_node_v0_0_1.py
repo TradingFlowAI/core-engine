@@ -7,6 +7,7 @@ import httpx
 
 from services.aptos_vault_service import AptosVaultService
 from services.flow_evm_vault_service import FlowEvmVaultService
+from services.evm_vault_service import EvmVaultService
 from utils.token_price_util import get_aptos_token_price_usd
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType
@@ -27,10 +28,22 @@ CHAIN_CONFIG = {
     "aptos": {
         "chain_id": None,  # Aptos doesn't use chain_id
         "description": "Aptos Mainnet",
+        "network_type": "aptos",
     },
     "flow_evm": {
         "chain_id": 545,  # Flow EVM Testnet (747 for mainnet when ready)
         "description": "Flow EVM Testnet",
+        "network_type": "evm",
+    },
+    "bsc": {
+        "chain_id": 56,  # BSC Mainnet
+        "description": "BSC Mainnet",
+        "network_type": "evm",
+    },
+    "bsc-testnet": {
+        "chain_id": 97,  # BSC Testnet
+        "description": "BSC Testnet",
+        "network_type": "evm",
     },
 }
 
@@ -38,7 +51,7 @@ CHAIN_CONFIG = {
 @register_node_type(
     "vault_node",
     default_params={
-        "chain": "aptos",  # Supports "aptos" or "flow_evm"
+        "chain": "aptos",  # Supports "aptos", "flow_evm", "bsc", "bsc-testnet"
         "vault_address": None,  # User address, required parameter
     },
 )
@@ -47,10 +60,10 @@ class VaultNode(NodeBase):
     Vault Node - Query user holdings information in TradingFlow Vault
 
     This node is responsible for querying the asset holdings of specified users in the TradingFlow Vault system.
-    Supports multi-chain queries, including Aptos and Flow EVM.
+    Supports multi-chain queries, including Aptos, Flow EVM, BSC, and BSC Testnet.
 
     Input parameters:
-    - chain: Blockchain network name (supports "aptos" or "flow_evm")
+    - chain: Blockchain network name (supports "aptos", "flow_evm", "bsc", "bsc-testnet")
     - vault_address: User's wallet address or vault address
 
     Note: chain_id is automatically determined from CHAIN_CONFIG table based on chain selection.
@@ -135,8 +148,9 @@ class VaultNode(NodeBase):
                 f"Unsupported chain: {self.chain}. Supported chains: {list(CHAIN_CONFIG.keys())}"
             )
 
-        # Get chain_id from fixed config table (no user input needed)
+        # Get chain_id and network_type from fixed config table (no user input needed)
         self.chain_id = CHAIN_CONFIG[self.chain]["chain_id"]
+        self.network_type = CHAIN_CONFIG[self.chain].get("network_type", "aptos")
 
         # Query result
         self.holdings_result = None
@@ -146,6 +160,8 @@ class VaultNode(NodeBase):
             self.vault_service = AptosVaultService.get_instance()
         elif self.chain == "flow_evm":
             self.vault_service = FlowEvmVaultService.get_instance(self.chain_id)
+        elif self.chain in ["bsc", "bsc-testnet"]:
+            self.vault_service = EvmVaultService.get_instance(self.chain_id)
         else:
             raise ValueError(f"Unsupported chain: {self.chain}")
 
@@ -173,6 +189,8 @@ class VaultNode(NodeBase):
                     self.vault_service = AptosVaultService.get_instance()
                 elif self.chain == "flow_evm":
                     self.vault_service = FlowEvmVaultService.get_instance(self.chain_id)
+                elif self.chain in ["bsc", "bsc-testnet"]:
+                    self.vault_service = EvmVaultService.get_instance(self.chain_id)
 
             # Get holdings data based on chain type
             if self.chain == "aptos":
@@ -182,6 +200,11 @@ class VaultNode(NodeBase):
                 )
             elif self.chain == "flow_evm":
                 # Flow EVM uses get_vault_info_with_prices
+                holdings_data = await self.vault_service.get_vault_info_with_prices(
+                    vault_address
+                )
+            elif self.chain in ["bsc", "bsc-testnet"]:
+                # BSC uses get_vault_info_with_prices (same as Flow EVM)
                 holdings_data = await self.vault_service.get_vault_info_with_prices(
                     vault_address
                 )
@@ -235,8 +258,8 @@ class VaultNode(NodeBase):
                 # Aptos: /aptos/vault/:address/operations
                 url = f"{MONITOR_URL}/aptos/vault/{vault_address}/operations"
                 params = {"limit": limit}
-            elif self.chain == "flow_evm":
-                # Flow EVM: /evm/vault/:chain_id/:vault_address/operations
+            elif self.chain in ["flow_evm", "bsc", "bsc-testnet"]:
+                # EVM chains: /evm/vault/:chain_id/:vault_address/operations
                 url = f"{MONITOR_URL}/evm/vault/{self.chain_id}/{vault_address}/operations"
                 params = {"limit": limit}
             else:
@@ -255,7 +278,7 @@ class VaultNode(NodeBase):
                 # Aptos response format: {"data": {"events": [...]}}
                 operations = data.get("data", {}).get("events", [])
             else:
-                # Flow EVM response format: {"success": true, "data": [...]}
+                # EVM chains (Flow EVM, BSC) response format: {"success": true, "data": [...]}
                 operations = data.get("data", [])
 
             await self.persist_log(f"Retrieved {len(operations)} transactions", "INFO")
@@ -313,7 +336,8 @@ class VaultNode(NodeBase):
         # 处理不同链的数据格式
         if self.chain == "aptos":
             return await self._prepare_aptos_holdings_output(holdings_data)
-        elif self.chain == "flow_evm":
+        elif self.chain in ["flow_evm", "bsc", "bsc-testnet"]:
+            # BSC 和 Flow EVM 使用相同的 EVM 格式
             return await self._prepare_flow_evm_holdings_output(holdings_data)
         else:
             raise ValueError(f"Unsupported chain: {self.chain}")
@@ -403,10 +427,10 @@ class VaultNode(NodeBase):
                 "chain_id": self.chain_id,
                 "holdings": [],
                 "total_value_usd": 0.0,
-                "message": "Failed to retrieve Flow EVM holdings - connection error",
+                "message": f"Failed to retrieve {self.chain} holdings - connection error",
             }
 
-        # Flow EVM service 返回的数据格式已经包含价格信息
+        # EVM service 返回的数据格式已经包含价格信息
         if not holdings_data.get("success"):
             return {
                 "success": False,
@@ -415,7 +439,7 @@ class VaultNode(NodeBase):
                 "chain_id": self.chain_id,
                 "holdings": [],
                 "total_value_usd": 0.0,
-                "message": "Failed to retrieve Flow EVM holdings",
+                "message": f"Failed to retrieve {self.chain} holdings",
             }
 
         vault_info = holdings_data.get("vault", {})
@@ -425,14 +449,33 @@ class VaultNode(NodeBase):
         # 转换为统一格式
         formatted_holdings = []
         for token_data in portfolio_composition:
+            # 获取原始 wei 值（优先使用 amount_raw）
+            amount_raw = token_data.get("amount_raw")
+            decimals = token_data.get("decimals", 18)
+            
+            # 如果有 amount_raw，使用它；否则从 amount 转换
+            if amount_raw is not None:
+                amount_wei = str(amount_raw)
+                try:
+                    amount_human = float(amount_raw) / (10 ** decimals)
+                except (ValueError, TypeError):
+                    amount_human = float(token_data.get("amount", "0"))
+            else:
+                # 旧格式：amount 是人类可读值
+                amount_human = float(token_data.get("amount", "0"))
+                try:
+                    amount_wei = str(int(amount_human * (10 ** decimals)))
+                except (ValueError, TypeError):
+                    amount_wei = "0"
+            
             formatted_holding = {
                 "token_address": token_data.get("token_address"),
-                "amount": token_data.get("amount"),
+                "amount": amount_wei,  # 原始 wei 值，用于百分比计算
                 "symbol": token_data.get("token_symbol"),
-                "decimals": token_data.get("decimals"),
+                "decimals": decimals,
                 "price_usd": token_data.get("price_usd"),
                 "value_usd": float(token_data.get("value_usd", "0")) if token_data.get("value_usd") else 0.0,
-                "amount_human_readable": float(token_data.get("amount", "0")),
+                "amount_human_readable": amount_human,  # 人类可读值
                 "percentage": token_data.get("percentage"),
             }
             formatted_holdings.append(formatted_holding)
@@ -445,7 +488,7 @@ class VaultNode(NodeBase):
             "holdings": formatted_holdings,
             "total_value_usd": total_value_usd,
             "token_count": vault_info.get("token_count", len(formatted_holdings)),
-            "message": "Flow EVM holdings retrieved successfully",
+            "message": f"{self.chain} holdings retrieved successfully",
             "raw_result": self.holdings_result,  # 保留原始结果供参考
         }
 
@@ -462,11 +505,18 @@ class VaultNode(NodeBase):
         # 获取最近的交易历史
         transactions = await self.get_recent_transactions(self.vault_address, limit=10)
 
+        # For BSC chains, use the resolved vault contract address if available
+        # This is critical for downstream nodes (like swap) that need the actual contract address
+        output_address = self.vault_address
+        if self.chain in ["bsc", "bsc-testnet"] and hasattr(self, 'resolved_vault_contract') and self.resolved_vault_contract:
+            output_address = self.resolved_vault_contract
+
         # 构建完整的 vault 输出
         vault_output = {
             "chain": self.chain,
             "chain_id": self.chain_id,
-            "address": self.vault_address,
+            "address": output_address,  # Use resolved contract address for BSC
+            "investor_address": getattr(self, 'investor_address', self.vault_address),  # Original user wallet address
             "balance": {
                 "holdings": holdings_output.get("holdings", []),
                 "total_value_usd": holdings_output.get("total_value_usd", 0.0),
@@ -484,6 +534,46 @@ class VaultNode(NodeBase):
 
         return vault_output
 
+    async def _resolve_vault_contract_address(self, investor_address: str) -> Optional[str]:
+        """
+        For BSC chains, resolve the actual Vault contract address from an investor address.
+        Returns the vault contract address if found, or None if not found.
+        """
+        if self.chain not in ["bsc", "bsc-testnet"]:
+            return None  # Only needed for BSC
+        
+        try:
+            # Get factory address from environment
+            import os
+            factory_address = os.getenv("BSC_FACTORY_ADDRESS") if self.chain == "bsc" else os.getenv("BSC_TESTNET_FACTORY_ADDRESS")
+            
+            if not factory_address:
+                await self.persist_log(f"No factory address configured for {self.chain}", "WARNING")
+                return None
+            
+            # Query the factory contract to get the user's vault address
+            url = f"{MONITOR_URL}/evm/vault/investor/{self.chain_id}/{investor_address}?factory_address={factory_address}"
+            await self.persist_log(f"Resolving vault contract address via Factory: {url}", "DEBUG")
+            
+            response = await self._http_client.get(url)
+            response.raise_for_status()
+            
+            data = response.json()
+            if data.get("success") and data.get("data", {}).get("vault_address"):
+                vault_contract_address = data["data"]["vault_address"]
+                # Check if it's not a zero address
+                if vault_contract_address != "0x0000000000000000000000000000000000000000":
+                    await self.persist_log(
+                        f"Resolved investor {investor_address} to vault contract {vault_contract_address}",
+                        "INFO"
+                    )
+                    return vault_contract_address
+            
+            return None
+        except Exception as e:
+            await self.persist_log(f"Failed to resolve vault contract address: {e}", "DEBUG")
+            return None
+
     async def execute(self) -> bool:
         """Execute node logic"""
         try:
@@ -499,6 +589,20 @@ class VaultNode(NodeBase):
                 await self.persist_log(error_msg, "ERROR")
                 await self.set_status(NodeStatus.FAILED, error_msg)
                 return False
+
+            # For BSC chains, resolve the actual vault contract address
+            # User may have provided their wallet address (investor address) instead of vault contract address
+            self.investor_address = self.vault_address  # Store original investor address
+            self.resolved_vault_contract = None
+            
+            if self.chain in ["bsc", "bsc-testnet"]:
+                resolved_address = await self._resolve_vault_contract_address(self.vault_address)
+                if resolved_address:
+                    self.resolved_vault_contract = resolved_address
+                    await self.persist_log(
+                        f"Using resolved vault contract address: {resolved_address} (original: {self.vault_address})",
+                        "INFO"
+                    )
 
             # 查询用户持仓
             self.holdings_result = await self.query_user_holdings(self.vault_address)

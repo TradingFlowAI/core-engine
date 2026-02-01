@@ -264,6 +264,8 @@ WORKER_CONFIG = {
     "BINANCE_API_KEY": os.environ.get("BINANCE_API_KEY", ""),
     "BINANCE_API_SECRET": os.environ.get("BINANCE_API_SECRET", ""),
     "TWITTER_API_KEY": os.environ.get("TWITTER_API_KEY", ""),
+    # ChainCatcher API configuration
+    "CHAINCATCHER_API_TOKEN": os.environ.get("CHAINCATCHER_API_TOKEN", ""),
     # OpenRouter LLM configuration
     "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY", ""),
     # Google configuration

@@ -418,6 +418,10 @@ class AptosVaultService:
         amount_out_min: int = 0,
         sqrt_price_limit: str = "0",
         deadline: Optional[int] = None,
+        # Flow 关联参数（用于收益追踪）
+        flow_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+        cycle: Optional[int] = None,
     ) -> Dict[str, any]:
         """
         管理员执行swap交易
@@ -431,6 +435,9 @@ class AptosVaultService:
             amount_out_min: 最小输出金额，默认为0
             sqrt_price_limit: 价格限制，默认为"0"
             deadline: 交易截止时间戳，如果为None则使用当前时间+1小时
+            flow_id: 关联的Flow ID（用于收益追踪）
+            node_id: 执行该交易的节点ID
+            cycle: Flow执行周期
 
         Returns:
             Dict[str, any]: 交易执行结果
@@ -474,6 +481,14 @@ class AptosVaultService:
                 "sqrtPriceLimit": sqrt_price_limit,
                 "deadline": deadline,
             }
+
+            # 添加 Flow 关联参数（用于收益追踪）
+            if flow_id:
+                trade_data["flowId"] = flow_id
+            if node_id:
+                trade_data["nodeId"] = node_id
+            if cycle is not None:
+                trade_data["cycle"] = cycle
 
             url = f"{self._monitor_url}{VAULT_API_TRADE_SIGNAL_URI}"
             logger.info(f"Executing admin swap: {url}")

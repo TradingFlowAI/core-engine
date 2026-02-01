@@ -42,7 +42,9 @@ class RedisStatusPublisher:
         node_id: str,
         status: str,
         error_message: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        execution_type: str = "global",
+        execution_id: Optional[str] = None,
     ) -> bool:
         """
         Publish node status change to Redis channel.
@@ -54,6 +56,8 @@ class RedisStatusPublisher:
             status: Node status (pending, running, completed, failed, skipped, terminated)
             error_message: Error message (if any)
             metadata: Additional metadata
+            execution_type: "global" or "partial"
+            execution_id: Partial run execution ID (if applicable)
 
         Returns:
             bool: Whether publish was successful
@@ -70,8 +74,13 @@ class RedisStatusPublisher:
                 "node_id": node_id,
                 "status": status,
                 "error_message": error_message,
-                "metadata": metadata or {}
+                "metadata": metadata or {},
+                "execution_type": execution_type,
             }
+
+            # Add execution_id for partial runs
+            if execution_id:
+                status_update["execution_id"] = execution_id
 
             # Serialize to JSON
             message = json.dumps(status_update)
@@ -79,7 +88,11 @@ class RedisStatusPublisher:
             # Publish to Redis
             self.redis_client.publish(channel, message)
 
-            print(f"[RedisStatusPublisher] Published status: {node_id} -> {status}")
+            # 🔍 调试：如果有 lastOutput，打印日志
+            if metadata and metadata.get('lastOutput'):
+                print(f"[RedisStatusPublisher] Published status with lastOutput: {node_id} -> {status}")
+            else:
+                print(f"[RedisStatusPublisher] Published status: {node_id} -> {status}")
             return True
 
         except redis.RedisError as e:
@@ -165,7 +178,9 @@ def publish_node_status(
     node_id: str,
     status: str,
     error_message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    execution_type: str = "global",
+    execution_id: Optional[str] = None,
 ) -> bool:
     """
     Convenience function: Publish node status to Redis.
@@ -177,13 +192,16 @@ def publish_node_status(
         status: Node status
         error_message: Error message
         metadata: Metadata
+        execution_type: "global" or "partial"
+        execution_id: Partial run execution ID
 
     Returns:
         bool: Whether publish was successful
     """
     publisher = get_status_publisher()
     return publisher.publish_node_status(
-        flow_id, cycle, node_id, status, error_message, metadata
+        flow_id, cycle, node_id, status, error_message, metadata,
+        execution_type, execution_id
     )
 
 

@@ -27,7 +27,9 @@ AI_RESPONSE_OUTPUT_HANDLE = "ai_response"  # AI response output
 @register_node_type(
     "ai_model_node",
     default_params={
-        "model_name": "gpt-3.5-turbo",
+        # IMPORTANT: Default model should match frontend default (AiModelNode.tsx)
+        "model": "deepseek/deepseek-chat-v3-0324",  # Frontend uses "model", map to model_name in __init__
+        "model_name": "deepseek/deepseek-chat-v3-0324",  # Legacy support, must also be updated
         "temperature": 0.7,
         "system_prompt": "You are a helpful assistant.",
         "prompt": "Please analyze the following information:",
@@ -56,7 +58,8 @@ class AIModelNode(NodeBase):
         cycle: int,
         node_id: str,
         name: str,
-        model_name: str = "gpt-3.5-turbo",
+        model: str = None,  # Frontend uses "model"
+        model_name: str = "gpt-3.5-turbo",  # Legacy parameter name
         temperature: float = 0.7,
         system_prompt: str = "You are a helpful assistant.",
         prompt: str = "Please analyze the following information:",
@@ -97,8 +100,33 @@ class AIModelNode(NodeBase):
             state_store=state_store,
         )
 
-        # Save parameters
-        self.model_name = model_name or "openai/gpt-3.5-turbo"
+        # 🔍 Enhanced logging for model selection debugging
+        # Log raw input values to trace model selection issues
+        self.logger.info(
+            f"[AIModelNode] Initializing with raw params: "
+            f"model='{model}' (type={type(model).__name__}), "
+            f"model_name='{model_name}' (type={type(model_name).__name__})"
+        )
+
+        # Save parameters - prefer "model" from frontend, fallback to "model_name" for legacy
+        # IMPORTANT: Check for empty string as well as None
+        resolved_model = None
+        if model and str(model).strip():
+            resolved_model = str(model).strip()
+            self.logger.info(f"[AIModelNode] Using 'model' param: {resolved_model}")
+        elif model_name and str(model_name).strip() and model_name != "gpt-3.5-turbo":
+            # Only use model_name if it's not the default fallback
+            resolved_model = str(model_name).strip()
+            self.logger.info(f"[AIModelNode] Using 'model_name' param: {resolved_model}")
+        else:
+            resolved_model = "deepseek/deepseek-chat-v3-0324"  # Updated default to match frontend
+            self.logger.warning(
+                f"[AIModelNode] No valid model specified, using default: {resolved_model}"
+            )
+        
+        self.model_name = resolved_model
+        self.logger.info(f"[AIModelNode] Final model_name resolved to: {self.model_name}")
+        
         self.system_prompt = system_prompt
         self.prompt = prompt
 
@@ -759,6 +787,26 @@ class AIModelNode(NodeBase):
             await self.persist_log(f"Error extracting structured data: {str(e)}", "ERROR")
             return {"response": ai_response, "error": str(e)}
 
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        估算文本的 token 数量（粗略估算）
+        
+        使用简单规则：
+        - 英文：约 4 字符 = 1 token
+        - 中文：约 1.5 字符 = 1 token
+        
+        Returns:
+            int: 估算的 token 数量
+        """
+        # 计算中文字符数量
+        chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+        # 计算英文字符数量
+        english_chars = len(text) - chinese_chars
+        
+        # 粗略估算
+        estimated_tokens = int(chinese_chars / 1.5 + english_chars / 4)
+        return max(estimated_tokens, 1)
+
     async def call_ai_model(self, context: str) -> Optional[str]:
         """
         调用AI大模型API
@@ -773,8 +821,35 @@ class AIModelNode(NodeBase):
             await self.persist_log("OpenRouter API key not provided", "ERROR")
             return None
         try:
-            await self.persist_log(f"Calling OpenRouter API with model: {self.model_name}", "INFO")
-            await self.persist_log(f"Context: {context[:200]}...", "DEBUG")
+            # 🔍 Enhanced logging: Show the actual model being used
+            await self.persist_log(
+                f"[OpenRouter] Calling API with model: {self.model_name}, "
+                f"temperature: {self.temperature}, max_tokens: {self.max_tokens}",
+                "INFO"
+            )
+            
+            # 📊 Token estimation for debugging context length issues
+            estimated_input_tokens = self._estimate_tokens(context)
+            if self.system_prompt:
+                estimated_input_tokens += self._estimate_tokens(self.system_prompt)
+            total_estimated_tokens = estimated_input_tokens + self.max_tokens
+            
+            await self.persist_log(
+                f"[OpenRouter] Estimated tokens - input: ~{estimated_input_tokens}, "
+                f"output: {self.max_tokens}, total: ~{total_estimated_tokens}",
+                "INFO"
+            )
+            
+            # ⚠️ Warning if estimated tokens exceed common context limits
+            if total_estimated_tokens > 16000:
+                await self.persist_log(
+                    f"[OpenRouter] WARNING: Estimated tokens ({total_estimated_tokens}) may exceed "
+                    f"context limit for smaller models. middle-out transform is enabled but may fail "
+                    f"if total > 2x model context. Consider using a model with larger context.",
+                    "WARNING"
+                )
+            
+            await self.persist_log(f"Context preview: {context[:200]}...", "DEBUG")
 
             # Prepare messages in OpenAI chat format
             messages = []
@@ -788,7 +863,16 @@ class AIModelNode(NodeBase):
                 "max_tokens": self.max_tokens,
                 "temperature": self.temperature,
                 "stream": False,
+                "transforms": ["middle-out"],  # Auto-compress prompts exceeding context size
             }
+            
+            # 🔍 Log the actual request payload (without sensitive data)
+            await self.persist_log(
+                f"[OpenRouter] Request payload: model={data['model']}, "
+                f"messages_count={len(messages)}, max_tokens={data['max_tokens']}, "
+                f"temperature={data['temperature']}, transforms={data['transforms']}",
+                "DEBUG"
+            )
 
             headers = {
                 "Content-Type": "application/json",
@@ -803,6 +887,17 @@ class AIModelNode(NodeBase):
                 response_data = response.json()
 
                 await self.persist_log(f"Raw response: {response_data}", "DEBUG")
+                
+                # 📊 Log actual usage if available
+                if "usage" in response_data:
+                    usage = response_data["usage"]
+                    await self.persist_log(
+                        f"[OpenRouter] Actual token usage - "
+                        f"prompt: {usage.get('prompt_tokens', 'N/A')}, "
+                        f"completion: {usage.get('completion_tokens', 'N/A')}, "
+                        f"total: {usage.get('total_tokens', 'N/A')}",
+                        "INFO"
+                    )
 
                 # Extract content from OpenAI-format response
                 if "choices" in response_data and len(response_data["choices"]) > 0:
@@ -820,7 +915,27 @@ class AIModelNode(NodeBase):
                     return None
 
         except httpx.HTTPStatusError as e:
-            await self.persist_log(f"HTTP error calling OpenRouter API: {e.response.status_code} - {e.response.text}", "ERROR")
+            error_text = e.response.text
+            await self.persist_log(
+                f"[OpenRouter] HTTP error {e.response.status_code} - "
+                f"Model: {self.model_name}, Error: {error_text}",
+                "ERROR"
+            )
+            
+            # 🔍 Parse error for better debugging
+            try:
+                error_json = json.loads(error_text)
+                error_message = error_json.get("error", {}).get("message", "")
+                if "context length" in error_message.lower():
+                    await self.persist_log(
+                        f"[OpenRouter] CONTEXT LENGTH EXCEEDED: {error_message}. "
+                        f"Suggestions: 1) Reduce prompt length, 2) Use a model with larger context, "
+                        f"3) Enable middle-out transform (already enabled)",
+                        "ERROR"
+                    )
+            except:
+                pass
+            
             return None
         except Exception as e:
             await self.persist_log(f"Error calling OpenRouter API: {str(e)}", "ERROR")

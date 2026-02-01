@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sanic import Blueprint, Request
 from sanic.response import json as sanic_json
@@ -13,6 +13,9 @@ from common.node_task_manager import NodeTaskManager
 from core.node_executor import execute_node_task
 
 logger = logging.getLogger(__name__)
+
+# 🔥 僵尸任务超时时间（秒）：如果节点 running 超过这个时间，允许重新执行
+ZOMBIE_TASK_TIMEOUT_SECONDS = 300  # 5 分钟
 
 # Get configuration
 WORKER_ID = CONFIG["WORKER_ID"]
@@ -80,6 +83,9 @@ async def execute_node(request: Request):
                 {"error": f"Unsupported node type: {node_type}"}, status=400
             )
 
+        # 🔥 支持强制执行参数
+        force_execute = node_data.get("force", False)
+
         # Check if node is already running
         existing_node_task = await node_manager.get_task(node_task_id)
         logger.info("Existing node task %s, info: %s", node_task_id, existing_node_task)
@@ -87,13 +93,63 @@ async def execute_node(request: Request):
             "running",
             "initializing",
         ]:
-            return sanic_json(
-                {
-                    "error": "Node is already running",
-                    "status": existing_node_task.get("status"),
-                },
-                status=400,
-            )
+            # 🔥 如果用户请求强制执行，直接清理旧任务
+            if force_execute:
+                logger.info(
+                    "Force execution requested for %s, terminating existing task",
+                    node_task_id
+                )
+                await node_manager.remove_task(node_task_id)
+            else:
+                # 🔥 检查是否是僵尸任务（运行时间超过阈值）
+                start_time_str = existing_node_task.get("start_time")
+                is_zombie = False
+                elapsed_seconds = 0
+                if start_time_str:
+                    try:
+                        # 🔥 处理多种时间格式
+                        start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                        now_utc = datetime.now(timezone.utc)
+                        
+                        # 如果 start_time 没有时区信息，假定它是 UTC
+                        if start_time.tzinfo is None:
+                            start_time = start_time.replace(tzinfo=timezone.utc)
+                        
+                        elapsed_seconds = (now_utc - start_time).total_seconds()
+                        
+                        # 🔥 如果 elapsed_seconds 是负数，说明时区有问题，重置为 0
+                        if elapsed_seconds < 0:
+                            logger.warning(
+                                "Negative elapsed time for task %s (%.1f s), start_time=%s, now=%s - assuming clock issue",
+                                node_task_id, elapsed_seconds, start_time_str, now_utc.isoformat()
+                            )
+                            elapsed_seconds = 0
+                        
+                        if elapsed_seconds > ZOMBIE_TASK_TIMEOUT_SECONDS:
+                            is_zombie = True
+                            logger.warning(
+                                "Detected zombie task %s (running for %.1f seconds), allowing re-execution",
+                                node_task_id, elapsed_seconds
+                            )
+                    except Exception as e:
+                        logger.warning("Failed to parse start_time for zombie check: %s", e)
+                
+                if not is_zombie:
+                    # 🔥 返回更多信息，帮助前端判断
+                    return sanic_json(
+                        {
+                            "error": "Node is already running",
+                            "status": existing_node_task.get("status"),
+                            "start_time": start_time_str,
+                            "elapsed_seconds": int(elapsed_seconds),
+                            "can_force": True,  # 提示前端可以使用 force 参数
+                        },
+                        status=409,  # 使用 409 Conflict 更语义化
+                    )
+                
+                # 🔥 如果是僵尸任务，清理旧状态，继续执行
+                logger.info("Cleaning up zombie task %s before re-execution", node_task_id)
+                await node_manager.remove_task(node_task_id)
 
         # Create node execution task
         task = asyncio.create_task(
@@ -116,7 +172,7 @@ async def execute_node(request: Request):
             "cycle": cycle,
             "task_id": str(id(task)),  # Save task ID instead of object
             "node_task_id": node_task_id,
-            "start_time": datetime.now().isoformat(),
+            "start_time": datetime.now(timezone.utc).isoformat(),  # 🔥 使用 UTC 时间
             "status": "initializing",
             "node_type": node_type,
             "progress": 0,
