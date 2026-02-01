@@ -194,6 +194,8 @@ class SwapNode(NodeBase):
 
     def _ensure_vault_context(self) -> None:
         """Ensure vault-derived attributes (address/chain) are populated."""
+        old_chain = self.chain
+        
         if isinstance(self.vault, dict):
             vault_chain = self.vault.get("chain")
             if vault_chain:
@@ -206,6 +208,19 @@ class SwapNode(NodeBase):
         if not self.vault_address:
             raise ValueError("vault_address is required to execute swap node")
         self.vault_address = self._normalize_chain_address(self.vault_address)
+        
+        # Re-initialize vault_service if chain changed
+        if self.chain != old_chain:
+            if self.chain == "aptos":
+                self.vault_service = AptosVaultService.get_instance()
+            elif self.chain == "flow_evm":
+                self.vault_service = FlowEvmVaultService.get_instance(747)
+            elif self.chain == "bsc":
+                from services.evm_vault_service import EvmVaultService
+                self.vault_service = EvmVaultService.get_bsc_instance(testnet=False)
+            elif self.chain == "bsc-testnet":
+                from services.evm_vault_service import EvmVaultService
+                self.vault_service = EvmVaultService.get_bsc_instance(testnet=True)
 
     def _normalize_chain_address(self, address: Optional[str]) -> Optional[str]:
         if not address:
@@ -382,8 +397,32 @@ class SwapNode(NodeBase):
                 prices = await get_flow_evm_token_prices_usd([normalized_address])
                 price = prices.get(normalized_address) if prices else None
                 return Decimal(str(price)) if price is not None else None
+            elif self.chain == "bsc":
+                # Get BSC token price from monitor service
+                price = await self._get_bsc_token_price_usd(normalized_address)
+                return Decimal(str(price)) if price is not None else None
         except Exception as err:
             await self.persist_log(f"Failed to fetch price for {normalized_address}: {err}", "WARNING")
+        return None
+    
+    async def _get_bsc_token_price_usd(self, token_address: str) -> Optional[float]:
+        """Get BSC token price from monitor service"""
+        try:
+            monitor_url = CONFIG.get("MONITOR_URL")
+            if not monitor_url:
+                return None
+            
+            chain_id = 56  # BSC mainnet
+            price_url = f"{monitor_url}/evm/tokens/{chain_id}/{token_address}/price"
+            
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(price_url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    price = data.get("data", {}).get("price_usd") or data.get("price_usd")
+                    return float(price) if price else None
+        except Exception as e:
+            await self.persist_log(f"Failed to get BSC token price: {e}", "WARNING")
         return None
 
     async def _prepare_amount_from_target(self) -> None:
@@ -495,21 +534,41 @@ class SwapNode(NodeBase):
         Uses common BSC token symbol-to-address mapping and fetches decimals from monitor service
         """
         # Common BSC token addresses (mainnet)
+        # Reference: PancakeSwap supported tokens with good liquidity
         BSC_MAINNET_TOKENS = {
+            # Native & Wrapped
             "BNB": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
             "WBNB": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+            # Stablecoins
             "USDT": "0x55d398326f99059fF775485246999027B3197955",  # BSC-USD (USDT)
             "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
             "BUSD": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
-            "ETH": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+            "DAI": "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3",
+            "FDUSD": "0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409",  # First Digital USD
+            # Major Cryptos (BEP20 wrapped versions)
+            "ETH": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",   # Binance-Peg ETH
+            "WETH": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
             "BTCB": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",  # Bitcoin BEP2
+            "BTC": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",   # Alias for BTCB
+            "WBTC": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",  # Alias for BTCB
+            # DeFi & Exchange Tokens
             "CAKE": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",  # PancakeSwap
+            "XVS": "0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63",   # Venus
+            "ALPACA": "0x8F0528cE5eF7B51152A59745bEfDD91D97091d2F", # Alpaca Finance
+            # Other Popular Tokens
             "XRP": "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
             "ADA": "0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47",
             "DOGE": "0xbA2aE424d960c26247Dd6c32edC70B295c744C43",
             "DOT": "0x7083609fCE4d1d8Dc0C979AAb8c869Ea2C873402",
             "LINK": "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
             "UNI": "0xBf5140A22578168FD562DCcF235E5D43A02ce9B1",
+            "MATIC": "0xCC42724C6683B7E57334c4E856f4c9965ED682bD",
+            "AVAX": "0x1CE0c2827e2eF14D5C4f29a091d735A204794041",
+            "SOL": "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",   # Wrapped SOL
+            "TRX": "0xCE7de646e7208a4Ef112cb6ed5038FA6cC6b12e3",
+            "LTC": "0x4338665CBB7B2485A8855A139b75D5e34AB0DB94",
+            "SHIB": "0x2859e4544C4bB03966803b044A93563Bd2D0DD4D",
+            "PEPE": "0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00",
         }
         
         # BSC Testnet token addresses
@@ -518,6 +577,12 @@ class SwapNode(NodeBase):
             "WBNB": "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
             "USDT": "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd",
             "BUSD": "0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee",
+            "USDC": "0x64544969ed7EBf5f083679233325356EbE738930",
+            "DAI": "0x8a9424745056Eb399FD19a0EC26A14316684e274",
+            "CAKE": "0xFa60D973F7642B748046464e165A65B7323b0DEe",  # PancakeSwap Testnet
+            "ETH": "0x8BaBbB98678facC7342735486C851ABD7A0d17Ca",   # Mock ETH
+            "BTC": "0x6ce8dA28E2f864420840cF74474eFf5fD80E65B8",   # Mock BTC
+            "BTCB": "0x6ce8dA28E2f864420840cF74474eFf5fD80E65B8",
         }
         
         token_map = BSC_TESTNET_TOKENS if self.chain == "bsc-testnet" else BSC_MAINNET_TOKENS
@@ -625,7 +690,19 @@ class SwapNode(NodeBase):
             await self.persist_log(f"Found Flow EVM balance via API: {token_address}={balance_raw}", "INFO")
             return Decimal(balance_raw)
 
-        raise ValueError("Unsupported chain for token balance query")
+        elif self.chain in ["bsc", "bsc-testnet"]:
+            if not self.vault_address and isinstance(self.vault, dict):
+                self.vault_address = self.vault.get("address")
+            balance_data = await self.vault_service.get_token_balance(token_address, self.vault_address)
+            balance_raw = balance_data.get("balance")
+            if balance_raw is None:
+                raise SwapSkipException(
+                    f"No holdings found for {token_symbol or token_address} in BSC vault {self.vault_address}, skipping swap"
+                )
+            await self.persist_log(f"Found BSC balance via API: {token_address}={balance_raw}", "INFO")
+            return Decimal(balance_raw)
+
+        raise ValueError(f"Unsupported chain for token balance query: {self.chain}")
 
     async def get_final_amount_in(self) -> int:
         """Get final amount_in from human readable or percentage"""

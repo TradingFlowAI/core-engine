@@ -486,8 +486,8 @@ class EvmVaultService:
                 "vault_address": vault_address,
                 "token_in": token_in,
                 "token_out": token_out,
-                "amount_in": amount_in,
-                "amount_out_min": amount_out_min,
+                "amount_in": str(amount_in),  # Convert to string to avoid JS number precision issues
+                "amount_out_min": str(amount_out_min),  # Convert to string
                 "fee_recipient": fee_recipient,
                 "fee_rate": fee_rate,
                 # Smart Router 新增字段
