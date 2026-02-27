@@ -16,6 +16,7 @@ import pandas as pd
 import psutil
 
 from common.edge import Edge
+from common.log_sanitizer import sanitize
 from common.node_decorators import register_node_type
 from common.signal_types import SignalType
 from nodes.node_base import NodeBase, NodeStatus
@@ -584,6 +585,27 @@ class CodeNode(NodeBase):
                 }
             )
 
+            # ★ R&D Mode: 扫描 input_data 中的 Operator 描述符，替换为活对象
+            current_loop = asyncio.get_running_loop()
+            for key, value in list(input_data_dict.items()):
+                if isinstance(value, dict) and value.get("_tf_operator") is True:
+                    try:
+                        from operators.factory import OperatorFactory
+                        operator = await OperatorFactory.from_descriptor(
+                            value, loop=current_loop
+                        )
+                        input_data_dict[key] = operator  # dict → live Operator object
+                        await self.persist_log(
+                            f"Operator injected: {key} -> {repr(operator)}",
+                            "INFO",
+                        )
+                    except Exception as op_err:
+                        await self.persist_log(
+                            f"Failed to create operator for '{key}': {sanitize(str(op_err))}",
+                            "ERROR",
+                        )
+                        # Keep the original dict so user code can see the error
+
             # 准备执行环境
             local_vars = await self._setup_execution_environment()
             local_vars.update(input_data_dict)
@@ -617,6 +639,12 @@ class CodeNode(NodeBase):
 
             # 定义一个在当前线程执行代码的函数
             def run_code_with_trace():
+                # ★ Phase 0 安全加固: 在执行线程中隔离 os.environ
+                # 防止用户代码通过 os.environ 读取敏感环境变量
+                # 注意：os._Environ 不能无参数实例化，使用空 dict 代替
+                import os as _os
+                original_environ = _os.environ
+                _os.environ = {}
                 try:
                     with redirect_stdout(stdout_capture), redirect_stderr(
                         stderr_capture
@@ -683,6 +711,9 @@ class CodeNode(NodeBase):
                             else None
                         )
                     )
+                finally:
+                    # ★ Phase 0 安全加固: 恢复原始 os.environ
+                    _os.environ = original_environ
 
             # 创建一个线程来执行代码
             code_thread = threading.Thread(
@@ -790,16 +821,18 @@ class CodeNode(NodeBase):
                 debug_output = debug_capture.getvalue()  # 获取调试输出
                 
                 # 🔥 将 print 输出按行拆分，每行作为单独的 INFO 日志持久化
+                # ★ Phase 0 安全加固: 在 persist_log 之前额外脱敏 (双重保护)
                 if stdout_output:
                     stdout_lines = stdout_output.strip().split('\n')
                     for line in stdout_lines:
                         if line.strip():  # 跳过空行
+                            sanitized_line = sanitize(line)
                             await self.persist_log(
-                                f"[print] {line}",
+                                f"[print] {sanitized_line}",
                                 log_level="INFO",
                                 log_metadata={
                                     "source": "user_print",
-                                    "raw_output": line
+                                    "raw_output": sanitized_line
                                 }
                             )
                 
@@ -808,12 +841,13 @@ class CodeNode(NodeBase):
                     stderr_lines = stderr_output.strip().split('\n')
                     for line in stderr_lines:
                         if line.strip():
+                            sanitized_line = sanitize(line)
                             await self.persist_log(
-                                f"[stderr] {line}",
+                                f"[stderr] {sanitized_line}",
                                 log_level="WARNING",
                                 log_metadata={
                                     "source": "user_stderr",
-                                    "raw_output": line
+                                    "raw_output": sanitized_line
                                 }
                             )
                 

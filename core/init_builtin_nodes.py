@@ -208,7 +208,30 @@ def init_all_builtin_nodes():
                 'category': 'interactive',
                 'description': 'K-line chart with threshold triggers (TradingView)'
             }
-        }
+        },
+        # R&D Mode Nodes
+        {
+            'node_type': 'private_key_node',
+            'version': '0.0.1',
+            'module': 'nodes.private_key_node_v0_0_1',
+            'class': 'PrivateKeyNode',
+            'metadata': {
+                'display_name': 'Private Key Node',
+                'category': 'rd_mode',
+                'description': 'Provide blockchain wallet operator for direct signing (R&D Mode)'
+            }
+        },
+        {
+            'node_type': 'exchange_api_node',
+            'version': '0.0.1',
+            'module': 'nodes.exchange_api_node_v0_0_1',
+            'class': 'ExchangeAPINode',
+            'metadata': {
+                'display_name': 'Exchange API Node',
+                'category': 'rd_mode',
+                'description': 'Provide exchange operator for CEX trading (R&D Mode)'
+            }
+        },
     ]
 
     # Dynamic import and registration

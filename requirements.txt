@@ -86,3 +86,4 @@ eth-rlp~=2.2.0
 ckzg~=2.1.1
 requests-oauthlib~=2.0.0
 prometheus-client~=0.23.1
+ccxt>=4.0.0

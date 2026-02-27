@@ -216,6 +216,10 @@ BASE_CONFIG = {
     "RABBITMQ_DATA_PATH": os.environ.get("RABBITMQ_DATA_PATH", "/opt/tradingflow/data/rabbitmq"),
     "PGADMIN_DATA_PATH": os.environ.get("PGADMIN_DATA_PATH", "/opt/tradingflow/data/pgadmin"),
     "MONGO_DATA_PATH": os.environ.get("MONGO_DATA_PATH", "/opt/tradingflow/data/mongodb"),
+    # Secret management (R&D Mode)
+    "SECRET_ENCRYPTION_MODE": os.environ.get("SECRET_ENCRYPTION_MODE", "local"),  # "local" | "kms"
+    "MASTER_SECRET_KEY": os.environ.get("MASTER_SECRET_KEY", ""),  # 32-byte hex for local mode
+    "AWS_KMS_KEY_ID": os.environ.get("AWS_KMS_KEY_ID", ""),  # KMS key ARN for kms mode
     # Infrastructure configuration
     "DATA_SERVER_IP": os.environ.get("DATA_SERVER_IP", "localhost"),
     "TAG": os.environ.get("TAG", "dev"),

@@ -24,3 +24,7 @@ from .chaincatcher_node_v0_0_1 import ChainCatcherNode
 # from .interactive.chart_node import ChartNode
 # from .interactive.chatbox_node import ChatBoxNode
 from .interactive.candleline_node import CandlelineNode
+
+# R&D Mode Nodes
+from .private_key_node_v0_0_1 import PrivateKeyNode
+from .exchange_api_node_v0_0_1 import ExchangeAPINode

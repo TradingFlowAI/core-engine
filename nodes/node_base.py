@@ -17,6 +17,7 @@ from infra.exceptions.tf_exception import (
 from infra.mq.node_signal_consumer import NodeSignalConsumer
 from infra.mq.node_signal_publisher import NodeSignalPublisher
 from common.edge import Edge
+from common.log_sanitizer import sanitize, sanitize_dict
 from common.signal_types import Signal, SignalType
 from common.state_store import StateStoreFactory
 from core.redis_signal_publisher_async import publish_signal_async
@@ -288,6 +289,11 @@ class NodeBase(abc.ABC):
             log_source: Log source (node, system, user)
             log_metadata: Additional structured metadata
         """
+        # ★ Phase 0 安全加固: 在所有输出路径之前进行全局脱敏
+        message = sanitize(message)
+        if log_metadata:
+            log_metadata = sanitize_dict(log_metadata)
+
         # Log to console first
         log_level_upper = log_level.upper()
         if log_level_upper == "DEBUG":
